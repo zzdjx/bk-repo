@@ -8,6 +8,8 @@
 
 package com.tencent.bkrepo.agent.service.run
 
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.hitl.AguiInterruptNormalizer
 import io.agentscope.core.agui.encoder.AguiEventEncoder
 import io.agentscope.core.agui.event.AguiEvent
 import org.springframework.http.MediaType
@@ -16,11 +18,17 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 /** AG-UI 事件 JSON 编码并通过 SSE 推送。 */
 @Component
-class AguiSseEventWriter {
+class AguiSseEventWriter(
+    private val interruptNormalizer: AguiInterruptNormalizer,
+    private val runtimeProperties: EffectiveAgentRuntimeProperties,
+) {
 
     private val aguiEventEncoder = AguiEventEncoder()
 
-    fun encode(event: AguiEvent): String = aguiEventEncoder.encodeToJson(event)
+    fun encode(event: AguiEvent): String {
+        val normalized = interruptNormalizer.normalizeEvent(event, runtimeProperties.activeRunTtl)
+        return aguiEventEncoder.encodeToJson(normalized)
+    }
 
     fun send(emitter: SseEmitter, event: AguiEvent) {
         sendJson(emitter, encode(event))

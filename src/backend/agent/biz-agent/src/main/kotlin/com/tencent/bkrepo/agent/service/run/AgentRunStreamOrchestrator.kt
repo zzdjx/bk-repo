@@ -9,6 +9,8 @@
 package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
+import com.tencent.bkrepo.agent.hitl.AguiInterruptNormalizer
 import com.tencent.bkrepo.agent.hitl.AgentInterruptStateRepository
 import com.tencent.bkrepo.agent.model.TAgentRun
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
@@ -39,6 +41,7 @@ class AgentRunStreamOrchestrator(
     private val runEventService: AgentRunEventService,
     private val replaySinkRegistry: AgentRunReplaySinkRegistry,
     private val interruptStateRepository: AgentInterruptStateRepository,
+    private val interruptNormalizer: AguiInterruptNormalizer,
     private val sseEventWriter: AguiSseEventWriter,
 ) {
 
@@ -257,16 +260,19 @@ class AgentRunStreamOrchestrator(
 
     private fun pendingInterrupts(threadId: String): List<AguiEvent.Interrupt> {
         val snapshots = interruptStateRepository.getPendingInterrupt(threadId)?.interrupts ?: return emptyList()
-        return snapshots.map { snapshot ->
-            AguiEvent.Interrupt(
-                snapshot.id,
-                snapshot.reason,
-                snapshot.message,
-                snapshot.toolCallId,
-                snapshot.responseSchema,
-                snapshot.expiresAt,
-                snapshot.metadata,
-            )
-        }
+        return snapshots
+            .filter { it.toolName !in AgentPermissionRulesConfiguration.HARNESS_ORCHESTRATION_TOOLS }
+            .map { snapshot ->
+                val normalized = interruptNormalizer.normalizeSnapshot(snapshot, properties.activeRunTtl)
+                AguiEvent.Interrupt(
+                    normalized.id,
+                    normalized.reason,
+                    normalized.message,
+                    normalized.toolCallId,
+                    normalized.responseSchema,
+                    normalized.expiresAt,
+                    normalized.metadata,
+                )
+            }
     }
 }

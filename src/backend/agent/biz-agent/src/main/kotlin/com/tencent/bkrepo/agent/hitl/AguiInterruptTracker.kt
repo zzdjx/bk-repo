@@ -8,6 +8,8 @@
 
 package com.tencent.bkrepo.agent.hitl
 
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
 import com.tencent.bkrepo.agent.session.PendingInterruptSession
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
 import io.agentscope.core.agui.event.AguiEvent
@@ -20,7 +22,10 @@ import org.springframework.stereotype.Component
  * 由调用方每次 run 各自持有，不能存为本类的实例字段（否则并发 run 之间会互相污染 toolCallId 映射）。
  */
 @Component
-class AguiInterruptTracker {
+class AguiInterruptTracker(
+    private val interruptNormalizer: AguiInterruptNormalizer,
+    private val runtimeProperties: EffectiveAgentRuntimeProperties,
+) {
 
     /** 单次 run 的 toolCallId -> toolName 映射，随 run 生命周期由调用方创建与持有。 */
     class State {
@@ -53,9 +58,13 @@ class AguiInterruptTracker {
         val id = interrupt.id()?.takeIf { it.isNotBlank() } ?: return null
         val toolCallId = interrupt.toolCallId()?.takeIf { it.isNotBlank() }
         val toolName = toolCallId?.let { state.toolNameByCallId[it] }
+        if (toolName in AgentPermissionRulesConfiguration.HARNESS_ORCHESTRATION_TOOLS) {
+            return null
+        }
         val responseSchema = interrupt.responseSchema() as? Map<String, Any?>
-        val requiresApproval = hasApprovedSchema(responseSchema)
-        return PendingInterruptSnapshot(
+        val requiresApproval = interruptNormalizer.hasApprovedSchema(responseSchema)
+            || isPermissionConfirmMetadata(interrupt.metadata() as? Map<String, Any?>)
+        val snapshot = PendingInterruptSnapshot(
             id = id,
             reason = interrupt.reason().orEmpty(),
             toolCallId = toolCallId,
@@ -66,11 +75,9 @@ class AguiInterruptTracker {
             expiresAt = interrupt.expiresAt(),
             metadata = interrupt.metadata() as? Map<String, Any?>,
         )
+        return interruptNormalizer.normalizeSnapshot(snapshot, runtimeProperties.activeRunTtl)
     }
 
-    private fun hasApprovedSchema(responseSchema: Any?): Boolean {
-        if (responseSchema !is Map<*, *>) return false
-        val properties = responseSchema["properties"] as? Map<*, *> ?: return false
-        return properties.containsKey("approved")
-    }
+    private fun isPermissionConfirmMetadata(metadata: Map<String, Any?>?): Boolean =
+        metadata?.get("agentscope.interruptKind") == "permission_confirm"
 }

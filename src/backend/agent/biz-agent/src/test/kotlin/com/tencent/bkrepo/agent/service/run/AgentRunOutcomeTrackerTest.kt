@@ -8,6 +8,8 @@
 
 package com.tencent.bkrepo.agent.service.run
 
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.hitl.AguiInterruptNormalizer
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
 import com.tencent.bkrepo.agent.hitl.DefaultAgentInterruptStateRepository
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
@@ -20,8 +22,13 @@ import java.util.concurrent.atomic.AtomicReference
 
 class AgentRunOutcomeTrackerTest {
 
+    private val runtimeProperties = EffectiveAgentRuntimeProperties.defaults()
+
     private val tracker = AgentRunOutcomeTracker(
-        aguiInterruptTracker = AguiInterruptTracker(),
+        aguiInterruptTracker = AguiInterruptTracker(
+            AguiInterruptNormalizer(),
+            runtimeProperties,
+        ),
         interruptStateRepository = DefaultAgentInterruptStateRepository(
             pendingInterruptStore = InMemoryAgentPendingInterruptStore(),
             resumeIdempotencyStore = InMemoryAgentResumeIdempotencyStore(),
