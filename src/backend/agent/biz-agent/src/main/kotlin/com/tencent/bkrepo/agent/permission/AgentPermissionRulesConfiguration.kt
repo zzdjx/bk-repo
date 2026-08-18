@@ -41,6 +41,9 @@ class AgentPermissionRulesConfiguration {
     @Bean
     fun agentPermissionContext(properties: EffectiveAgentRuntimeProperties): PermissionContextState {
         val builder = PermissionContextState.builder()
+        HARNESS_ORCHESTRATION_TOOLS.forEach { toolName ->
+            builder.addAllowRule(toolName, toolRule(toolName, PermissionBehavior.ALLOW))
+        }
         if (properties.frontendToolsEnabled) {
             LocalToolDefinitions.allTools().forEach { definition ->
                 registerRule(builder, definition.name, definition.riskLevel)
@@ -78,5 +81,18 @@ class AgentPermissionRulesConfiguration {
 
     companion object {
         private const val RULE_SOURCE = "bkrepo-agent"
+
+        /**
+         * Harness 编排工具：委派子 Agent、查询任务状态等，不含直接业务写操作。
+         * 子 Agent 内工具仍按各自风险等级走 PermissionEngine（含 ASK）。
+         */
+        val HARNESS_ORCHESTRATION_TOOLS: List<String> = listOf(
+            "agent_spawn",
+            "agent_send",
+            "agent_list",
+            "task_output",
+            "task_cancel",
+            "task_list",
+        )
     }
 }
