@@ -10,7 +10,10 @@ package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
+import com.tencent.bkrepo.agent.hitl.AguiPermissionResumeAdapter
 import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
+import com.tencent.bkrepo.agent.hitl.SubagentHitlPromoter
+import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS
 import com.tencent.bkrepo.agent.tool.frontend.FrontendToolSanitizer
 import com.tencent.bkrepo.agent.context.AgentChatContext
 import com.tencent.bkrepo.agent.context.AgentChatContextResolver
@@ -29,6 +32,7 @@ import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.api.exception.TooManyRequestsException
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
+import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.core.agui.model.RunAgentInput
 import io.agentscope.core.agui.processor.AguiRequestProcessor
 import org.springframework.stereotype.Component
@@ -45,6 +49,7 @@ class AgentRunOrchestrator(
     private val permissionManager: PermissionManager,
     private val inputValidator: RunAgentInputValidator,
     private val aguiResumeValidator: AguiResumeValidator,
+    private val aguiPermissionResumeAdapter: AguiPermissionResumeAdapter,
     private val frontendToolSanitizer: FrontendToolSanitizer,
     private val agentSessionService: AgentSessionService,
     private val agentRunRecordService: AgentRunRecordService,
@@ -76,15 +81,22 @@ class AgentRunOrchestrator(
         val input: RunAgentInput,
         val threadId: String,
         val runId: String,
+        val permissionConfirmResults: List<io.agentscope.core.event.ConfirmResult>,
     )
 
     private fun prepareInput(userId: String, projectId: String, input: RunAgentInput): PreparedInput {
         inputValidator.validate(input)
         aguiResumeValidator.validateAndPrepare(userId, projectId, input)
-        val processed = frontendToolSanitizer.sanitize(input)
+        val sanitized = frontendToolSanitizer.sanitize(input)
+        val adapted = aguiPermissionResumeAdapter.adapt(sanitized)
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
-        agentSessionService.assertActiveSession(userId, projectId, processed.threadId)
-        return PreparedInput(processed, processed.threadId, processed.runId)
+        agentSessionService.assertActiveSession(userId, projectId, adapted.input.threadId)
+        return PreparedInput(
+            adapted.input,
+            adapted.input.threadId,
+            adapted.input.runId,
+            adapted.confirmResults,
+        )
     }
 
     private fun resolveExistingRun(input: RunAgentInput): SseEmitter? {
@@ -158,7 +170,13 @@ class AgentRunOrchestrator(
         val archiveState = AguiMessageArchiveHandler.State()
         messageArchiveHandler.archiveIncomingUserMessages(prepared.input, prepared.threadId, prepared.runId)
         val interruptState = AguiInterruptTracker.State()
-        val runtimeContext = chatContext.toRuntimeContext()
+        val subagentHitlState = SubagentHitlPromoter.State()
+        var runtimeContext = chatContext.toRuntimeContext()
+        if (prepared.permissionConfirmResults.isNotEmpty()) {
+            runtimeContext = RuntimeContext.builder(runtimeContext)
+                .put(RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS, prepared.permissionConfirmResults)
+                .build()
+        }
         val processResult = aguiRequestProcessor.process(prepared.input, null, null, runtimeContext)
         val emitter = SseEmitter(properties.sseTimeout.toMillis())
         return AgentRunScope(
@@ -172,6 +190,7 @@ class AgentRunOrchestrator(
             eventFlux = processResult.events(),
             archiveState = archiveState,
             interruptState = interruptState,
+            subagentHitlState = subagentHitlState,
             emitter = emitter,
         )
     }

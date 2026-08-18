@@ -27,6 +27,12 @@ class AgentRunOutcomeTracker(
             is AguiEvent.RunFinished -> {
                 // 2.0.1 legacy：errorEvents() 可能在 RUN_ERROR 后再发 RUN_FINISHED，终态以 FAILED 为准。
                 if (terminalStatus.get() == AgentRunStatus.FAILED) return
+                // 子 Agent HITL 上冒后已 SUSPENDED，后续 agent_spawn 结束不应覆盖为 COMPLETED。
+                if (terminalStatus.get() == AgentRunStatus.SUSPENDED &&
+                    event.outcome() !is AguiEvent.RunFinishedInterruptOutcome
+                ) {
+                    return
+                }
                 terminalStatus.set(
                     if (event.outcome() is AguiEvent.RunFinishedInterruptOutcome) {
                         AgentRunStatus.SUSPENDED

@@ -64,6 +64,9 @@ const val RUNTIME_CONTEXT_FORCE_ARCHIVE_ASSISTANT = "forceArchiveAssistant"
 /** middleware 内部 per-call 归档状态在 [RuntimeContext] 中的 key */
 const val RUNTIME_CONTEXT_MESSAGE_ARCHIVE_STATE = "messageArchiveState"
 
+/** Permission HITL resume：本轮注入的 [io.agentscope.core.event.ConfirmResult] 列表 */
+const val RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS = "bkrepo.permissionConfirmResults"
+
 const val AGENT_THREAD_ID_PREFIX = "s-"
 
 const val AGENT_MESSAGE_ID_PREFIX = "m-"

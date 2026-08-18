@@ -66,6 +66,42 @@ class AgentRunOutcomeTrackerTest {
     }
 
     @Test
+    fun `RunFinished after SUSPENDED keeps SUSPENDED`() {
+        val status = AtomicReference(AgentRunStatus.COMPLETED)
+        tracker.applyTerminalEvent(
+            AguiEvent.RunFinished(
+                "thread-1",
+                "run-1",
+                null,
+                AguiEvent.RunFinishedInterruptOutcome(
+                    listOf(
+                        AguiEvent.Interrupt(
+                            "permission-call-1",
+                            "permission_confirm",
+                            "confirm",
+                            "call-1",
+                            null,
+                            null,
+                            null,
+                        ),
+                    ),
+                ),
+            ),
+            status,
+        )
+        tracker.applyTerminalEvent(
+            AguiEvent.RunFinished(
+                "thread-1",
+                "run-1",
+                null,
+                AguiEvent.RunFinishedSuccessOutcome(),
+            ),
+            status,
+        )
+        assertEquals(AgentRunStatus.SUSPENDED, status.get())
+    }
+
+    @Test
     fun `RunFinished after RunError keeps FAILED`() {
         val status = AtomicReference(AgentRunStatus.COMPLETED)
         tracker.applyTerminalEvent(

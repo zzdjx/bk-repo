@@ -9,6 +9,7 @@
 package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
+import com.tencent.bkrepo.agent.hitl.SubagentHitlPromoter
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import io.agentscope.core.agui.event.AguiEvent
@@ -33,6 +34,7 @@ class AgentRunScope(
     val eventFlux: Flux<AguiEvent>,
     val archiveState: AguiMessageArchiveHandler.State,
     val interruptState: AguiInterruptTracker.State,
+    val subagentHitlState: SubagentHitlPromoter.State,
     val emitter: SseEmitter,
     val terminalStatus: AtomicReference<AgentRunStatus> = AtomicReference(AgentRunStatus.COMPLETED),
     val runFinished: AtomicBoolean = AtomicBoolean(false),

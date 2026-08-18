@@ -9,6 +9,7 @@
 package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
+import com.tencent.bkrepo.agent.hitl.SubagentHitlPromoter
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
@@ -26,6 +27,7 @@ class AgentRunEventPipeline(
     private val activeRunManager: ActiveRunManager,
     private val runEventService: AgentRunEventService,
     private val aguiInterruptTracker: AguiInterruptTracker,
+    private val subagentHitlPromoter: SubagentHitlPromoter,
     private val messageArchiveHandler: AguiMessageArchiveHandler,
     private val outcomeTracker: AgentRunOutcomeTracker,
     private val lifecycleManager: AgentRunLifecycleManager,
@@ -50,6 +52,12 @@ class AgentRunEventPipeline(
         if (scope.runFinished.get()) return
         if (handleCancelIfRequested(scope)) return
         aguiInterruptTracker.onEvent(event, scope.interruptState)
+        subagentHitlPromoter.onEvent(event, scope.interruptState, scope.subagentHitlState)
+        dispatchEvent(scope, event)
+        promoteSubagentHitlIfNeeded(scope, event)
+    }
+
+    private fun dispatchEvent(scope: AgentRunScope, event: AguiEvent) {
         val outbound = aguiInterruptTracker.enrichEvent(event, scope.interruptState)
         outcomeTracker.applyTerminalEvent(outbound, scope.terminalStatus)
         outcomeTracker.capturePendingInterruptIfNeeded(
@@ -62,6 +70,23 @@ class AgentRunEventPipeline(
         messageArchiveHandler.onEvent(outbound, scope.threadId, scope.runId, scope.archiveState)
         runEventService.append(scope, outbound)
         sendToPrimaryClient(scope, outbound)
+    }
+
+    private fun promoteSubagentHitlIfNeeded(scope: AgentRunScope, event: AguiEvent) {
+        val promoted = subagentHitlPromoter.buildRunFinishedIfNeeded(
+            event = event,
+            threadId = scope.threadId,
+            runId = scope.runId,
+            state = scope.subagentHitlState,
+        ) ?: return
+        dispatchEvent(scope, promoted)
+        lifecycleManager.finish(
+            scope,
+            AgentRunLifecycleManager.FinishOptions(
+                abortAgent = true,
+                runStatus = AgentRunStatus.SUSPENDED,
+            ),
+        )
     }
 
     private fun sendToPrimaryClient(scope: AgentRunScope, event: AguiEvent) {

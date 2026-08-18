@@ -37,6 +37,7 @@ import com.tencent.bkrepo.agent.agent.transfer.TransferDiagnosticsAgentDefinitio
 import com.tencent.bkrepo.agent.config.AgentHarnessConfigurer
 import com.tencent.bkrepo.agent.config.AgentMemoryConfig
 import com.tencent.bkrepo.agent.config.AgentModelConfig
+import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.config.properties.AgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.AgentLlmPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryProperties
@@ -149,6 +150,7 @@ class HarnessAgentSmokeTest {
         val agentHarnessConfigurer = AgentHarnessConfigurer(
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
+            permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
         )
         val permissionContext = io.agentscope.core.permission.PermissionContextState.builder().build()
         val toolkit = io.agentscope.core.tool.Toolkit(

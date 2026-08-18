@@ -28,6 +28,7 @@
 package com.tencent.bkrepo.agent.config
 
 import com.tencent.bkrepo.agent.agent.AgentCatalog
+import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import io.agentscope.core.model.Model
@@ -48,6 +49,7 @@ import java.nio.file.Paths
 class AgentHarnessConfigurer(
     private val agentMemoryConfig: AgentMemoryConfig,
     private val agentCatalog: AgentCatalog,
+    private val permissionConfirmResumeMiddleware: PermissionConfirmResumeMiddleware,
 ) {
 
     fun configure(
@@ -74,6 +76,7 @@ class AgentHarnessConfigurer(
             .disableDynamicSubagents()
             .disableMemoryTools()
             .disableWorkspaceContext()
+            .middleware(permissionConfirmResumeMiddleware)
 
         if (properties.topology.coordinator.enabled) {
             builder = builder.enableTaskList(properties.topology.coordinator.taskListEnabled)
