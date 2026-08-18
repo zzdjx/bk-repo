@@ -9,6 +9,7 @@
 package com.tencent.bkrepo.agent.hitl
 
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
+import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
 import io.agentscope.core.agui.event.AguiEvent
 import org.springframework.stereotype.Component
 import java.time.Duration
@@ -20,7 +21,9 @@ import java.time.Instant
  * AG-UI 规范中二者可选，但客户端 Zod schema 在 outcome.interrupts[] 下要求 object/string。
  */
 @Component
-class AguiInterruptNormalizer {
+class AguiInterruptNormalizer(
+    private val frontendToolCatalog: FrontendToolCatalog,
+) {
 
     fun normalizeEvent(event: AguiEvent, interruptTtl: Duration): AguiEvent {
         if (event !is AguiEvent.RunFinished) {
@@ -46,10 +49,11 @@ class AguiInterruptNormalizer {
     fun normalizeInterrupt(
         interrupt: AguiEvent.Interrupt,
         interruptTtl: Duration,
+        toolName: String? = null,
         requiresApproval: Boolean? = null,
     ): AguiEvent.Interrupt {
         val schema = interrupt.responseSchema() as? Map<String, Any?>
-        val approval = requiresApproval ?: hasApprovedSchema(schema) || isPermissionConfirm(interrupt)
+        val approval = requiresApproval ?: requiresApproval(toolName, interrupt, schema)
         val responseSchema = when {
             !schema.isNullOrEmpty() -> schema
             approval -> APPROVAL_RESPONSE_SCHEMA
@@ -68,7 +72,8 @@ class AguiInterruptNormalizer {
     }
 
     fun normalizeSnapshot(snapshot: PendingInterruptSnapshot, interruptTtl: Duration): PendingInterruptSnapshot {
-        val approval = snapshot.requiresApproval || isPermissionConfirmMetadata(snapshot.metadata)
+        val approval = requiresApproval(snapshot.toolName, snapshot.metadata, snapshot.responseSchema)
+            || snapshot.requiresApproval
         val responseSchema = when {
             !snapshot.responseSchema.isNullOrEmpty() -> snapshot.responseSchema
             approval -> APPROVAL_RESPONSE_SCHEMA
@@ -88,8 +93,22 @@ class AguiInterruptNormalizer {
         return properties.containsKey("approved")
     }
 
-    private fun isPermissionConfirm(interrupt: AguiEvent.Interrupt): Boolean =
-        isPermissionConfirmMetadata(interrupt.metadata() as? Map<String, Any?>)
+    private fun requiresApproval(
+        toolName: String?,
+        interrupt: AguiEvent.Interrupt,
+        responseSchema: Map<String, Any?>?,
+    ): Boolean = requiresApproval(toolName, interrupt.metadata() as? Map<String, Any?>, responseSchema)
+
+    private fun requiresApproval(
+        toolName: String?,
+        metadata: Map<String, Any?>?,
+        responseSchema: Any?,
+    ): Boolean {
+        if (hasApprovedSchema(responseSchema)) return true
+        if (isPermissionConfirmMetadata(metadata)) return true
+        if (!toolName.isNullOrBlank() && frontendToolCatalog.isWriteTool(toolName)) return true
+        return false
+    }
 
     private fun isPermissionConfirmMetadata(metadata: Map<String, Any?>?): Boolean =
         metadata?.get("agentscope.interruptKind") == "permission_confirm"

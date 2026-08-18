@@ -8,7 +8,10 @@
 
 package com.tencent.bkrepo.agent.hitl
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
+import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
 import io.agentscope.core.agui.event.AguiEvent
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -19,7 +22,8 @@ import java.time.Duration
 
 class AguiInterruptNormalizerTest {
 
-    private val normalizer = AguiInterruptNormalizer()
+    private val catalog = FrontendToolCatalog()
+    private val normalizer = AguiInterruptNormalizer(catalog)
     private val ttl = Duration.ofMinutes(5)
 
     @Test
@@ -34,7 +38,7 @@ class AguiInterruptNormalizerTest {
             null,
         )
 
-        val normalized = normalizer.normalizeInterrupt(interrupt, ttl)
+        val normalized = normalizer.normalizeInterrupt(interrupt, ttl, "list_download_tasks")
 
         assertEquals("object", (normalized.responseSchema() as Map<*, *>)["type"])
         assertNotNull(normalized.expiresAt())
@@ -42,12 +46,30 @@ class AguiInterruptNormalizerTest {
     }
 
     @Test
-    fun `uses approval schema for permission confirm metadata`() {
+    fun `uses approval schema for write tools`() {
         val interrupt = AguiEvent.Interrupt(
             "int-2",
             "tool_call",
             "confirm",
             "tc-2",
+            null,
+            null,
+            mapOf("toolName" to "set_download_path"),
+        )
+
+        val normalized = normalizer.normalizeInterrupt(interrupt, ttl, "set_download_path")
+        val properties = (normalized.responseSchema() as Map<*, *>)["properties"] as Map<*, *>
+
+        assertTrue(properties.containsKey("approved"))
+    }
+
+    @Test
+    fun `uses approval schema for permission confirm metadata`() {
+        val interrupt = AguiEvent.Interrupt(
+            "int-3",
+            "tool_call",
+            "confirm",
+            "tc-3",
             null,
             null,
             mapOf("agentscope.interruptKind" to "permission_confirm"),
@@ -62,9 +84,9 @@ class AguiInterruptNormalizerTest {
     @Test
     fun `normalizes pending snapshot for client validation`() {
         val snapshot = PendingInterruptSnapshot(
-            id = "int-3",
+            id = "int-4",
             reason = "tool_call",
-            toolCallId = "tc-3",
+            toolCallId = "tc-4",
             toolName = "list_download_tasks",
         )
 
@@ -83,7 +105,7 @@ class AguiInterruptNormalizerTest {
             null,
             AguiEvent.RunFinishedInterruptOutcome(
                 listOf(
-                    AguiEvent.Interrupt("int-4", "tool_call", null, "tc-4", null, null, null),
+                    AguiEvent.Interrupt("int-5", "tool_call", null, "tc-5", null, null, null),
                 ),
             ),
         )

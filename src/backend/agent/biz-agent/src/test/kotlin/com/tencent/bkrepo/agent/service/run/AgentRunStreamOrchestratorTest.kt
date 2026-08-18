@@ -11,6 +11,7 @@ package com.tencent.bkrepo.agent.service.run
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.hitl.AguiInterruptNormalizer
 import com.tencent.bkrepo.agent.hitl.DefaultAgentInterruptStateRepository
+import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
 import com.tencent.bkrepo.agent.model.TAgentRun
 import com.tencent.bkrepo.agent.model.TAgentRunEvent
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
@@ -43,7 +44,7 @@ class AgentRunStreamOrchestratorTest {
         reconnectPollInterval = java.time.Duration.ofMillis(50),
         reconnectTimeout = java.time.Duration.ofMillis(200),
     )
-    private val interruptNormalizer = AguiInterruptNormalizer()
+    private val interruptNormalizer = AguiInterruptNormalizer(FrontendToolCatalog())
     private val sseEventWriter = AguiSseEventWriter(interruptNormalizer, properties)
     private val replaySinkRegistry = AgentRunReplaySinkRegistry()
 

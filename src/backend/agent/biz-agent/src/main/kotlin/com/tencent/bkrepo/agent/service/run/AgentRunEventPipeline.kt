@@ -50,17 +50,18 @@ class AgentRunEventPipeline(
         if (scope.runFinished.get()) return
         if (handleCancelIfRequested(scope)) return
         aguiInterruptTracker.onEvent(event, scope.interruptState)
-        outcomeTracker.applyTerminalEvent(event, scope.terminalStatus)
+        val outbound = aguiInterruptTracker.enrichEvent(event, scope.interruptState)
+        outcomeTracker.applyTerminalEvent(outbound, scope.terminalStatus)
         outcomeTracker.capturePendingInterruptIfNeeded(
             threadId = scope.threadId,
             runId = scope.runId,
-            event = event,
+            event = outbound,
             terminalStatus = scope.terminalStatus.get(),
             interruptState = scope.interruptState,
         )
-        messageArchiveHandler.onEvent(event, scope.threadId, scope.runId, scope.archiveState)
-        runEventService.append(scope, event)
-        sendToPrimaryClient(scope, event)
+        messageArchiveHandler.onEvent(outbound, scope.threadId, scope.runId, scope.archiveState)
+        runEventService.append(scope, outbound)
+        sendToPrimaryClient(scope, outbound)
     }
 
     private fun sendToPrimaryClient(scope: AgentRunScope, event: AguiEvent) {

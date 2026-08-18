@@ -8,10 +8,13 @@
 
 package com.tencent.bkrepo.agent.hitl
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
 import com.tencent.bkrepo.agent.session.PendingInterruptSession
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
+import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
 import io.agentscope.core.agui.event.AguiEvent
 import org.springframework.stereotype.Component
 
@@ -24,12 +27,15 @@ import org.springframework.stereotype.Component
 @Component
 class AguiInterruptTracker(
     private val interruptNormalizer: AguiInterruptNormalizer,
+    private val frontendToolCatalog: FrontendToolCatalog,
     private val runtimeProperties: EffectiveAgentRuntimeProperties,
+    private val objectMapper: ObjectMapper,
 ) {
 
     /** 单次 run 的 toolCallId -> toolName 映射，随 run 生命周期由调用方创建与持有。 */
     class State {
         val toolNameByCallId = mutableMapOf<String, String>()
+        val argsBufferByCallId = mutableMapOf<String, StringBuilder>()
     }
 
     fun onEvent(event: AguiEvent, state: State) {
@@ -37,12 +43,25 @@ class AguiInterruptTracker(
             is AguiEvent.ToolCallStart -> {
                 state.toolNameByCallId[event.toolCallId()] = event.toolCallName()
             }
+            is AguiEvent.ToolCallArgs -> {
+                val callId = event.toolCallId()?.takeIf { it.isNotBlank() } ?: return
+                val delta = event.delta()?.takeIf { it.isNotBlank() } ?: return
+                state.argsBufferByCallId.computeIfAbsent(callId) { StringBuilder() }.append(delta)
+            }
             else -> Unit
         }
     }
 
+    fun enrichEvent(event: AguiEvent, state: State): AguiEvent {
+        if (event !is AguiEvent.RunFinished) {
+            return event
+        }
+        return enrichRunFinished(event, state)
+    }
+
     fun captureSuspendedSession(runId: String, event: AguiEvent.RunFinished, state: State): PendingInterruptSession? {
-        val outcome = event.outcome()
+        val enriched = enrichRunFinished(event, state)
+        val outcome = enriched.outcome()
         if (outcome !is AguiEvent.RunFinishedInterruptOutcome) {
             return null
         }
@@ -53,17 +72,59 @@ class AguiInterruptTracker(
         return PendingInterruptSession(originRunId = runId, interrupts = interrupts)
     }
 
+    private fun enrichRunFinished(event: AguiEvent.RunFinished, state: State): AguiEvent.RunFinished {
+        val outcome = event.outcome()
+        if (outcome !is AguiEvent.RunFinishedInterruptOutcome) {
+            return event
+        }
+        val enriched = outcome.interrupts().map { interrupt -> enrichInterrupt(interrupt, state) }
+        return AguiEvent.RunFinished(
+            event.threadId(),
+            event.runId(),
+            event.result(),
+            AguiEvent.RunFinishedInterruptOutcome(enriched),
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun enrichInterrupt(interrupt: AguiEvent.Interrupt, state: State): AguiEvent.Interrupt {
+        val toolCallId = interrupt.toolCallId()?.takeIf { it.isNotBlank() }
+        val toolName = resolveToolName(interrupt, state, toolCallId)
+        val toolInput = toolInput(state, toolCallId)
+        val metadata = mergeToolMetadata(interrupt.metadata() as? Map<String, Any?>, toolName, toolInput)
+        val requiresApproval = interruptNormalizer.hasApprovedSchema(interrupt.responseSchema())
+            || isPermissionConfirmMetadata(metadata)
+            || (!toolName.isNullOrBlank() && frontendToolCatalog.isWriteTool(toolName))
+        return interruptNormalizer.normalizeInterrupt(
+            AguiEvent.Interrupt(
+                interrupt.id(),
+                interrupt.reason(),
+                interrupt.message(),
+                toolCallId,
+                interrupt.responseSchema(),
+                interrupt.expiresAt(),
+                metadata,
+            ),
+            runtimeProperties.activeRunTtl,
+            toolName,
+            requiresApproval,
+        )
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun toSnapshot(interrupt: AguiEvent.Interrupt, state: State): PendingInterruptSnapshot? {
         val id = interrupt.id()?.takeIf { it.isNotBlank() } ?: return null
         val toolCallId = interrupt.toolCallId()?.takeIf { it.isNotBlank() }
-        val toolName = toolCallId?.let { state.toolNameByCallId[it] }
+        val toolName = resolveToolName(interrupt, state, toolCallId)
         if (toolName in AgentPermissionRulesConfiguration.HARNESS_ORCHESTRATION_TOOLS) {
             return null
         }
+        val toolInput = toolInput(state, toolCallId)
+        val metadata = mergeToolMetadata(interrupt.metadata() as? Map<String, Any?>, toolName, toolInput)
         val responseSchema = interrupt.responseSchema() as? Map<String, Any?>
         val requiresApproval = interruptNormalizer.hasApprovedSchema(responseSchema)
-            || isPermissionConfirmMetadata(interrupt.metadata() as? Map<String, Any?>)
+            || isPermissionConfirmMetadata(metadata)
+            || (!toolName.isNullOrBlank() && frontendToolCatalog.isWriteTool(toolName))
         val snapshot = PendingInterruptSnapshot(
             id = id,
             reason = interrupt.reason().orEmpty(),
@@ -73,11 +134,55 @@ class AguiInterruptTracker(
             message = interrupt.message(),
             responseSchema = responseSchema,
             expiresAt = interrupt.expiresAt(),
-            metadata = interrupt.metadata() as? Map<String, Any?>,
+            metadata = metadata,
         )
         return interruptNormalizer.normalizeSnapshot(snapshot, runtimeProperties.activeRunTtl)
     }
 
+    private fun resolveToolName(
+        interrupt: AguiEvent.Interrupt,
+        state: State,
+        toolCallId: String?,
+    ): String? {
+        toolCallId?.let { state.toolNameByCallId[it] }?.takeIf { it.isNotBlank() }?.let { return it }
+        val fromMeta = (interrupt.metadata() as? Map<*, *>)?.get("toolName")
+        return fromMeta as? String
+    }
+
+    private fun toolInput(state: State, toolCallId: String?): Map<String, Any?>? {
+        if (toolCallId.isNullOrBlank()) return null
+        val raw = state.argsBufferByCallId[toolCallId]?.toString()?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        return try {
+            objectMapper.readValue(raw, TOOL_INPUT_TYPE)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun mergeToolMetadata(
+        metadata: Map<String, Any?>?,
+        toolName: String?,
+        toolInput: Map<String, Any?>?,
+    ): Map<String, Any?>? {
+        if (toolName.isNullOrBlank() && toolInput == null) {
+            return metadata
+        }
+        val merged = LinkedHashMap<String, Any?>()
+        metadata?.let { merged.putAll(it) }
+        if (!toolName.isNullOrBlank()) {
+            merged["toolName"] = toolName
+        }
+        if (toolInput != null) {
+            merged["toolInput"] = toolInput
+        }
+        return merged
+    }
+
     private fun isPermissionConfirmMetadata(metadata: Map<String, Any?>?): Boolean =
         metadata?.get("agentscope.interruptKind") == "permission_confirm"
+
+    companion object {
+        private val TOOL_INPUT_TYPE = object : TypeReference<Map<String, Any?>>() {}
+    }
 }
