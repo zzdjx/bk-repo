@@ -76,8 +76,10 @@ class AguiAgentConfiguration {
             .enableReasoning(enableReasoning)
             .emitTokenUsage(false)
             .emitToolCallArgs(true)
-            // 子 Agent 工具/HITL 走 native 事件 + source，便于 SubagentHitlPromoter 从 Raw RequireUserConfirm 直接上冒。
-            .emitSubagentEventsAsNative(true)
+            // 保持默认 false：子 Agent 事件走框架自带的 SubagentEventConverter 降级为 Custom(subagent.*)，
+            // 避免 agent_spawn 同步阻塞期间子 Agent 自身的 RUN_STARTED/TOOL_CALL_START 泄漏到顶层 AG-UI
+            // 协议状态机（会被 @ag-ui/client 判定为“run 仍处于 active”而报错）。SubagentHitlPromoter 从
+            // Custom(subagent.require_confirm) 关联前置 Custom(subagent.tool_call) 完成 HITL 上冒。
             .toolMergeMode(toolMergeMode)
             .build()
     }
