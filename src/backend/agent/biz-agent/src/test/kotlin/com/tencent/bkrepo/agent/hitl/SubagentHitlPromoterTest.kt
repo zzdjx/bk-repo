@@ -13,6 +13,8 @@ import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
 import io.agentscope.core.agui.event.AguiEvent
 import io.agentscope.core.agui.model.AguiResume
 import io.agentscope.core.agui.model.RunAgentInput
+import io.agentscope.core.event.RequireUserConfirmEvent
+import io.agentscope.core.message.ToolUseBlock
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -32,7 +34,7 @@ class SubagentHitlPromoterTest {
         val confirm = customRequireConfirm("sub-client", 1)
         promoter.onEvent(confirm, interruptState, state)
 
-        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", state)
+        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", interruptState, state)
         assertNotNull(runFinished)
         val outcome = runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome
         assertEquals(1, outcome.interrupts().size)
@@ -46,14 +48,72 @@ class SubagentHitlPromoterTest {
     }
 
     @Test
+    fun `require confirm falls back to interrupt tracker when source key mismatches`() {
+        val state = SubagentHitlPromoter.State()
+        promoter.onEvent(
+            customToolCallStart("thread-abc/client", "call-2", "set_download_path"),
+            interruptState,
+            state,
+        )
+
+        val confirm = customRequireConfirm("different-prefix/client", 1)
+        promoter.onEvent(confirm, interruptState, state)
+
+        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", interruptState, state)
+        assertNotNull(runFinished)
+        val interrupt = (runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome).interrupts().single()
+        assertEquals("call-2", interrupt.toolCallId())
+        assertEquals("set_download_path", interrupt.metadata()["toolName"])
+    }
+
+    @Test
+    fun `require confirm falls back to interruptState when tool call custom was missed`() {
+        val state = SubagentHitlPromoter.State()
+        interruptState.toolNameByCallId["call-3"] = "set_download_path"
+
+        val confirm = customRequireConfirm("thread-abc/client", 1)
+        promoter.onEvent(confirm, interruptState, state)
+
+        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", interruptState, state)
+        assertNotNull(runFinished)
+        val interrupt = (runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome).interrupts().single()
+        assertEquals("call-3", interrupt.toolCallId())
+        assertEquals("set_download_path", interrupt.metadata()["toolName"])
+    }
+
+    @Test
+    fun `raw RequireUserConfirmEvent promotes without prior tool call custom`() {
+        val state = SubagentHitlPromoter.State()
+        val toolUse = ToolUseBlock.builder()
+            .id("call-raw-1")
+            .name("set_download_path")
+            .input(mapOf("path" to "D:\\Downloads"))
+            .build()
+        val raw = AguiEvent.Raw(
+            "thread-1",
+            "run-1",
+            RequireUserConfirmEvent("reply-1", listOf(toolUse)),
+            "thread-abc/client",
+        )
+
+        promoter.onEvent(raw, interruptState, state)
+        val runFinished = promoter.buildRunFinishedIfNeeded(raw, "thread-1", "run-1", interruptState, state)
+        assertNotNull(runFinished)
+        val interrupt = (runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome).interrupts().single()
+        assertEquals("call-raw-1", interrupt.toolCallId())
+        assertEquals("set_download_path", interrupt.metadata()["toolName"])
+        assertEquals(mapOf("path" to "D:\\Downloads"), interrupt.metadata()["toolInput"])
+    }
+
+    @Test
     fun `promoted only once`() {
         val state = SubagentHitlPromoter.State()
         promoter.onEvent(customToolCallStart("sub-client", "call-1", "set_download_path"), interruptState, state)
         val confirm = customRequireConfirm("sub-client", 1)
         promoter.onEvent(confirm, interruptState, state)
 
-        assertNotNull(promoter.buildRunFinishedIfNeeded(confirm, "t", "r", state))
-        assertEquals(null, promoter.buildRunFinishedIfNeeded(confirm, "t", "r", state))
+        assertNotNull(promoter.buildRunFinishedIfNeeded(confirm, "t", "r", interruptState, state))
+        assertEquals(null, promoter.buildRunFinishedIfNeeded(confirm, "t", "r", interruptState, state))
     }
 
     private fun customToolCallStart(source: String, toolCallId: String, toolName: String): AguiEvent.Custom =

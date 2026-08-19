@@ -77,6 +77,7 @@ class AgentRunEventPipeline(
             event = event,
             threadId = scope.threadId,
             runId = scope.runId,
+            interruptState = scope.interruptState,
             state = scope.subagentHitlState,
         ) ?: return
         dispatchEvent(scope, promoted)
