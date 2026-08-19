@@ -8,6 +8,7 @@
 
 package com.tencent.bkrepo.agent.service.run
 
+import com.tencent.bkrepo.agent.hitl.AguiResumeContractBridge
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
 import com.tencent.bkrepo.agent.runtime.ActiveRunScope
@@ -17,6 +18,7 @@ import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+import reactor.core.scheduler.Schedulers
 
 /** run 结束、资源清理、跨副本 cancel 与 SSE 收尾。 */
 @Component
@@ -25,6 +27,7 @@ class AgentRunLifecycleManager(
     private val agentSessionInterruptor: AgentSessionInterruptor,
     private val agentRunRecordService: AgentRunRecordService,
     private val runEventService: AgentRunEventService,
+    private val resumeContractBridge: AguiResumeContractBridge,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -72,8 +75,9 @@ class AgentRunLifecycleManager(
         if (options.abortAgent) {
             agentSessionInterruptor.interrupt(scope.runtimeContext)
         }
+        resumeContractBridge.finishActiveRun(scope.threadId, scope.runId)
         if (options.disposeSubscription) {
-            scope.subscriptionRef.get()?.dispose()
+            disposeSubscription(scope, options.abortAgent)
         }
         agentRunRecordService.finishRun(
             runId = scope.runId,
@@ -88,7 +92,8 @@ class AgentRunLifecycleManager(
     fun finishWithError(scope: AgentRunScope, error: Throwable) {
         if (!scope.runFinished.compareAndSet(false, true)) return
         agentSessionInterruptor.interrupt(scope.runtimeContext)
-        scope.subscriptionRef.get()?.dispose()
+        resumeContractBridge.finishActiveRun(scope.threadId, scope.runId)
+        disposeSubscription(scope, abortAgent = true)
         agentRunRecordService.finishRun(
             runId = scope.runId,
             status = AgentRunStatus.FAILED,
@@ -96,6 +101,16 @@ class AgentRunLifecycleManager(
         )
         cleanup(scope)
         completeEmitter(scope.emitter)
+    }
+
+    private fun disposeSubscription(scope: AgentRunScope, abortAgent: Boolean) {
+        val subscription = scope.subscriptionRef.get() ?: return
+        if (abortAgent) {
+            // 避免在 Reactor onNext 回调内同步 dispose，导致 doFinally 延迟或不触发。
+            Schedulers.boundedElastic().schedule { subscription.dispose() }
+        } else {
+            subscription.dispose()
+        }
     }
 
     private fun cleanup(scope: AgentRunScope) {
