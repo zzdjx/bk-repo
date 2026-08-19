@@ -19,12 +19,14 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
 /**
- * 将子 Agent 的 `subagent.require_confirm` 等 Custom 事件上冒为标准 AG-UI `RUN_FINISHED(interrupt)`。
+ * 将子 Agent 的 [RequireUserConfirmEvent] / TOOL_SUSPENDED 结果上冒为标准 AG-UI `RUN_FINISHED(interrupt)`。
  *
- * AgentScope 2.0.1 的 [io.agentscope.core.agui.adapter.strategy.SubagentEventConverter]
- * 会把子 Agent 的 [RequireUserConfirmEvent] 降级为
- * `AguiEvent.Custom(subagent.require_confirm)`，不会写入 [AguiStreamContext.pendingInterrupts]。
- * 父 run 在 `agent_spawn` 同步阻塞期间也不会自然发出 interrupt 终态。
+ * AgentScope 2.0.1 默认（[io.agentscope.core.agui.adapter.strategy.SubagentEventConverter]）会把子 Agent
+ * 的事件降级为 `AguiEvent.Custom(subagent.*)`。本项目通过
+ * [io.agentscope.core.agui.adapter.AguiAdapterConfig.Builder.emitSubagentEventsAsNative] 显式关闭该降级，
+ * 子 Agent 事件改走原生 [AguiEvent.Raw] / [AguiEvent.ToolCallStart]（携带 `source`），因此这里只处理原生事件，
+ * 不再兼容已关闭的 Custom 事件降级路径。父 run 在 `agent_spawn` 同步阻塞期间也不会自然发出 interrupt 终态，
+ * 需要本类合成一次 `RUN_FINISHED(interrupt)`。
  */
 @Component
 class SubagentHitlPromoter {
@@ -39,17 +41,14 @@ class SubagentHitlPromoter {
     )
 
     class State {
-        val pendingBySource = mutableMapOf<String, MutableList<PendingToolCall>>()
-        val pendingInOrder = mutableListOf<PendingToolCall>()
         var promoted = false
     }
 
     fun onEvent(event: AguiEvent, interruptState: AguiInterruptTracker.State, state: State) {
         if (state.promoted) return
         when (event) {
-            is AguiEvent.Custom -> onCustomEvent(event, interruptState, state)
-            is AguiEvent.Raw -> onRawEvent(event, interruptState, state)
-            is AguiEvent.ToolCallStart -> trackNativeToolCall(event, interruptState, state)
+            is AguiEvent.Raw -> onRawEvent(event, interruptState)
+            is AguiEvent.ToolCallStart -> trackNativeToolCall(event, interruptState)
             else -> Unit
         }
     }
@@ -63,29 +62,17 @@ class SubagentHitlPromoter {
     ): AguiEvent.RunFinished? {
         if (state.promoted) return null
         return when (event) {
-            is AguiEvent.Custom -> buildFromRequireConfirm(event, threadId, runId, interruptState, state)
             is AguiEvent.Raw -> buildFromRawEvent(event, threadId, runId, state)
             else -> null
-        }
-    }
-
-    private fun onCustomEvent(
-        event: AguiEvent.Custom,
-        interruptState: AguiInterruptTracker.State,
-        state: State,
-    ) {
-        when (event.name()) {
-            NAME_TOOL_CALL -> trackToolCall(event, interruptState, state)
         }
     }
 
     private fun onRawEvent(
         event: AguiEvent.Raw,
         interruptState: AguiInterruptTracker.State,
-        state: State,
     ) {
         when (val agentEvent = event.event()) {
-            is RequireUserConfirmEvent -> trackRequireConfirm(event, agentEvent, interruptState, state)
+            is RequireUserConfirmEvent -> trackRequireConfirm(event, agentEvent, interruptState)
             is AgentResultEvent -> onAgentResultRaw(event, agentEvent, interruptState)
             else -> Unit
         }
@@ -102,40 +89,6 @@ class SubagentHitlPromoter {
             is AgentResultEvent -> buildFromToolSuspended(event, threadId, runId, state)
             else -> null
         }
-    }
-
-    private fun buildFromRequireConfirm(
-        event: AguiEvent.Custom,
-        threadId: String,
-        runId: String,
-        interruptState: AguiInterruptTracker.State,
-        state: State,
-    ): AguiEvent.RunFinished? {
-        if (event.name() != NAME_REQUIRE_CONFIRM) return null
-
-        val payload = asStringKeyMap(event.value()) ?: return null
-        val source = payload["source"] as? String ?: return null
-        val toolCallCount = (payload["toolCallCount"] as? Number)?.toInt() ?: 1
-        val targets = resolvePendingTargets(source, toolCallCount, interruptState, state)
-        if (targets.isEmpty()) {
-            logger.warn(
-                "subagent require_confirm without resolvable tool calls: source={} toolCallCount={} " +
-                    "pendingSources={}",
-                source,
-                toolCallCount,
-                state.pendingBySource.keys,
-            )
-            return null
-        }
-
-        val interrupts = targets.map { pendingCall -> buildPermissionInterrupt(pendingCall) }
-        state.promoted = true
-        logger.info(
-            "promoted subagent permission HITL: source={} toolCalls={}",
-            source,
-            targets.map { it.toolName },
-        )
-        return runFinished(threadId, runId, interrupts)
     }
 
     private fun buildFromRawRequireConfirm(
@@ -198,7 +151,6 @@ class SubagentHitlPromoter {
         event: AguiEvent.Raw,
         confirmEvent: RequireUserConfirmEvent,
         interruptState: AguiInterruptTracker.State,
-        state: State,
     ) {
         val source = event.source()?.takeIf { it.isNotBlank() } ?: return
         confirmEvent.toolCalls.forEach { tool ->
@@ -212,7 +164,6 @@ class SubagentHitlPromoter {
                     toolInput = tool.input?.takeIf { it.isNotEmpty() },
                 ),
                 interruptState,
-                state,
             )
         }
     }
@@ -244,14 +195,13 @@ class SubagentHitlPromoter {
     private fun trackNativeToolCall(
         event: AguiEvent.ToolCallStart,
         interruptState: AguiInterruptTracker.State,
-        state: State,
     ) {
         val toolCallId = event.toolCallId()?.takeIf { it.isNotBlank() } ?: return
         val toolName = event.toolCallName()?.takeIf { it.isNotBlank() } ?: return
         if (toolName in AgentPermissionRulesConfiguration.HARNESS_ORCHESTRATION_TOOLS) return
 
         val source = subagentSourceFromRawEvent(event.rawEvent())
-        trackPending(PendingToolCall(toolCallId, toolName, source), interruptState, state)
+        trackPending(PendingToolCall(toolCallId, toolName, source), interruptState)
     }
 
     private fun subagentSourceFromRawEvent(rawEvent: Any?): String {
@@ -259,74 +209,9 @@ class SubagentHitlPromoter {
         return rawEvent.source?.takeIf { it.isNotBlank() } ?: ""
     }
 
-    private fun trackToolCall(
-        event: AguiEvent.Custom,
-        interruptState: AguiInterruptTracker.State,
-        state: State,
-    ) {
-        val payload = asStringKeyMap(event.value()) ?: return
-        if (payload["type"] != TYPE_TOOL_CALL_START) return
-
-        val source = payload["source"] as? String ?: return
-        val toolCallId = payload["toolCallId"] as? String ?: return
-        val toolName = payload["toolName"] as? String ?: return
-        if (toolCallId.isBlank() || toolName.isBlank()) return
-
-        trackPending(PendingToolCall(toolCallId, toolName, source), interruptState, state)
-    }
-
-    private fun trackPending(
-        pending: PendingToolCall,
-        interruptState: AguiInterruptTracker.State,
-        state: State,
-    ) {
+    /** 供 [AguiInterruptTracker] 后续按 toolCallId 反查 toolName 用；本类自身不再依赖此映射做 target 解析。 */
+    private fun trackPending(pending: PendingToolCall, interruptState: AguiInterruptTracker.State) {
         interruptState.toolNameByCallId[pending.toolCallId] = pending.toolName
-        state.pendingBySource.computeIfAbsent(pending.source) { mutableListOf() }.add(pending)
-        state.pendingInOrder.add(pending)
-    }
-
-    private fun resolvePendingTargets(
-        source: String,
-        toolCallCount: Int,
-        interruptState: AguiInterruptTracker.State,
-        state: State,
-    ): List<PendingToolCall> {
-        val count = toolCallCount.coerceAtLeast(1)
-
-        state.pendingBySource[source]?.takeIf { it.isNotEmpty() }?.let { return it.takeLast(count) }
-
-        state.pendingBySource.entries
-            .filter { (key, _) -> sourcesMatch(key, source) }
-            .flatMap { it.value }
-            .takeIf { it.isNotEmpty() }
-            ?.let { return it.takeLast(count) }
-
-        state.pendingInOrder
-            .filter { it.toolName !in AgentPermissionRulesConfiguration.HARNESS_ORCHESTRATION_TOOLS }
-            .takeIf { it.isNotEmpty() }
-            ?.let { return it.takeLast(count) }
-
-        return interruptState.toolNameByCallId.entries
-            .filter { (_, toolName) -> toolName !in AgentPermissionRulesConfiguration.HARNESS_ORCHESTRATION_TOOLS }
-            .takeLast(count)
-            .map { (toolCallId, toolName) ->
-                PendingToolCall(toolCallId, toolName, source)
-            }
-    }
-
-    private fun sourcesMatch(storedSource: String, requestedSource: String): Boolean {
-        if (storedSource == requestedSource) return true
-        val storedTail = storedSource.substringAfterLast('/')
-        val requestedTail = requestedSource.substringAfterLast('/')
-        return storedTail.isNotBlank() && storedTail == requestedTail
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun asStringKeyMap(value: Any?): Map<String, Any?>? {
-        if (value !is Map<*, *>) return null
-        return value.entries.associate { (key, entryValue) ->
-            key.toString() to entryValue
-        }
     }
 
     private fun buildPermissionInterrupt(pending: PendingToolCall): AguiEvent.Interrupt {
@@ -386,9 +271,6 @@ class SubagentHitlPromoter {
     private fun confirmMessage(toolName: String): String = "确认执行 $toolName？"
 
     companion object {
-        private const val NAME_TOOL_CALL = "subagent.tool_call"
-        private const val NAME_REQUIRE_CONFIRM = "subagent.require_confirm"
-        private const val TYPE_TOOL_CALL_START = "TOOL_CALL_START"
         private const val REASON_PERMISSION_CONFIRM = "permission_confirm"
         private const val REASON_TOOL_CALL = "tool_call"
     }

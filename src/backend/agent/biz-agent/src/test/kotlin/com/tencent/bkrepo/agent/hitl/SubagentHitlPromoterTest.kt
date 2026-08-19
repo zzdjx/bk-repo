@@ -26,62 +26,6 @@ class SubagentHitlPromoterTest {
     private val interruptState = AguiInterruptTracker.State()
 
     @Test
-    fun `require confirm promotes to RunFinished interrupt`() {
-        val state = SubagentHitlPromoter.State()
-        val toolCall = customToolCallStart("sub-client", "call-1", "set_download_path")
-        promoter.onEvent(toolCall, interruptState, state)
-
-        val confirm = customRequireConfirm("sub-client", 1)
-        promoter.onEvent(confirm, interruptState, state)
-
-        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", interruptState, state)
-        assertNotNull(runFinished)
-        val outcome = runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome
-        assertEquals(1, outcome.interrupts().size)
-
-        val interrupt = outcome.interrupts()[0]
-        assertEquals("permission_confirm-call-1", interrupt.id())
-        assertEquals("call-1", interrupt.toolCallId())
-        assertEquals("set_download_path", interrupt.metadata()["toolName"])
-        assertEquals("permission_confirm", interrupt.metadata()["agentscope.interruptKind"])
-        assertTrue(state.promoted)
-    }
-
-    @Test
-    fun `require confirm falls back to interrupt tracker when source key mismatches`() {
-        val state = SubagentHitlPromoter.State()
-        promoter.onEvent(
-            customToolCallStart("thread-abc/client", "call-2", "set_download_path"),
-            interruptState,
-            state,
-        )
-
-        val confirm = customRequireConfirm("different-prefix/client", 1)
-        promoter.onEvent(confirm, interruptState, state)
-
-        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", interruptState, state)
-        assertNotNull(runFinished)
-        val interrupt = (runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome).interrupts().single()
-        assertEquals("call-2", interrupt.toolCallId())
-        assertEquals("set_download_path", interrupt.metadata()["toolName"])
-    }
-
-    @Test
-    fun `require confirm falls back to interruptState when tool call custom was missed`() {
-        val state = SubagentHitlPromoter.State()
-        interruptState.toolNameByCallId["call-3"] = "set_download_path"
-
-        val confirm = customRequireConfirm("thread-abc/client", 1)
-        promoter.onEvent(confirm, interruptState, state)
-
-        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", interruptState, state)
-        assertNotNull(runFinished)
-        val interrupt = (runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome).interrupts().single()
-        assertEquals("call-3", interrupt.toolCallId())
-        assertEquals("set_download_path", interrupt.metadata()["toolName"])
-    }
-
-    @Test
     fun `raw RequireUserConfirmEvent promotes without prior tool call custom`() {
         val state = SubagentHitlPromoter.State()
         val toolUse = ToolUseBlock.builder()
@@ -106,7 +50,7 @@ class SubagentHitlPromoterTest {
     }
 
     @Test
-    fun `native ToolCallStart with subagent source supports later require confirm fallback`() {
+    fun `native ToolCallStart with subagent source enriches interrupt tracker toolName`() {
         val state = SubagentHitlPromoter.State()
         val toolCallStart = AguiEvent.ToolCallStart(
             "thread-1",
@@ -119,48 +63,28 @@ class SubagentHitlPromoterTest {
         )
         promoter.onEvent(toolCallStart, interruptState, state)
 
-        val confirm = customRequireConfirm("thread-abc/client", 1)
-        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", interruptState, state)
-        assertNotNull(runFinished)
-        val interrupt = (runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome).interrupts().single()
-        assertEquals("call-native-1", interrupt.toolCallId())
+        assertEquals("set_download_path", interruptState.toolNameByCallId["call-native-1"])
     }
 
     @Test
-    fun `promoted only once`() {
+    fun `promoted only once for the same raw RequireUserConfirmEvent`() {
         val state = SubagentHitlPromoter.State()
-        promoter.onEvent(customToolCallStart("sub-client", "call-1", "set_download_path"), interruptState, state)
-        val confirm = customRequireConfirm("sub-client", 1)
-        promoter.onEvent(confirm, interruptState, state)
+        val toolUse = ToolUseBlock.builder()
+            .id("call-once-1")
+            .name("set_download_path")
+            .input(emptyMap())
+            .build()
+        val raw = AguiEvent.Raw(
+            "thread-1",
+            "run-1",
+            RequireUserConfirmEvent("reply-1", listOf(toolUse)),
+            "thread-abc/client",
+        )
 
-        assertNotNull(promoter.buildRunFinishedIfNeeded(confirm, "t", "r", interruptState, state))
-        assertEquals(null, promoter.buildRunFinishedIfNeeded(confirm, "t", "r", interruptState, state))
+        promoter.onEvent(raw, interruptState, state)
+        assertNotNull(promoter.buildRunFinishedIfNeeded(raw, "thread-1", "run-1", interruptState, state))
+        assertEquals(null, promoter.buildRunFinishedIfNeeded(raw, "thread-1", "run-1", interruptState, state))
     }
-
-    private fun customToolCallStart(source: String, toolCallId: String, toolName: String): AguiEvent.Custom =
-        AguiEvent.Custom(
-            "thread-1",
-            "run-1",
-            "subagent.tool_call",
-            mapOf(
-                "source" to source,
-                "type" to "TOOL_CALL_START",
-                "toolCallId" to toolCallId,
-                "toolName" to toolName,
-            ),
-        )
-
-    private fun customRequireConfirm(source: String, toolCallCount: Int): AguiEvent.Custom =
-        AguiEvent.Custom(
-            "thread-1",
-            "run-1",
-            "subagent.require_confirm",
-            mapOf(
-                "source" to source,
-                "type" to "REQUIRE_USER_CONFIRM",
-                "toolCallCount" to toolCallCount,
-            ),
-        )
 }
 
 class AguiPermissionResumeAdapterTest {

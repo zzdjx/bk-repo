@@ -8,7 +8,6 @@
 
 package com.tencent.bkrepo.agent.service.run
 
-import com.tencent.bkrepo.agent.hitl.AguiResumeContractBridge
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
 import com.tencent.bkrepo.agent.runtime.ActiveRunScope
@@ -27,7 +26,6 @@ class AgentRunLifecycleManager(
     private val agentSessionInterruptor: AgentSessionInterruptor,
     private val agentRunRecordService: AgentRunRecordService,
     private val runEventService: AgentRunEventService,
-    private val resumeContractBridge: AguiResumeContractBridge,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -75,7 +73,6 @@ class AgentRunLifecycleManager(
         if (options.abortAgent) {
             agentSessionInterruptor.interrupt(scope.runtimeContext)
         }
-        resumeContractBridge.finishActiveRun(scope.threadId, scope.runId)
         if (options.disposeSubscription) {
             disposeSubscription(scope, options.abortAgent)
         }
@@ -92,7 +89,6 @@ class AgentRunLifecycleManager(
     fun finishWithError(scope: AgentRunScope, error: Throwable) {
         if (!scope.runFinished.compareAndSet(false, true)) return
         agentSessionInterruptor.interrupt(scope.runtimeContext)
-        resumeContractBridge.finishActiveRun(scope.threadId, scope.runId)
         disposeSubscription(scope, abortAgent = true)
         agentRunRecordService.finishRun(
             runId = scope.runId,

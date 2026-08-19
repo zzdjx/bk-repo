@@ -9,7 +9,6 @@
 package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
-import com.tencent.bkrepo.agent.hitl.AguiResumeContractBridge
 import com.tencent.bkrepo.agent.hitl.SubagentHitlPromoter
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
@@ -32,7 +31,6 @@ class AgentRunEventPipeline(
     private val messageArchiveHandler: AguiMessageArchiveHandler,
     private val outcomeTracker: AgentRunOutcomeTracker,
     private val lifecycleManager: AgentRunLifecycleManager,
-    private val resumeContractBridge: AguiResumeContractBridge,
     private val sseEventWriter: AguiSseEventWriter,
 ) {
 
@@ -61,9 +59,6 @@ class AgentRunEventPipeline(
 
     private fun dispatchEvent(scope: AgentRunScope, event: AguiEvent) {
         val outbound = aguiInterruptTracker.enrichEvent(event, scope.interruptState)
-        if (outbound is AguiEvent.RunFinished) {
-            resumeContractBridge.syncInterruptOutcome(scope.threadId, scope.runId, outbound)
-        }
         outcomeTracker.applyTerminalEvent(outbound, scope.terminalStatus)
         outcomeTracker.capturePendingInterruptIfNeeded(
             threadId = scope.threadId,
