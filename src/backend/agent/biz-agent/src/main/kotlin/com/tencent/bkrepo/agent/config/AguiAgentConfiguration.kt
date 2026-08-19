@@ -76,6 +76,8 @@ class AguiAgentConfiguration {
             .enableReasoning(enableReasoning)
             .emitTokenUsage(false)
             .emitToolCallArgs(true)
+            // 子 Agent 工具/HITL 走 native 事件 + source，便于 SubagentHitlPromoter 从 Raw RequireUserConfirm 直接上冒。
+            .emitSubagentEventsAsNative(true)
             .toolMergeMode(toolMergeMode)
             .build()
     }

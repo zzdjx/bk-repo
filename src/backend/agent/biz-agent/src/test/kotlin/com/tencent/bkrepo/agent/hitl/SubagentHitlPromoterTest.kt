@@ -106,6 +106,27 @@ class SubagentHitlPromoterTest {
     }
 
     @Test
+    fun `native ToolCallStart with subagent source supports later require confirm fallback`() {
+        val state = SubagentHitlPromoter.State()
+        val toolCallStart = AguiEvent.ToolCallStart(
+            "thread-1",
+            "run-1",
+            "call-native-1",
+            "set_download_path",
+            null,
+            io.agentscope.core.event.ToolCallStartEvent("reply-1", "call-native-1", "set_download_path")
+                .withSource("thread-abc/client"),
+        )
+        promoter.onEvent(toolCallStart, interruptState, state)
+
+        val confirm = customRequireConfirm("thread-abc/client", 1)
+        val runFinished = promoter.buildRunFinishedIfNeeded(confirm, "thread-1", "run-1", interruptState, state)
+        assertNotNull(runFinished)
+        val interrupt = (runFinished!!.outcome() as AguiEvent.RunFinishedInterruptOutcome).interrupts().single()
+        assertEquals("call-native-1", interrupt.toolCallId())
+    }
+
+    @Test
     fun `promoted only once`() {
         val state = SubagentHitlPromoter.State()
         promoter.onEvent(customToolCallStart("sub-client", "call-1", "set_download_path"), interruptState, state)

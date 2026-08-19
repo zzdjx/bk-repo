@@ -49,6 +49,7 @@ class SubagentHitlPromoter {
         when (event) {
             is AguiEvent.Custom -> onCustomEvent(event, interruptState, state)
             is AguiEvent.Raw -> onRawEvent(event, interruptState, state)
+            is AguiEvent.ToolCallStart -> trackNativeToolCall(event, interruptState, state)
             else -> Unit
         }
     }
@@ -238,6 +239,24 @@ class SubagentHitlPromoter {
                 interruptState.argsBufferByCallId[callId] = StringBuilder(input.toString())
             }
         }
+    }
+
+    private fun trackNativeToolCall(
+        event: AguiEvent.ToolCallStart,
+        interruptState: AguiInterruptTracker.State,
+        state: State,
+    ) {
+        val toolCallId = event.toolCallId()?.takeIf { it.isNotBlank() } ?: return
+        val toolName = event.toolCallName()?.takeIf { it.isNotBlank() } ?: return
+        if (toolName in AgentPermissionRulesConfiguration.HARNESS_ORCHESTRATION_TOOLS) return
+
+        val source = subagentSourceFromRawEvent(event.rawEvent())
+        trackPending(PendingToolCall(toolCallId, toolName, source), interruptState, state)
+    }
+
+    private fun subagentSourceFromRawEvent(rawEvent: Any?): String {
+        if (rawEvent !is io.agentscope.core.event.AgentEvent) return ""
+        return rawEvent.source?.takeIf { it.isNotBlank() } ?: ""
     }
 
     private fun trackToolCall(
