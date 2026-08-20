@@ -475,7 +475,12 @@ class SubagentHitlPromoter(
         )
     }
 
-    private fun buildToolCallInterrupt(
+    /**
+     * 供本类内部（[buildFromToolSuspended]）与 [SubagentConfirmResumeExecutor] 复用：把子代理挂起的
+     * 工具调用统一编码为"请客户端本地执行"形状的 `AguiEvent.Interrupt`（`reason=tool_call`，不带
+     * `agentscope.interruptKind=permission_confirm`，因此不会被误判为需要再次弹确认框）。
+     */
+    internal fun buildToolCallInterrupt(
         toolCallId: String,
         use: ToolUseBlock?,
         result: ToolResultBlock,

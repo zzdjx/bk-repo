@@ -21,15 +21,38 @@ import org.springframework.stereotype.Component
  * 标准 [io.agentscope.core.agui.converter.AguiMessageConverter] 会把 resume 落成 ToolResult Msg，
  * 无法解除 PERMISSION_ASKING；需在 [PermissionConfirmResumeMiddleware] 注入
  * [io.agentscope.core.message.Msg.METADATA_CONFIRM_RESULTS]。
+ *
+ * ## 子代理级确认需要额外路由，不能走 [PermissionConfirmResumeMiddleware]
+ *
+ * [PermissionConfirmResumeMiddleware] 把 confirmMsg 注入的是**协调者自己**这次调用的输入——只有当
+ * ASKING 的工具调用本身挂在协调者自己身上时才有效。而 `set_download_path` 这类写操作实际 ASKING 在
+ * `client` 等声明式子代理内部（[com.tencent.bkrepo.agent.tool.local.ExternalLocalTool] 的
+ * `checkPermissions` 自检），协调者自己并没有对应的 pending 工具调用，往协调者输入里塞 confirmMsg 只会
+ * 变成一条对大模型不可见的空文本消息，导致大模型把这一轮当成空输入随意作答、会话也无法正常收尾。
+ *
+ * 因此这里对 [SubagentHitlPromoter] 促升出的、metadata 带 `agentscope.interruptKind=permission_confirm`
+ * 与 `subagentSource=<parentSessionId>/<agentId>` 的 pending interrupt 做特殊识别：解析出目标
+ * `agentId`，通过 [subagentResumeTargets] 返回，交由
+ * [com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 路由给
+ * [SubagentConfirmResumeExecutor] 直接重新驱动该子代理会话续跑，完全跳过协调者的大模型推理——
+ * 不依赖大模型"猜到"要重新调用 `agent_spawn`。协调者自身的 ASK（若未来出现）仍走 [confirmResults] +
+ * [PermissionConfirmResumeMiddleware] 的原有路径。
  */
 @Component
 class AguiPermissionResumeAdapter(
     private val interruptStateRepository: AgentInterruptStateRepository,
 ) {
 
+    /** 委派给子代理（如 `client`）的写操作确认恢复目标：由哪个子代理续跑、带哪个确认结果。 */
+    data class SubagentResumeTarget(
+        val agentId: String,
+        val confirmResult: ConfirmResult,
+    )
+
     data class AdaptedRun(
         val input: RunAgentInput,
         val confirmResults: List<ConfirmResult>,
+        val subagentResumeTargets: List<SubagentResumeTarget> = emptyList(),
     )
 
     fun adapt(input: RunAgentInput): AdaptedRun {
@@ -47,6 +70,7 @@ class AguiPermissionResumeAdapter(
         }
 
         val confirmResults = mutableListOf<ConfirmResult>()
+        val subagentResumeTargets = mutableListOf<SubagentResumeTarget>()
         val remainingResume = mutableListOf<AguiResume>()
         for (entry in input.resume) {
             val snapshot = approvalById[entry.interruptId]
@@ -55,15 +79,19 @@ class AguiPermissionResumeAdapter(
                 continue
             }
             val approved = extractApproved(entry.payload) == true
-            confirmResults.add(
-                ConfirmResult(
-                    approved,
-                    buildToolUseBlock(snapshot),
-                ),
+            val confirmResult = ConfirmResult(
+                approved,
+                buildToolUseBlock(snapshot),
             )
+            val subagentId = subagentAgentIdOf(snapshot)
+            if (subagentId != null) {
+                subagentResumeTargets.add(SubagentResumeTarget(subagentId, confirmResult))
+            } else {
+                confirmResults.add(confirmResult)
+            }
         }
 
-        if (confirmResults.isEmpty()) {
+        if (confirmResults.isEmpty() && subagentResumeTargets.isEmpty()) {
             return AdaptedRun(input, emptyList())
         }
 
@@ -81,7 +109,19 @@ class AguiPermissionResumeAdapter(
                 .resume(remainingResume)
                 .build()
         }
-        return AdaptedRun(adaptedInput, confirmResults)
+        return AdaptedRun(adaptedInput, confirmResults, subagentResumeTargets)
+    }
+
+    /**
+     * 若该 pending interrupt 来自 [SubagentHitlPromoter] 促升的子代理级 `permission_confirm`
+     * （metadata 携带 `agentscope.interruptKind=permission_confirm` 与 `subagentSource=<parentSessionId>/<agentId>`），
+     * 解析出目标 `agentId`；否则返回 null（视为协调者自身的 ASK，走原有 [PermissionConfirmResumeMiddleware] 路径）。
+     */
+    private fun subagentAgentIdOf(snapshot: com.tencent.bkrepo.agent.session.PendingInterruptSnapshot): String? {
+        val metadata = snapshot.metadata ?: return null
+        if (metadata["agentscope.interruptKind"] != "permission_confirm") return null
+        val source = metadata["subagentSource"] as? String ?: return null
+        return source.substringAfterLast('/').takeIf { it.isNotBlank() }
     }
 
     @Suppress("UNCHECKED_CAST")
