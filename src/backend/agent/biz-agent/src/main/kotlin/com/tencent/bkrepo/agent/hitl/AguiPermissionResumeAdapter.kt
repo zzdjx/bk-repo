@@ -43,10 +43,18 @@ class AguiPermissionResumeAdapter(
     private val interruptStateRepository: AgentInterruptStateRepository,
 ) {
 
-    /** 委派给子代理（如 `client`）的写操作确认恢复目标：由哪个子代理续跑、带哪个确认结果。 */
+    /**
+     * 委派给子代理（如 `client`）的写操作确认恢复目标：由哪个子代理续跑、带哪个确认结果。
+     *
+     * [spawnLabel] 是协调者当初调用 `agent_spawn` 时（如果有）大模型自主填写的可选 `label` 参数，
+     * 由 [SubagentHitlPromoter] 在促升时从协调者自己的原始工具调用参数里提取并写入 pending interrupt
+     * 快照的 `subagentSpawnLabel` 元数据——[SubagentConfirmResumeExecutor] 必须用同一个 label 重算
+     * sessionId，否则在带 label 的委派场景下会打到一个全新、空上下文的子代理会话。
+     */
     data class SubagentResumeTarget(
         val agentId: String,
         val confirmResult: ConfirmResult,
+        val spawnLabel: String? = null,
     )
 
     data class AdaptedRun(
@@ -85,7 +93,8 @@ class AguiPermissionResumeAdapter(
             )
             val subagentId = subagentAgentIdOf(snapshot)
             if (subagentId != null) {
-                subagentResumeTargets.add(SubagentResumeTarget(subagentId, confirmResult))
+                val spawnLabel = snapshot.metadata?.get("subagentSpawnLabel") as? String
+                subagentResumeTargets.add(SubagentResumeTarget(subagentId, confirmResult, spawnLabel))
             } else {
                 confirmResults.add(confirmResult)
             }

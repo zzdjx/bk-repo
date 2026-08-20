@@ -115,7 +115,7 @@ class SubagentHitlPromoter(
             is AguiEvent.Custom ->
                 buildFromRequireConfirm(event, threadId, runId, interruptState, state)
                     ?: buildFromSuspendedToolResult(event, threadId, runId, state)
-            is AguiEvent.Raw -> buildFromRawEvent(event, threadId, runId, state)
+            is AguiEvent.Raw -> buildFromRawEvent(event, threadId, runId, interruptState, state)
             else -> null
         }
     }
@@ -151,10 +151,12 @@ class SubagentHitlPromoter(
         event: AguiEvent.Raw,
         threadId: String,
         runId: String,
+        interruptState: AguiInterruptTracker.State,
         state: State,
     ): AguiEvent.RunFinished? {
         return when (val agentEvent = event.event()) {
-            is RequireUserConfirmEvent -> buildFromRawRequireConfirm(event, agentEvent, threadId, runId, state)
+            is RequireUserConfirmEvent ->
+                buildFromRawRequireConfirm(event, agentEvent, threadId, runId, interruptState, state)
             is AgentResultEvent -> buildFromToolSuspended(event, threadId, runId, state)
             else -> null
         }
@@ -184,7 +186,7 @@ class SubagentHitlPromoter(
             return null
         }
 
-        val interrupts = targets.map { pendingCall -> buildPermissionInterrupt(pendingCall) }
+        val interrupts = targets.map { pendingCall -> buildPermissionInterrupt(pendingCall, interruptState) }
         state.promoted = true
         logger.info(
             "promoted subagent permission HITL: source={} toolCalls={}",
@@ -199,6 +201,7 @@ class SubagentHitlPromoter(
         confirmEvent: RequireUserConfirmEvent,
         threadId: String,
         runId: String,
+        interruptState: AguiInterruptTracker.State,
         state: State,
     ): AguiEvent.RunFinished? {
         val source = event.source()?.takeIf { it.isNotBlank() } ?: return null
@@ -215,7 +218,7 @@ class SubagentHitlPromoter(
             source,
             targets.map { it.toolName },
         )
-        val interrupts = targets.map { buildPermissionInterrupt(it) }
+        val interrupts = targets.map { buildPermissionInterrupt(it, interruptState) }
         return runFinished(threadId, runId, interrupts)
     }
 
@@ -457,13 +460,17 @@ class SubagentHitlPromoter(
         }
     }
 
-    private fun buildPermissionInterrupt(pending: PendingToolCall): AguiEvent.Interrupt {
+    private fun buildPermissionInterrupt(
+        pending: PendingToolCall,
+        interruptState: AguiInterruptTracker.State,
+    ): AguiEvent.Interrupt {
         val metadata = linkedMapOf<String, Any?>(
             "agentscope.interruptKind" to "permission_confirm",
             "toolName" to pending.toolName,
             "subagentSource" to pending.source,
         )
         pending.toolInput?.let { metadata["toolInput"] = it }
+        subagentSpawnLabel(pending.source, interruptState)?.let { metadata["subagentSpawnLabel"] = it }
         return AguiEvent.Interrupt(
             interruptId(pending.toolCallId, REASON_PERMISSION_CONFIRM),
             REASON_PERMISSION_CONFIRM,
@@ -473,6 +480,29 @@ class SubagentHitlPromoter(
             null,
             metadata,
         )
+    }
+
+    /**
+     * 从协调者**自己**这次调用 `agent_spawn` 的原始工具调用参数里，找出（如果有）大模型自主填写的
+     * `label` 可选参数，供 [SubagentConfirmResumeExecutor] 在 resume 时精确重算出与
+     * [io.agentscope.harness.agent.tool.AgentSpawnTool] 完全一致的子代理 sessionId（详见该类类注释
+     * 「关键前提」）。
+     *
+     * `agent_spawn` 是协调者自己的原生工具调用（Harness 编排工具，不经 [SubagentEventConverter] 降级），
+     * 其 `ToolCallStart`/`ToolCallArgs` 在 [AguiInterruptTracker.onEvent] 里本就会被无差别记录进
+     * `toolNameByCallId`/`argsBufferByCallId`（该处不区分工具类型），且这一步发生在协调者阻塞调用
+     * `agent_spawn` **之前**——不受本类促升成功后 `lifecycleManager.finish(abortAgent = true)`
+     * 提前终止协调者自身推理流程的影响，因此比事后从任何持久化状态里反查更可靠。
+     */
+    private fun subagentSpawnLabel(source: String, interruptState: AguiInterruptTracker.State): String? {
+        val agentId = source.substringAfterLast('/').takeIf { it.isNotBlank() } ?: return null
+        return interruptState.toolNameByCallId.entries
+            .asSequence()
+            .filter { (_, toolName) -> toolName == AGENT_SPAWN_TOOL_NAME }
+            .mapNotNull { (callId, _) -> interruptState.argsBufferByCallId[callId]?.toString() }
+            .filter { args -> AGENT_SPAWN_AGENT_ID_ARG.find(args)?.groupValues?.get(1) == agentId }
+            .mapNotNull { args -> AGENT_SPAWN_LABEL_ARG.find(args)?.groupValues?.get(1) }
+            .firstOrNull()
     }
 
     /**
@@ -528,5 +558,8 @@ class SubagentHitlPromoter(
         private const val STATE_SUSPENDED = "RUNNING"
         private const val REASON_PERMISSION_CONFIRM = "permission_confirm"
         private const val REASON_TOOL_CALL = "tool_call"
+        private const val AGENT_SPAWN_TOOL_NAME = "agent_spawn"
+        private val AGENT_SPAWN_AGENT_ID_ARG = Regex(""""agent_id"\s*:\s*"([^"]*)"""")
+        private val AGENT_SPAWN_LABEL_ARG = Regex(""""label"\s*:\s*"([^"]*)"""")
     }
 }

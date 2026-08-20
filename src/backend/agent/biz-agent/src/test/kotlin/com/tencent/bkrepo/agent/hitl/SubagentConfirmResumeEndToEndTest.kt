@@ -100,6 +100,13 @@ class SubagentConfirmResumeEndToEndTest {
         resumeIdempotencyStore = InMemoryAgentResumeIdempotencyStore(),
     )
 
+    /**
+     * 协调者真实调用 `agent_spawn` 时是否带 `label` 参数——由各测试用例设置，模拟大模型自主填写该
+     * 可选参数的场景。见 [SubagentConfirmResumeExecutor] 类注释「关键前提」：带 label 时
+     * `AgentSpawnTool` 算出的真实子代理 sessionId 与不带 label 时完全不同。
+     */
+    private var agentSpawnLabel: String? = null
+
     @Test
     fun `client子Agent确认恢复后应绕开协调者直接续跑并再次挂起给客户端执行`(@TempDir workspace: Path) {
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -188,6 +195,77 @@ class SubagentConfirmResumeEndToEndTest {
             }
             assertTrue(round2Interrupts.any { it.reason() == "tool_call" }) {
                 "第二轮应是「请客户端本地执行」形状的 interrupt（reason=tool_call），实际 interrupts=$round2Interrupts"
+            }
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    /**
+     * 回归验证：协调者调用 `agent_spawn` 时若带了可选的 `label` 参数（大模型自主填写，`agent_spawn`
+     * 工具 schema 本身就开放了这个入参），[SubagentConfirmResumeExecutor] 仍应正确找回同一个 `client`
+     * 子代理会话续跑下去——而不是像修复前那样，盲目重算不带 label 的确定性哈希，打到一个全新、空上下文
+     * 的子代理会话，导致模型只能按系统提示词自我介绍、会话无法正常收尾（生产环境复现过的真实故障）。
+     */
+    @Test
+    fun `agent_spawn带label时仍应正确找回子代理会话而不是新开空会话自我介绍`(@TempDir workspace: Path) {
+        agentSpawnLabel = "download-path-change"
+        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange -> respondFromStub(exchange) }
+        server.start()
+        try {
+            val coordinator = buildCoordinator(workspace)
+
+            val round1Events = runCoordinatorAndCollectAguiEvents(coordinator)
+            val round1Replay = replayThroughRealHitlPipelineAndPersist(round1Events)
+            assertNotNull(round1Replay.promotedRunFinished) {
+                "第一轮应促升出 RUN_FINISHED(interrupt)，否则第二轮无从谈起。" +
+                    "\n原始事件序列：${round1Events.map { it.describe() }}"
+            }
+
+            val persistedSession = interruptStateRepository.getPendingInterrupt(threadId)
+            val persistedSnapshot = persistedSession?.interrupts?.singleOrNull()
+            assertNotNull(persistedSnapshot) { "持久化的 pending interrupt 快照应唯一，实际=${persistedSession?.interrupts}" }
+
+            val resumeInput = RunAgentInput.builder()
+                .threadId(threadId)
+                .runId(round2RunId)
+                .resume(
+                    listOf(
+                        AguiResume(
+                            persistedSnapshot!!.id,
+                            AguiResume.STATUS_RESOLVED,
+                            mapOf("approved" to true),
+                        ),
+                    ),
+                )
+                .build()
+            val target = AguiPermissionResumeAdapter(interruptStateRepository).adapt(resumeInput)
+                .subagentResumeTargets.singleOrNull()
+            assertNotNull(target) { "Adapter 应解析出唯一的子代理续跑目标" }
+
+            val executor = SubagentConfirmResumeExecutor(coordinator, SubagentHitlPromoter(frontendToolCatalog))
+            val round2Events = executor.resume(threadId, round2RunId, userId, target!!)
+                .collectList()
+                .block(Duration.ofSeconds(30))
+                .orEmpty()
+
+            val round2RunFinished = round2Events.filterIsInstance<AguiEvent.RunFinished>().singleOrNull()
+            assertNotNull(round2RunFinished) {
+                "第二轮应产出唯一的 RunFinished 事件，实际 round2Events=${round2Events.map { it.describe() }}"
+            }
+            val round2Outcome = round2RunFinished!!.outcome()
+            assertTrue(round2Outcome is AguiEvent.RunFinishedInterruptOutcome) {
+                "agent_spawn 带 label 时，确认同意后仍应真正找回子代理会话、放行 set_download_path 再次挂起，" +
+                    "而不是打到全新空会话只能自我介绍。实际 outcome=$round2Outcome，" +
+                    "events=${round2Events.map { it.describe() }}"
+            }
+            val round2Interrupts = (round2Outcome as AguiEvent.RunFinishedInterruptOutcome).interrupts()
+            assertTrue(round2Interrupts.any { it.metadata()?.get("toolName") == "set_download_path" }) {
+                "第二轮促升出的 interrupt 应关联到 set_download_path，实际 interrupts=$round2Interrupts"
+            }
+            assertTrue(round2Interrupts.any { it.reason() == "tool_call" }) {
+                "应是「请客户端本地执行」形状的 interrupt（reason=tool_call），实际 interrupts=$round2Interrupts"
             }
         } finally {
             server.stop(0)
@@ -374,6 +452,13 @@ class SubagentConfirmResumeEndToEndTest {
     private fun isMemoryExtractionRequest(requestBody: String): Boolean =
         requestBody.contains("memory extraction assistant")
 
+    /** 拼出 `agent_spawn` 工具调用参数，按需附带 [agentSpawnLabel]（模拟大模型自主填写 label）。 */
+    private fun buildAgentSpawnArgumentsJson(): String {
+        val labelPart = agentSpawnLabel?.let { ""","label":"$it"""" }.orEmpty()
+        return """{"agent_id":"client","task":"帮用户把全局下载目录改到 $downloadPath",""" +
+            """"timeout_seconds":30$labelPart}"""
+    }
+
     private fun respondFromStub(exchange: HttpExchange) {
         exchange.use {
             val requestBody = it.requestBody.readBytes().toString(StandardCharsets.UTF_8)
@@ -387,8 +472,7 @@ class SubagentConfirmResumeEndToEndTest {
                     1 -> toolCallChunks(
                         callId = "call_spawn_1",
                         toolName = "agent_spawn",
-                        argumentsJson = """{"agent_id":"client","task":"帮用户把全局下载目录改到 $downloadPath",""" +
-                            """"timeout_seconds":30}""",
+                        argumentsJson = buildAgentSpawnArgumentsJson(),
                     )
                     2 -> toolCallChunks(
                         callId = "call_setpath_1",

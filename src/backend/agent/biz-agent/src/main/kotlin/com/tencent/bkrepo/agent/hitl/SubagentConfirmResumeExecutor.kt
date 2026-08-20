@@ -36,7 +36,7 @@ import java.util.UUID
  * 自己没有对应的 pending 工具调用；如果依旧把确认结果只喂给协调者，大模型只会看到一条空文本消息，只能
  * 随意作答（例如自我介绍），会话也无法正常收尾——这是本类要解决的问题。
  *
- * ## 关键前提：必须能独立算出与第一次 `agent_spawn` 完全相同的子代理 sessionId
+ * ## 关键前提：必须找回与第一次 `agent_spawn` 完全相同的子代理 sessionId
  *
  * [io.agentscope.core.ReActAgent] 的状态是按 `RuntimeContext.getSessionId()`（经
  * `activateSlotForContext`）寻址持久化/恢复的，**与创建 Agent 实例时用的 `RuntimeContext` 无关**——
@@ -47,10 +47,33 @@ import java.util.UUID
  * `(userId, threadId)` 就能找回子代理状态"）实测失败后才发现的真实框架行为。
  *
  * 因此前提是：[com.tencent.bkrepo.agent.agent.AgentFactory] 必须给 `client` 的
- * `SubagentDeclaration` 配置 `persistSession(true)`，这样 `AgentSpawnTool` 改用
- * `"sub-" + SessionIdUtils.deterministicHash(threadId, agentId)`（未带 label 时）——纯函数，本类可以
- * 用同样的 `threadId`/`agentId` 独立重算出一模一样的字符串，从而在 resume 时用它作为
- * `ctx.sessionId` 精确定位回第一次挂起时写入 [io.agentscope.core.state.AgentStateStore] 的那份状态。
+ * `SubagentDeclaration` 配置 `persistSession(true)`，这样 `AgentSpawnTool` 改用确定性哈希
+ * `"sub-" + SessionIdUtils.deterministicHash(threadId, agentId[, label])`。
+ *
+ * ## 带 label 的委派场景：曾经复现过的生产故障（不能盲目重算不带 label 的哈希）
+ *
+ * `agent_spawn` 工具本身向大模型开放了一个可选的 `label` 入参（"Optional human-readable label for
+ * referencing via agent_send"）。只要协调者这次调用时带了任意 label 值，真实哈希输入就变成三元组
+ * `(threadId, agentId, label)` 而不是二元组。本类最初版本无条件重算不带 label 的二元组哈希，在真实
+ * 生产环境里协调者的大模型确实自主填写了 label 时，续跑会打到一个全新、空上下文的子代理会话——
+ * 该会话除了一条空文本 + 不可见的确认结果 metadata 外没有任何真实任务信息，模型只能按系统提示词
+ * 自我介绍，会话也无法正常收尾（症状与 Bug 3 修复前完全一致，只是这次是子代理而不是协调者在自我
+ * 介绍）。曾尝试事后从协调者自己持久化的 `AgentState.context` 里反查 `agent_spawn` 工具调用的返回
+ * 文本（其中固定含 `session_id: sub-xxxx` 一行）来找回真值，但这条路径不可靠：本类促升出
+ * `permission_confirm` interrupt 后，[com.tencent.bkrepo.agent.service.run.AgentRunEventPipeline]
+ * 会对协调者自身的推理流程调用 `lifecycleManager.finish(abortAgent = true)`——这个取消发生在
+ * `agent_spawn` 阻塞调用内部的子代理事件被实时转发观察到「挂起」信号之后，此时 `agent_spawn` 工具
+ * 方法本身可能仍未返回，协调者自己那一步「把 `agent_spawn` 的 `ToolResultBlock` 写入 context 并落盘」
+ * 大概率还没跑到，回读回来的协调者状态里往往根本没有这次 `agent_spawn` 的结果（用回归测试实测验证
+ * 过：不带 label 时能"侥幸"通过是因为回退到旧哈希本就正确，带 label 时必然拿不到东西、只能回退到
+ * 错误的哈希）。
+ *
+ * 因此正确的做法是**在促升发生的那一刻、而不是事后**捕获 label：[SubagentHitlPromoter] 在构建
+ * `permission_confirm` interrupt 时，直接从协调者自己这次 `agent_spawn` 工具调用的原生
+ * `ToolCallStart`/`ToolCallArgs` 参数文本里解析 `label`（这一步发生在 `agent_spawn` 阻塞执行**之前**，
+ * 不受后续 `abortAgent=true` 取消的影响），写入 pending interrupt 快照的 `subagentSpawnLabel`
+ * 元数据；[AguiPermissionResumeAdapter] 在 resume 时把它透传进 [SubagentResumeTarget]；本类只需要
+ * 原样使用这个 label 重算哈希，不需要（也不应该）再去猜测或反查。
  *
  * ## 为什么直接调用 `agent.call(msgs, ctx)` 就能解除 ASKING，不需要 middleware
  *
@@ -87,11 +110,7 @@ class SubagentConfirmResumeExecutor(
             .textContent("")
             .metadata(mapOf(Msg.METADATA_CONFIRM_RESULTS to listOf(target.confirmResult)))
             .build()
-        // 必须与 AgentSpawnTool 在 persistSession(true) 时使用的算法完全一致，否则找不回挂起状态——
-        // 见类注释「关键前提」。要求 AgentFactory 已经给该 agentId 的 SubagentDeclaration 配置了
-        // persistSession(true)，且 agent_spawn 调用时协调者/大模型没有传自定义 label（label 会改变哈希
-        // 输入，本类无法获知那次调用用了什么 label，因此不支持带 label 的委派场景）。
-        val childSessionId = "sub-" + SessionIdUtils.deterministicHash(threadId, target.agentId)
+        val childSessionId = "sub-" + deterministicHash(threadId, target.agentId, target.spawnLabel)
         val childCtx = RuntimeContext.builder(parentRc)
             .sessionId(childSessionId)
             .userId(userId)
@@ -119,6 +138,18 @@ class SubagentConfirmResumeExecutor(
                 )
             }
     }
+
+    /**
+     * 与 `AgentSpawnTool.deterministicHash` 完全一致的分支：带 label 时哈希三元组，不带时二元组——
+     * 详见类注释「带 label 的委派场景」。[label] 来自 [SubagentHitlPromoter] 在促升时从协调者自己
+     * 原生的 `agent_spawn` 工具调用参数里提取的真值，本类不重新猜测。
+     */
+    private fun deterministicHash(threadId: String, agentId: String, label: String?): String =
+        if (label != null) {
+            SessionIdUtils.deterministicHash(threadId, agentId, label)
+        } else {
+            SessionIdUtils.deterministicHash(threadId, agentId)
+        }
 
     /** 与 [io.agentscope.harness.agent.subagent.DefaultAgentManager.invokeAgent] 相同的类型分支处理。 */
     private fun callAgent(agent: Agent, msg: Msg, ctx: RuntimeContext): Mono<Msg>? = when (agent) {
