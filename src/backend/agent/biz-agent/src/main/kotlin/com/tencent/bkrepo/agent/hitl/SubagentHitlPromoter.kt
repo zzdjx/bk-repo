@@ -9,6 +9,7 @@
 package com.tencent.bkrepo.agent.hitl
 
 import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
+import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
 import io.agentscope.core.agui.event.AguiEvent
 import io.agentscope.core.event.AgentResultEvent
 import io.agentscope.core.event.RequireUserConfirmEvent
@@ -29,9 +30,53 @@ import org.springframework.stereotype.Component
  * 自行实现事件过滤。代价是 Custom 降级会丢失 toolCallId/toolName 等细节，因此这里按 `source` 关联
  * 前置的 `subagent.tool_call` 事件补全（`onRawEvent`/`ToolCallStart` 分支为兼容未来切回 native 时保留）。
  * 父 run 在 `agent_spawn` 同步阻塞期间也不会自然发出 interrupt 终态，需要本类合成一次 `RUN_FINISHED(interrupt)`。
+ *
+ * ## `agent_spawn` 同步路径下 `TOOL_SUSPENDED` 永远拿不到的已确认根因（上游 agentscope-harness/core
+ * 2.0.1 的框架行为，见 `AgentSpawnSetDownloadPathSuspensionEndToEndTest` 的端到端回归测试）
+ *
+ * `agent_spawn` 走 `AgentSpawnTool.execLocalSync` → `DefaultAgentManager.invokeAgent` →
+ * `ReActAgent.call()` → `callInternal()`。`callInternal` 对 `buildAgentStream(...)` 做的是局部订阅，
+ * 其中真正携带 `GenerateReason.TOOL_SUSPENDED` 的 `AgentResultEvent`（以及紧随其后的 `AgentEndEvent`）
+ * 是直接调用 `buildAgentStream` 自己局部捕获的 `sink`，完全不经过
+ * [io.agentscope.core.event.AgentEventEmitter.fromForwardingContext]（`agent_spawn` 通过
+ * `FORWARDING_CONTEXT_KEY` 注入、专门用来把子 Agent 事件转发进父 run 事件流的机制）。因此
+ * [onAgentResultRaw]/[buildFromToolSuspended] 依赖监听的 `AgentResultEvent` **永远不会到达这里**——
+ * 这不是本类促升逻辑的 bug，而是框架同步委派路径本身丢失了子 Agent 的挂起信号。这两个方法作为面向未来
+ * （框架修复后，或 `emitSubagentEventsAsNative=true` 时）的兼容分支保留，但当前生产链路不会命中。
+ *
+ * 该 bug 属于上游开源库 `io.agentscope:agentscope-harness`/`agentscope-core`（`agentscope-ai/
+ * agentscope-java`，Apache 2.0），bk-repo 无法直接修改其字节码，因此这里换一条**已经在事件流里、
+ * 不依赖 `AgentResultEvent` 的路径**做变通：细粒度的 `ModelCallStart`/`ToolCall*`/`ToolResult*` 事件
+ * 是 reasoning/acting 内部通过 `AgentEventEmitter` 发出的，会正确走 forwarding 转发并被
+ * `SubagentEventConverter` 降级为 `Custom(subagent.tool_result, ...)` 送达这里；而挂起结果的
+ * `ToolResultEndEvent.state` 在 [io.agentscope.core.ReActAgent] 内部由 `determineToolResultState`
+ * 计算——`result.isSuspended() == true` 时恒为 `RUNNING`（成功是 SUCCESS，失败是 ERROR，用户拒绝是
+ * DENIED，唯独挂起是 RUNNING）。因此 [buildFromSuspendedToolResult] 直接监听
+ * `Custom(subagent.tool_result, {type=TOOL_RESULT_END, state=RUNNING})`，一旦出现就等价于子 Agent
+ * 的这次工具调用被挂起、需要客户端确认/执行，据此合成 `RUN_FINISHED(interrupt)`——完全在 bk-repo 自己
+ * 的代码里解决，不依赖上游修复。
+ *
+ * ## 工具调用其实是两条完全不同的路径，[buildFromSuspendedToolResult] 只应该响应其中一条
+ *
+ * - **后台（服务端）工具路径**：[com.tencent.bkrepo.agent.tool.domain.DomainToolRegistrar] 注册的
+ *   领域工具（`list_repositories`/`get_transfer_task_status` 等），是普通 Java 方法，在服务端
+ *   `ToolExecutor.executeCore` 里同步跑到底，正常结束只会落到 SUCCESS/ERROR，`isSuspended()`
+ *   永远是 false，因此 `ToolResultEndEvent.state` 永远不会是 RUNNING。
+ * - **客户端本地工具路径**：[com.tencent.bkrepo.agent.tool.frontend.FrontendToolRegistrar] 用
+ *   [io.agentscope.core.tool.SchemaOnlyTool]（或
+ *   [com.tencent.bkrepo.agent.tool.local.ExternalLocalTool]）注册的 frontend tools（如
+ *   `set_download_path`），`ToolBase.externalTool=true`，服务端 `ToolExecutor.executeCore` 会直接
+ *   短路成 `ToolResultBlock.suspended(...)`，从不真正执行——这才是 `state=RUNNING` 的唯一来源。
+ *
+ * 二者共用同一个 `Custom(subagent.tool_result, TOOL_RESULT_END, ...)` 事件形态，理论上
+ * `state=RUNNING` 已经是"仅可能来自客户端本地工具"的唯一编码，但这里仍然显式用
+ * [frontendToolCatalog] 校验 `toolName` 确实在客户端本地工具 allowlist 里才促升——一是让"两条路径"
+ * 在代码里也是显式的、不是靠隐含推理成立的；二是防御未来上游/领域工具行为变化时把后台工具误判成挂起。
  */
 @Component
-class SubagentHitlPromoter {
+class SubagentHitlPromoter(
+    private val frontendToolCatalog: FrontendToolCatalog,
+) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -67,7 +112,9 @@ class SubagentHitlPromoter {
     ): AguiEvent.RunFinished? {
         if (state.promoted) return null
         return when (event) {
-            is AguiEvent.Custom -> buildFromRequireConfirm(event, threadId, runId, interruptState, state)
+            is AguiEvent.Custom ->
+                buildFromRequireConfirm(event, threadId, runId, interruptState, state)
+                    ?: buildFromSuspendedToolResult(event, threadId, runId, state)
             is AguiEvent.Raw -> buildFromRawEvent(event, threadId, runId, state)
             else -> null
         }
@@ -78,6 +125,11 @@ class SubagentHitlPromoter {
         interruptState: AguiInterruptTracker.State,
         state: State,
     ) {
+        // TODO 临时诊断日志：定位 agent_spawn 同步阻塞期间子 Agent Custom 事件是否实际到达本类。
+        // 确认 HITL 促升链路打通后可删除。
+        if (event.name() == NAME_LIFECYCLE || event.name() == NAME_TOOL_CALL || event.name() == NAME_REQUIRE_CONFIRM) {
+            logger.info("subagent custom event received: name={} value={}", event.name(), event.value())
+        }
         when (event.name()) {
             NAME_TOOL_CALL -> trackToolCall(event, interruptState, state)
         }
@@ -196,6 +248,78 @@ class SubagentHitlPromoter {
             interrupts.map { it.metadata()["toolName"] },
         )
         return runFinished(threadId, runId, interrupts)
+    }
+
+    /**
+     * 监听 `Custom(subagent.tool_result, {type=TOOL_RESULT_END, state=RUNNING, ...})`。
+     *
+     * `state=RUNNING` 是 [io.agentscope.core.ReActAgent] 内部 `determineToolResultState` 对
+     * `ToolResultBlock.isSuspended()==true` 的唯一编码（成功/失败/拒绝分别是 SUCCESS/ERROR/DENIED），
+     * 因此只要观测到这个组合，就等价于子 Agent 这次工具调用被挂起、等待客户端执行——
+     * 不需要（也拿不到）永远不会到达的 `AgentResultEvent(TOOL_SUSPENDED)`。
+     */
+    private fun buildFromSuspendedToolResult(
+        event: AguiEvent.Custom,
+        threadId: String,
+        runId: String,
+        state: State,
+    ): AguiEvent.RunFinished? {
+        if (event.name() != NAME_TOOL_RESULT) return null
+        val payload = asStringKeyMap(event.value()) ?: return null
+        if (payload["type"] != TYPE_TOOL_RESULT_END) return null
+        if (payload["state"] != STATE_SUSPENDED) return null
+
+        val toolCallId = payload["toolCallId"] as? String ?: return null
+        val toolName = payload["toolName"] as? String ?: return null
+        val source = payload["source"] as? String ?: ""
+        if (toolCallId.isBlank() || toolName.isBlank()) return null
+
+        // 只信任客户端本地工具路径：后台领域工具永远不会真正挂起（isSuspended()==false），
+        // state=RUNNING 理论上不会出现在它们身上，这里显式校验只是让这条边界条件在代码里可见。
+        if (frontendToolCatalog.find(toolName) == null) {
+            logger.warn(
+                "ignoring RUNNING tool_result for non-frontend tool (unexpected, backend tools " +
+                    "should never report isSuspended()): toolCallId={} toolName={} source={}",
+                toolCallId,
+                toolName,
+                source,
+            )
+            return null
+        }
+
+        val pending = state.pendingInOrder.find { it.toolCallId == toolCallId }
+        val interrupt = buildSuspendedToolResultInterrupt(toolCallId, toolName, source, pending?.toolInput)
+
+        state.promoted = true
+        logger.info(
+            "promoted subagent suspended tool_result HITL: source={} toolCallId={} toolName={}",
+            source,
+            toolCallId,
+            toolName,
+        )
+        return runFinished(threadId, runId, listOf(interrupt))
+    }
+
+    private fun buildSuspendedToolResultInterrupt(
+        toolCallId: String,
+        toolName: String,
+        source: String,
+        toolInput: Map<String, Any?>?,
+    ): AguiEvent.Interrupt {
+        val metadata = linkedMapOf<String, Any?>(
+            "toolName" to toolName,
+            "subagentSource" to source,
+        )
+        toolInput?.let { metadata["toolInput"] = it }
+        return AguiEvent.Interrupt(
+            interruptId(toolCallId, REASON_TOOL_CALL),
+            REASON_TOOL_CALL,
+            "等待客户端执行 $toolName",
+            toolCallId,
+            null,
+            null,
+            metadata,
+        )
     }
 
     private fun trackRequireConfirm(
@@ -390,9 +514,13 @@ class SubagentHitlPromoter {
     private fun confirmMessage(toolName: String): String = "确认执行 $toolName？"
 
     companion object {
+        private const val NAME_LIFECYCLE = "subagent.lifecycle"
         private const val NAME_TOOL_CALL = "subagent.tool_call"
+        private const val NAME_TOOL_RESULT = "subagent.tool_result"
         private const val NAME_REQUIRE_CONFIRM = "subagent.require_confirm"
         private const val TYPE_TOOL_CALL_START = "TOOL_CALL_START"
+        private const val TYPE_TOOL_RESULT_END = "TOOL_RESULT_END"
+        private const val STATE_SUSPENDED = "RUNNING"
         private const val REASON_PERMISSION_CONFIRM = "permission_confirm"
         private const val REASON_TOOL_CALL = "tool_call"
     }

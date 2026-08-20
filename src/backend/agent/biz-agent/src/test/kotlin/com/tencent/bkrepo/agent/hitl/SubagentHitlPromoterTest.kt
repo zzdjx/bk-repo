@@ -10,6 +10,7 @@ package com.tencent.bkrepo.agent.hitl
 
 import com.tencent.bkrepo.agent.session.PendingInterruptSession
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
+import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
 import io.agentscope.core.agui.event.AguiEvent
 import io.agentscope.core.agui.model.AguiResume
 import io.agentscope.core.agui.model.RunAgentInput
@@ -22,7 +23,7 @@ import org.junit.jupiter.api.Test
 
 class SubagentHitlPromoterTest {
 
-    private val promoter = SubagentHitlPromoter()
+    private val promoter = SubagentHitlPromoter(FrontendToolCatalog())
     private val interruptState = AguiInterruptTracker.State()
 
     @Test
