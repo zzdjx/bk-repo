@@ -160,7 +160,7 @@ object DriveNodeSeriesCountHelper {
         }
     }
 
-    private fun resolveLatestTypeRuleCriteria(rule: DriveMetadataQueryRule): Criteria {
+    internal fun resolveLatestTypeRuleCriteria(rule: DriveMetadataQueryRule): Criteria {
         val field = LATEST_VERSION_TYPE_FIELD
         return when (rule.operation) {
             OperationType.EQ -> Criteria.where(field).isEqualTo(rule.value)
@@ -169,6 +169,7 @@ object DriveNodeSeriesCountHelper {
             OperationType.NIN -> Criteria.where(field).nin(rule.value as Collection<*>)
             OperationType.NULL -> Criteria.where(field).isNull()
             OperationType.NOT_NULL -> Criteria.where(field).ne(null)
+            OperationType.EXISTS -> Criteria.where(field).exists(true).ne(null)
             else -> Criteria.where(field).isEqualTo(rule.value)
         }
     }

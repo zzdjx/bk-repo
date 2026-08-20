@@ -44,6 +44,7 @@ class ArtifactShareServiceScopeMappingTest {
         )
         every { artifactShareDao.findByShortShareId(any()) } returns null
         every { artifactShareDao.assignShortShareIdIfAbsent(any(), any()) } returns true
+        every { driveShareNodeResolver.resolveThumbnail(any()) } returns null
     }
 
     @Test
@@ -54,6 +55,7 @@ class ArtifactShareServiceScopeMappingTest {
             driveShareNodeResolver.resolveFileByIno("p", "r", 9L)
         } returns DriveShareNodeInfo(node = node, fullPath = "/a.html")
         every { driveShareNodeResolver.metadataValue(node, any()) } returns null
+        every { driveShareNodeResolver.resolveThumbnail(node) } returns null
         every { orgScopeIdMappingService.toStoredIds(listOf("display-dept-1")) } returns mapOf(
             "display-dept-1" to "stored-dept-1",
         )

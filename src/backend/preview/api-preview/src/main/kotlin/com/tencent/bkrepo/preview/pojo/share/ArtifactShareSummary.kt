@@ -31,4 +31,8 @@ data class ArtifactShareSummary(
     val featured: Boolean = false,
     @get:Schema(title = "最近修改时间")
     val lastModifiedDate: LocalDateTime,
+    @get:Schema(title = "缩略图 sidecar inode；缺失时为 null")
+    val thumbnailIno: Long? = null,
+    @get:Schema(title = "缩略图 sidecar 完整路径；缺失时为 null")
+    val thumbnailFullPath: String? = null,
 )

@@ -387,6 +387,7 @@
 
 - 响应体
   返回 `DriveNode`，字段说明见下文「DriveNode 返回字段说明」。
+  若请求元数据包含 `IMATE_ARTIFACT_NAME`（`X-BKREPO-META` 批量头保留大小写），上传成功后会尝试生成同目录隐藏 sidecar `.{name}.thumb.jpg`，并把 sidecar 完整路径写回源文件元数据 `IMATE_ARTIFACT_THUMBNAIL`、把 sidecar inode 写回 `IMATE_ARTIFACT_THUMBNAIL_INO`。两个字段必须同时存在才视为有缩略图。sidecar 节点本身不写元数据。当前服务端可为 `image`、`pdf`、`slides`、`table`、`video`、`markdown`、`html` 生成缩略图（png/jpg/gif/webp/bmp 缩放与 svg 栅格化，支持 SVG2 滤镜如 feDropShadow，按文档长边输出，不修改原文件；pdf/ppt/pptx 取首页，Keynote `.key` 暂不支持；xls/xlsx/csv 按文档长边渲首屏网格；mp4/webm 抽第一帧；md/markdown 渲首屏文本；html 用 Playwright 在 Chromium sandbox + iframe `sandbox="allow-scripts"` 中截首屏，拦截外网与本地文件）。生成失败不影响原文件上传成功。code/audio/other 不生成 sidecar。
   ```json
   {
     "code": 0,
@@ -456,11 +457,15 @@
   | name.operation   | string | 否    | EQ   | 操作类型，支持与节点搜索一致的 OperationType（如 EQ/IN/MATCH/MATCH_I 等）             | operation type                       |
   | metadata         | array  | 否    | []   | 元数据过滤条件列表，多条规则按 AND 组合；单条语义对齐节点搜索 `metadata.{key}`（elemMatch） | metadata query rules                 |
   | metadata[].key   | string | 是    | 无    | 元数据 key；作品集可传 `worksCategory`                                     | metadata key                         |
-  | metadata[].value | any    | 是    | 无    | 元数据 value；`IN/NIN` 时为数组                                           | metadata value                       |
-  | metadata[].operation | string | 否 | EQ | 操作类型，支持与节点搜索一致的 OperationType（如 EQ/IN/NIN/MATCH 等）                | operation type                       |
+  | metadata[].value | any    | 否    | 空串   | 元数据 value；`IN/NIN` 时为数组；`EXISTS`/`NULL`/`NOT_NULL` 不比较 value，可省略 | metadata value                       |
+  | metadata[].operation | string | 否 | EQ | 操作类型，支持与节点搜索一致的 OperationType（如 EQ/IN/NIN/MATCH/`EXISTS` 等）     | operation type                       |
   | direction        | string | 否    | DESC | 排序方向：`ASC` / `DESC`                                                | sort direction                       |
   | lastModifiedDate | string | 否    | 无    | 上一页最后一条 `lastModifiedDate`（ISO-8601），首次不传；需与 `lastId` 成对        | last modifiedDate cursor             |
   | lastId           | string | 否    | 无    | 上一页最后一条 `id`，需与 `lastModifiedDate` 成对                            | last id cursor                       |
+
+- 元数据 `EXISTS`
+  - `operation=EXISTS` 只判断 metadata 数组中存在该 `key`（elemMatch key，兼容大小写），不比较 value
+  - 适用于「必须是作品节点」这类过滤，无需维护类型名单；sidecar 无 `IMATE_ARTIFACT_TYPE` 不会命中
 
 - 排序与续页规则
   - 默认按 `lastModifiedDate DESC, id DESC` 返回；可通过 `direction` 改为 ASC
@@ -547,7 +552,7 @@
   | projectId     | string | 是    | 无   | 路径参数：项目名称                                           | project name             |
   | repoName      | string | 是    | 无   | 路径参数：仓库名称                                           | repo name                |
   | name          | object | 否    | 无   | 文件名查询条件，语义与 search 接口一致                            | name query rule          |
-  | metadata      | array  | 否    | []  | 元数据过滤条件列表，语义与 search 接口一致；`IMATE_ARTIFACT_TYPE` 在按系列去重时作用于各系列最新版本 | metadata query rules     |
+  | metadata      | array  | 否    | []  | 元数据过滤条件列表，语义与 search 接口一致（含 `EXISTS`）；`IMATE_ARTIFACT_TYPE` 在按系列去重时作用于各系列最新版本 | metadata query rules     |
   | distinctByMetadataKeys | array | 否 | 无 | 按元数据键组合去重计数；缺省为文件总数 | distinct series grouping keys |
   | groupByMetadataKey | string | 否 | 无 | 分桶元数据键；与 distinct 正交——无 distinct 时按文件分桶，有 distinct 时按各系列最新版本分桶 | metadata key for buckets |
 

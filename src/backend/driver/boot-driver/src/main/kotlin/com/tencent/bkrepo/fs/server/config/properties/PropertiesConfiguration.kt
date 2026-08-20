@@ -5,6 +5,7 @@ import com.tencent.bkrepo.common.security.interceptor.devx.DevXProperties
 import com.tencent.bkrepo.common.security.service.ServiceAuthProperties
 import com.tencent.bkrepo.fs.server.config.properties.drive.DriveOperateLogProperties
 import com.tencent.bkrepo.fs.server.config.properties.drive.DriveProperties
+import com.tencent.bkrepo.fs.server.config.properties.drive.DriveThumbnailProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration
 
@@ -12,6 +13,7 @@ import org.springframework.context.annotation.Configuration
 @EnableConfigurationProperties(
     DriveProperties::class,
     DriveOperateLogProperties::class,
+    DriveThumbnailProperties::class,
     IoaProperties::class,
     StreamProperties::class,
     DevXProperties::class,

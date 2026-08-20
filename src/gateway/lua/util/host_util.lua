@@ -140,7 +140,7 @@ function _M:get_addr(service_name)
     -- 检查当前服务是否在需要带宽判断的服务列表中
     -- ip带宽检查逻辑
     local service_with_bandwidth_check = config.service_with_bandwidth_check
-    if string.find(service_with_bandwidth_check or "", service_name) then
+    if stringUtil:containsService(service_with_bandwidth_check, service_name) then
         -- 使用共享内存缓存带宽检查结果
         local bw_cache = ngx.shared.bw_cache_store
         local cache_key = "bw:" .. service_name

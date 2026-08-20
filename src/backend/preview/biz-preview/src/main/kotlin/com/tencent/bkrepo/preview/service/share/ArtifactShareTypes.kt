@@ -51,7 +51,7 @@ object ArtifactShareTypes {
     private val HTML_EXTS = setOf("html", "htm")
     private val MARKDOWN_EXTS = setOf("md", "markdown")
     private val TABLE_EXTS = setOf("xls", "xlsx", "csv")
-    private val SLIDES_EXTS = setOf("ppt", "pptx", "key")
+    private val SLIDES_EXTS = setOf("ppt", "pptx")
     private val VIDEO_EXTS = setOf("mp4", "webm")
     private val AUDIO_EXTS = setOf("mp3", "wav", "ogg", "oga", "m4a")
     private val CODE_EXTS = setOf(

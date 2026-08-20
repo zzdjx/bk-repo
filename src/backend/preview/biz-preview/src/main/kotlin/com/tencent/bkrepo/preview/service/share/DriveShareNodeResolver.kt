@@ -11,6 +11,11 @@ data class DriveShareNodeInfo(
     val fullPath: String,
 )
 
+data class ArtifactShareThumbnail(
+    val ino: Long,
+    val fullPath: String,
+)
+
 /**
  * 同步解析 Drive 文件节点（供 preview 素材分享使用）。
  */
@@ -43,10 +48,21 @@ class DriveShareNodeResolver(
             ?.takeIf { it.isNotEmpty() }
     }
 
+    fun resolveThumbnail(node: TDriveNode): ArtifactShareThumbnail? {
+        val path = metadataValue(node, METADATA_ARTIFACT_THUMBNAIL) ?: return null
+        val ino = metadataValue(node, METADATA_ARTIFACT_THUMBNAIL_INO)
+            ?.toLongOrNull()
+            ?.takeIf { it > 0L }
+            ?: return null
+        return ArtifactShareThumbnail(ino = ino, fullPath = path)
+    }
+
     companion object {
         const val METADATA_AGENT_ID = "IMATE_AGENT_ID"
         const val METADATA_CONVERSATION_ID = "IMATE_CONVERSATION_ID"
         const val METADATA_ARTIFACT_NAME = "IMATE_ARTIFACT_NAME"
         const val METADATA_ARTIFACT_TYPE = "IMATE_ARTIFACT_TYPE"
+        const val METADATA_ARTIFACT_THUMBNAIL = "IMATE_ARTIFACT_THUMBNAIL"
+        const val METADATA_ARTIFACT_THUMBNAIL_INO = "IMATE_ARTIFACT_THUMBNAIL_INO"
     }
 }

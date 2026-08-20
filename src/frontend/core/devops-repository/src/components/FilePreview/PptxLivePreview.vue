@@ -64,13 +64,18 @@
             document.addEventListener('fullscreenchange', this.onFullscreenChange)
             document.addEventListener('webkitfullscreenchange', this.onFullscreenChange)
             window.addEventListener('keydown', this.onKeydown)
-            if (typeof ResizeObserver !== 'undefined' && this.$refs.stageWrap) {
+            if (typeof ResizeObserver !== 'undefined') {
                 this.resizeObserver = new ResizeObserver(() => {
                     if (this.player) {
                         this.player.resize()
                     }
                 })
-                this.resizeObserver.observe(this.$refs.stageWrap)
+                if (this.$refs.stageWrap) {
+                    this.resizeObserver.observe(this.$refs.stageWrap)
+                }
+                if (this.$refs.thumbsHost) {
+                    this.resizeObserver.observe(this.$refs.thumbsHost)
+                }
             }
             this.reload()
         },
@@ -231,10 +236,13 @@
     --pptx-live-thumb-visible: 10;
     --pptx-live-thumb-gap: 8px;
     --pptx-live-thumb-chrome: 36px;
-    --pptx-live-thumb-h: calc((100cqh - var(--pptx-live-thumb-chrome) - (var(--pptx-live-thumb-visible) - 1) * var(--pptx-live-thumb-gap)) / var(--pptx-live-thumb-visible));
-    --pptx-live-thumb-w: calc(var(--pptx-live-thumb-h) * 16 / 9);
+    --pptx-live-thumb-min-w: 128px;
+    --pptx-live-thumb-packed-h: calc((100cqh - var(--pptx-live-thumb-chrome) - (var(--pptx-live-thumb-visible) - 1) * var(--pptx-live-thumb-gap)) / var(--pptx-live-thumb-visible));
+    --pptx-live-thumb-min-h: calc(var(--pptx-live-thumb-min-w) / var(--pptx-slide-aspect, 1.7777778));
+    --pptx-live-thumb-h: max(var(--pptx-live-thumb-min-h), var(--pptx-live-thumb-packed-h));
+    --pptx-live-thumb-w: calc(var(--pptx-live-thumb-h) * var(--pptx-slide-aspect, 1.7777778));
     flex: none;
-    width: calc(var(--pptx-live-thumb-w) + 44px);
+    width: calc(var(--pptx-live-thumb-w) + 52px);
     min-width: 0;
     min-height: 0;
     overflow: hidden;
@@ -264,30 +272,29 @@
 }
 .pptx-live-thumbs ::v-deep .pptxv-thumb {
     flex: none;
-    height: var(--pptx-live-thumb-h);
-    min-height: var(--pptx-live-thumb-h);
-    max-height: var(--pptx-live-thumb-h);
+    height: calc(var(--pptx-live-thumb-h) + 4px);
+    min-height: calc(var(--pptx-live-thumb-h) + 4px);
+    max-height: calc(var(--pptx-live-thumb-h) + 4px);
     width: max-content;
-    box-sizing: border-box;
-    overflow: hidden;
+    box-sizing: content-box;
+    overflow: visible;
 }
 .pptx-live-thumbs ::v-deep .pptxv-thumb-frame {
-    box-sizing: border-box;
+    box-sizing: content-box;
     flex: none;
     height: var(--pptx-live-thumb-h) !important;
     width: var(--pptx-live-thumb-w) !important;
     overflow: hidden;
+    background: transparent !important;
+    border-width: 2px !important;
 }
-.pptx-live-thumbs ::v-deep .pptxv-thumb-frame .pptxv-stage {
-    transform: scale(min(
-        calc((var(--pptx-live-thumb-w) - 10px) / var(--pptx-slide-w, 1280px)),
-        calc((var(--pptx-live-thumb-h) - 10px) / var(--pptx-slide-h, 720px))
-    )) !important;
-    transform-origin: top left !important;
+.pptx-live-thumbs.is-sized ::v-deep .pptxv-thumb-frame > .pptxv-stage {
+    transform: none !important;
+    transform-origin: 0 0 !important;
 }
 .pptx-live-thumbs ::v-deep .pptxv-thumb.is-active .pptxv-thumb-frame {
-    border-width: 5px;
     border-color: #3a84ff;
+    box-shadow: 0 0 0 3px #3a84ff;
 }
 .pptx-live-main {
     flex: 1;

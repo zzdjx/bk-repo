@@ -34,6 +34,7 @@ import com.tencent.bkrepo.common.query.matcher.impl.AfterMatcher
 import com.tencent.bkrepo.common.query.matcher.impl.BeforeMatcher
 import com.tencent.bkrepo.common.query.matcher.impl.ContainsMatcher
 import com.tencent.bkrepo.common.query.matcher.impl.EqualMatcher
+import com.tencent.bkrepo.common.query.matcher.impl.ExistsMatcher
 import com.tencent.bkrepo.common.query.matcher.impl.GreaterThanMatcher
 import com.tencent.bkrepo.common.query.matcher.impl.GreaterThanOrEqualMatcher
 import com.tencent.bkrepo.common.query.matcher.impl.InMatcher
@@ -127,7 +128,8 @@ abstract class RuleMatcher {
             OperationType.REGEX to RegexMatcher(),
             OperationType.REGEX_I to RegexIMatcher(),
             OperationType.NULL to NullMatcher(),
-            OperationType.NOT_NULL to NotNullMatcher()
+            OperationType.NOT_NULL to NotNullMatcher(),
+            OperationType.EXISTS to ExistsMatcher()
         )
 
         /**

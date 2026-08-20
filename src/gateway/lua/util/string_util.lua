@@ -49,6 +49,19 @@ function _M:split (str, sep)
     return t
 end
 
+--[[逗号/空白分隔的服务名列表，明文精确匹配（避免 string.find 把 '-' 当 Lua 模式）]]
+function _M:containsService(list, service_name)
+    if list == nil or list == "" or service_name == nil or service_name == "" then
+        return false
+    end
+    for name in string.gmatch(tostring(list), "[^,%s]+") do
+        if name == service_name then
+            return true
+        end
+    end
+    return false
+end
+
 function _M:getValue(var)
     local varType = type(var)
     if varType == "table" then

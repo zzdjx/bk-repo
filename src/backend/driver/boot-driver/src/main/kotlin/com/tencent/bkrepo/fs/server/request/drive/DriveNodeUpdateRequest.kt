@@ -23,6 +23,10 @@ data class DriveNodeUpdateRequest(
     val atime: Long? = null,
     val ifMatch: LocalDateTime? = null,
     val metadata: MutableList<TMetadata>? = null,
+    /**
+     * 为 false 时只写 metadata，不改 lastModifiedBy / lastModifiedDate，供历史缩略图回填。
+     */
+    val touchLastModified: Boolean = true,
 ) : DriveNodeBaseRequest(
     projectId = projectId,
     repoName = repoName,

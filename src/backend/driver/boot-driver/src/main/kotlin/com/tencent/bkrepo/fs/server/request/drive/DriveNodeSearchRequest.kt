@@ -128,7 +128,7 @@ internal object DriveNodeSearchQueryParams {
                     throw ErrorCodeException(CommonMessageCode.PARAMETER_INVALID, "$field.value")
                 }
             }
-            OperationType.NULL, OperationType.NOT_NULL -> Unit
+            OperationType.NULL, OperationType.NOT_NULL, OperationType.EXISTS -> Unit
             else -> Unit
         }
     }
