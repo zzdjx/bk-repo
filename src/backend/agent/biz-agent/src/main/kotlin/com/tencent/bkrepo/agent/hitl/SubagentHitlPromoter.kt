@@ -474,9 +474,13 @@ class SubagentHitlPromoter(
         if (spawnLabel != null) {
             metadata["subagentSpawnLabel"] = spawnLabel
             logger.info(
-                "captured agent_spawn label for later resume sessionId recompute: source={} label={}",
+                "captured agent_spawn label for later resume sessionId recompute: source={} label={} " +
+                    "labelLength={} rawArgs={}",
                 pending.source,
                 spawnLabel,
+                spawnLabel.length,
+                interruptState.toolNameByCallId.filterValues { it == AGENT_SPAWN_TOOL_NAME }.keys
+                    .map { callId -> interruptState.argsBufferByCallId[callId]?.toString() },
             )
         } else {
             logger.info(

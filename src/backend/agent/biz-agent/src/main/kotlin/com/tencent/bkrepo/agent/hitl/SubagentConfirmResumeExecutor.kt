@@ -111,13 +111,20 @@ class SubagentConfirmResumeExecutor(
             .metadata(mapOf(Msg.METADATA_CONFIRM_RESULTS to listOf(target.confirmResult)))
             .build()
         val childSessionId = "sub-" + deterministicHash(threadId, target.agentId, target.spawnLabel)
+        val childSessionExistsInStore = try {
+            harnessAgent.stateStore?.exists(userId, childSessionId)
+        } catch (ex: Exception) {
+            logger.warn("failed to check child session existence: childSessionId={}", childSessionId, ex)
+            null
+        }
         logger.info(
             "recomputed child sessionId for subagent confirm resume: threadId={} agentId={} spawnLabel={} " +
-                "childSessionId={}",
+                "childSessionId={} existsInStore={}",
             threadId,
             target.agentId,
             target.spawnLabel,
             childSessionId,
+            childSessionExistsInStore,
         )
         val childCtx = RuntimeContext.builder(parentRc)
             .sessionId(childSessionId)
