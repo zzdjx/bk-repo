@@ -111,6 +111,14 @@ class SubagentConfirmResumeExecutor(
             .metadata(mapOf(Msg.METADATA_CONFIRM_RESULTS to listOf(target.confirmResult)))
             .build()
         val childSessionId = "sub-" + deterministicHash(threadId, target.agentId, target.spawnLabel)
+        logger.info(
+            "recomputed child sessionId for subagent confirm resume: threadId={} agentId={} spawnLabel={} " +
+                "childSessionId={}",
+            threadId,
+            target.agentId,
+            target.spawnLabel,
+            childSessionId,
+        )
         val childCtx = RuntimeContext.builder(parentRc)
             .sessionId(childSessionId)
             .userId(userId)
@@ -200,7 +208,12 @@ class SubagentConfirmResumeExecutor(
      */
     private fun finalReplyEvents(msg: Msg, threadId: String, runId: String, agentId: String): List<AguiEvent> {
         val text = msg.textContent.orEmpty()
-        logger.info("subagent confirm resumed with final reply: threadId={} agentId={} hasText={}", threadId, agentId, text.isNotBlank())
+        logger.info(
+            "subagent confirm resumed with final reply: threadId={} agentId={} textPreview={}",
+            threadId,
+            agentId,
+            text.take(120),
+        )
         val messageId = msg.id ?: UUID.randomUUID().toString()
         return buildList {
             add(AguiEvent.RunStarted(threadId, runId))

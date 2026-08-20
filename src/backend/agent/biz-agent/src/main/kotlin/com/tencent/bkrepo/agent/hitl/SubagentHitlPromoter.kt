@@ -470,7 +470,24 @@ class SubagentHitlPromoter(
             "subagentSource" to pending.source,
         )
         pending.toolInput?.let { metadata["toolInput"] = it }
-        subagentSpawnLabel(pending.source, interruptState)?.let { metadata["subagentSpawnLabel"] = it }
+        val spawnLabel = subagentSpawnLabel(pending.source, interruptState)
+        if (spawnLabel != null) {
+            metadata["subagentSpawnLabel"] = spawnLabel
+            logger.info(
+                "captured agent_spawn label for later resume sessionId recompute: source={} label={}",
+                pending.source,
+                spawnLabel,
+            )
+        } else {
+            logger.info(
+                "no agent_spawn label found for source={} (either the real call carried no label, or its " +
+                    "args/agent_id could not be matched) — resume will recompute the no-label hash; " +
+                    "trackedAgentSpawnCalls={}",
+                pending.source,
+                interruptState.toolNameByCallId.filterValues { it == AGENT_SPAWN_TOOL_NAME }.keys
+                    .map { callId -> callId to interruptState.argsBufferByCallId[callId]?.toString() },
+            )
+        }
         return AguiEvent.Interrupt(
             interruptId(pending.toolCallId, REASON_PERMISSION_CONFIRM),
             REASON_PERMISSION_CONFIRM,
