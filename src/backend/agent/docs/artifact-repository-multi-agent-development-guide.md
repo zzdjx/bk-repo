@@ -1438,7 +1438,6 @@ Agent 适合需要语言理解、证据综合和不确定性推理的任务。�
 | POST | `/api/agent/run?projectId=` | AG-UI run SSE（body: 标准 `RunAgentInput`） |
 | GET | `/api/agent/run/status?projectId=&threadId=` | 查询 run 状态 |
 | POST | `/api/agent/run/stop?projectId=` | 停止 active run（body: `{ threadId, runId? }`） |
-| POST | `/api/agent/run/reconnect?projectId=` | 终态 run 事件重放 SSE（body: `{ threadId, runId }`） |
 
 **客户端接线（bk-artifacts-ui，`agent-backend`）**
 
@@ -1463,6 +1462,9 @@ Agent 适合需要语言理解、证据综合和不确定性推理的任务。�
 2. **reconnect / 历史恢复**：本地工具或 HITL 中断后关闭小制 → 重开同一会话 → 自动 reconnect 并 resume；
 3. **wait_running**：对话中途退出 → 重开同一会话 → 轮询 status 结束后刷新完整回复；
 4. **多副本 status**：切换网关实例后 `GET run/status` 仍能返回一致状态；
-5. 通过后删除旧协议兼容分支，更新契约测试与接口文档。
+5. ~~通过后删除旧协议兼容分支，更新契约测试与接口文档~~ **已完成**：`POST /run/reconnect`
+   （`UserAgentChatResource`/`AgentChatService`/`AgentChatServiceImpl` 的 `reconnectRun`、
+   `AgentRunReconnectRequest`、`LOG_OPERATE_RUN_RECONNECT`）已删除，客户端确认全量走
+   `GET /run/stream`；1-4 仍需真机验收后再关闭本节。
 
 

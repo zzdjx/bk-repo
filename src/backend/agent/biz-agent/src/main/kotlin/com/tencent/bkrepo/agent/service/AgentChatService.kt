@@ -8,7 +8,6 @@
 
 package com.tencent.bkrepo.agent.service
 
-import com.tencent.bkrepo.agent.pojo.AgentRunReconnectRequest
 import com.tencent.bkrepo.agent.pojo.AgentRunStatusInfo
 import com.tencent.bkrepo.agent.pojo.AgentRunStopRequest
 import io.agentscope.core.agui.model.RunAgentInput
@@ -41,7 +40,4 @@ interface AgentChatService {
         runId: String? = null,
         lastEventIndex: Long? = null,
     ): SseEmitter
-
-    @Deprecated("Use streamRun", ReplaceWith("streamRun(userId, projectId, request.threadId, request.runId, request.lastEventIndex)"))
-    fun reconnectRun(userId: String, projectId: String, request: AgentRunReconnectRequest): SseEmitter
 }

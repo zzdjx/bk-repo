@@ -8,7 +8,6 @@
 
 package com.tencent.bkrepo.agent.service.impl
 
-import com.tencent.bkrepo.agent.pojo.AgentRunReconnectRequest
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.pojo.AgentRunStatusInfo
 import com.tencent.bkrepo.agent.pojo.AgentRunStopRequest
@@ -94,17 +93,4 @@ class AgentChatServiceImpl(
         agentSessionService.assertActiveSession(userId, projectId, threadId)
         return agentRunStreamOrchestrator.stream(userId, projectId, threadId, runId, lastEventIndex)
     }
-
-    @Deprecated("Use GET /run/stream", ReplaceWith("streamRun(userId, projectId, request.threadId, request.runId, request.lastEventIndex)"))
-    override fun reconnectRun(
-        userId: String,
-        projectId: String,
-        request: AgentRunReconnectRequest,
-    ): SseEmitter = streamRun(
-        userId = userId,
-        projectId = projectId,
-        threadId = request.threadId,
-        runId = request.runId,
-        lastEventIndex = request.lastEventIndex,
-    )
 }

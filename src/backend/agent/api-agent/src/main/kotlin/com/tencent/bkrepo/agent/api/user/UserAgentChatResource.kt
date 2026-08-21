@@ -9,7 +9,6 @@
 package com.tencent.bkrepo.agent.api.user
 
 import com.tencent.bkrepo.agent.constant.AGENT_API_PREFIX
-import com.tencent.bkrepo.agent.pojo.AgentRunReconnectRequest
 import com.tencent.bkrepo.agent.pojo.AgentRunStatusInfo
 import com.tencent.bkrepo.agent.pojo.AgentRunStopRequest
 import com.tencent.bkrepo.common.api.pojo.Response
@@ -75,15 +74,5 @@ interface UserAgentChatResource {
         @RequestParam(required = false) runId: String?,
         @Parameter(name = "已收到的最大 eventIndex；省略时从首条事件重放")
         @RequestParam(required = false) lastEventIndex: Long?,
-    ): SseEmitter
-
-    @Deprecated("Use GET /run/stream")
-    @Operation(summary = "重连并重放 run 事件（已废弃，请使用 GET /run/stream）")
-    @PostMapping("/run/reconnect", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
-    fun reconnectRun(
-        @RequestAttribute userId: String,
-        @Parameter(name = "项目ID", required = true)
-        @RequestParam projectId: String,
-        @RequestBody request: AgentRunReconnectRequest,
     ): SseEmitter
 }

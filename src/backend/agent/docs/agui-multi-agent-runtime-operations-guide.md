@@ -42,8 +42,7 @@ Coordinator（小制 / bkrepo-assistant）
 | POST | `/run?projectId=` | 发起 AG-UI run，响应 `text/event-stream` |
 | GET | `/run/status?projectId=&threadId=` | 查询 thread 当前/最新 run 状态 |
 | POST | `/run/stop?projectId=` | 停止 active run（body: `threadId`, 可选 `runId`） |
-| GET | `/run/stream?projectId=&threadId=&runId=&lastEventIndex=` | **推荐** 衔接活跃 run 或重放终态事件 |
-| POST | `/run/reconnect?projectId=` | **已废弃**，内部转调 `/run/stream` |
+| GET | `/run/stream?projectId=&threadId=&runId=&lastEventIndex=` | 衔接活跃 run 或重放终态事件 |
 
 **`/run/stream` 行为**
 
@@ -75,7 +74,6 @@ Coordinator（小制 / bkrepo-assistant）
 | `AGENT_RUN_STATUS` | GET `/run/status` |
 | `AGENT_RUN_STOP` | POST `/run/stop` |
 | `AGENT_RUN_STREAM` | GET `/run/stream` |
-| `AGENT_RUN_RECONNECT` | POST `/run/reconnect`（废弃） |
 | `AGENT_SESSION_*` | 会话 CRUD |
 
 ## 3. 配置
@@ -255,7 +253,9 @@ agent:
 
 1. **功能回滚（推荐）**：配置中心关闭子 Agent（`topology.agents.*.enabled=false`），仅保留 Coordinator。
 2. **frontend tools**：`features.frontend-tools-enabled=false` 可快速缩小攻击面。
-3. **版本回滚**：回滚 `boot-agent` 镜像/包；Mongo 事件与 session 向前兼容，旧版本可能不识 `/run/stream`，客户端可暂用 `/run/reconnect`。
+3. **版本回滚**：回滚 `boot-agent` 镜像/包；Mongo 事件与 session 向前兼容；`POST /run/reconnect` 已随
+   §17.6 清理删除（客户端已全量切换到 `GET /run/stream`），回滚到不识别 `/run/stream` 的更旧客户端前
+   须先确认该版本不再被使用，否则需连同后端一起回滚。
 4. **配置回滚**：旧 `agent.model` / `agent.compaction` 等 key **不再绑定**；必须恢复为新前缀等效值，不能仅回滚 jar 而不改配置。
 
 ## 9. 多 Agent 拓扑（当前默认）
