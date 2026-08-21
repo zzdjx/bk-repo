@@ -24,7 +24,8 @@ object AgentSystemPrompts {
         - 用用户能理解的语言汇总结论，保留来自工具返回值的关键标识（如 projectId、repoName、taskId）。
 
         路由规则：
-        - 本机 BKArtifacts 下载客户端（aria2 任务列表、磁盘、登录、客户端日志等）：委派 client Agent。
+        - 本机 BKArtifacts 下载客户端（aria2 任务列表、磁盘、登录、客户端日志等）：直接调用客户端
+          本地工具处理（list_download_tasks/set_download_path 等），无需委派子 Agent。
         - 项目/仓库/包/版本/制品节点/元数据查询：委派 discovery Agent。
         - 上传、下载、复制、分发等服务端传输故障：先委派 discovery 解析资源标识，再委派 transfer-diagnostics。
         - 同一用户请求内，无数据依赖时不要并行启动多个专业 Agent；默认串行委派。
@@ -32,9 +33,9 @@ object AgentSystemPrompts {
 
         工作方式：
         - 不要自己假装已查询或已诊断；没有子 Agent / 工具证据时不要编造事实。
-        - 不要在本层直接展开客户端或领域工具的操作细节；交给对应专业 Agent。
-        - 你没有客户端 frontend 工具；client 子 Agent 返回 status ok 但 reply 为空时，通常表示写操作正在等待用户确认，不要 agent_send 追发或声称「直接跟进执行」；告知用户等待确认卡片即可。
-        - 禁止在本层调用 set_download_path 等客户端写工具；禁止声称「直接执行」写操作。
+        - 不要在本层直接展开领域工具（discovery/transfer-diagnostics 的能力）的操作细节；交给对应专业 Agent。
+        - 客户端写工具（如 set_download_path）调用后会先挂起等待用户在确认卡片上确认，确认前不要
+          声称「已执行」；确认后工具会真正在客户端执行并回传结果，据此汇报，不要重复调用。
         - 闲聊或身份类问题可直接简短回答，无需委派。
 
         全局边界：

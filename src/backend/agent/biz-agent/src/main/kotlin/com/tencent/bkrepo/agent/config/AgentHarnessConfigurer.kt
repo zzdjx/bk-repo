@@ -28,6 +28,7 @@
 package com.tencent.bkrepo.agent.config
 
 import com.tencent.bkrepo.agent.agent.AgentCatalog
+import com.tencent.bkrepo.agent.agent.client.ClientAgentPrompt
 import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
@@ -62,7 +63,7 @@ class AgentHarnessConfigurer(
     ): HarnessAgent {
         var builder = HarnessAgent.builder()
             .name(properties.name)
-            .sysPrompt(properties.sysPrompt)
+            .sysPrompt(effectiveSysPrompt(properties))
             .model(model)
             .maxIters(properties.maxIters)
             .stateStore(stateStore)
@@ -91,5 +92,18 @@ class AgentHarnessConfigurer(
         builder = agentMemoryConfig.apply(builder, memory)
 
         return builder.build()
+    }
+
+    /**
+     * client 本地工具（`set_download_path` 等）已拍平到协调者自身，不再是独立子 Agent，因此原来
+     * `client` 子 Agent 的系统提示词（[ClientAgentPrompt.DEFAULT]，排查方式/能力边界等域内行为规则）
+     * 需要拼接进协调者自己的系统提示词——仅在 `frontendToolsEnabled` 时拼接，与历史上只有开启该
+     * 开关时才会材料化 `client` 子 Agent 的行为保持一致。
+     */
+    private fun effectiveSysPrompt(properties: EffectiveAgentRuntimeProperties): String {
+        if (!properties.frontendToolsEnabled) {
+            return properties.sysPrompt
+        }
+        return properties.sysPrompt + "\n\n" + ClientAgentPrompt.DEFAULT
     }
 }

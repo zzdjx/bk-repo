@@ -16,9 +16,9 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
 /**
- * [ExternalLocalTool.checkPermissions] 是 `client` 等 declared subagent 场景下唯一起作用的确认闸门
- * （见类注释里对 `agentscope-harness` 2.0.1 declared subagent 权限上下文继承缺口的说明），因此这里直接
- * 钉住"风险等级 -> 自检决策"的映射，不依赖完整的 HarnessAgent/PermissionEngine 装配。
+ * [ExternalLocalTool.checkPermissions] 按 [ToolRiskLevel] 自行给出 ASK/DENY/PASSTHROUGH 决策，
+ * 与协调者自身的 [io.agentscope.core.permission.PermissionEngine] 规则表互为兜底（见类注释），
+ * 这里直接钉住"风险等级 -> 自检决策"的映射，不依赖完整的 HarnessAgent/PermissionEngine 装配。
  */
 @DisplayName("ExternalLocalTool 按风险等级自检权限")
 class ExternalLocalToolTest {

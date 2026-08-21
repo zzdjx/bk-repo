@@ -14,7 +14,6 @@ import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimePropertie
 import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
 import com.tencent.bkrepo.agent.session.PendingInterruptSession
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
-import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
 import io.agentscope.core.agui.event.AguiEvent
 import org.springframework.stereotype.Component
 
@@ -27,7 +26,6 @@ import org.springframework.stereotype.Component
 @Component
 class AguiInterruptTracker(
     private val interruptNormalizer: AguiInterruptNormalizer,
-    private val frontendToolCatalog: FrontendToolCatalog,
     private val runtimeProperties: EffectiveAgentRuntimeProperties,
     private val objectMapper: ObjectMapper,
 ) {
@@ -92,9 +90,8 @@ class AguiInterruptTracker(
         val toolName = resolveToolName(interrupt, state, toolCallId)
         val toolInput = toolInput(state, toolCallId)
         val metadata = mergeToolMetadata(interrupt.metadata() as? Map<String, Any?>, toolName, toolInput)
-        val requiresApproval = interruptNormalizer.hasApprovedSchema(interrupt.responseSchema())
-            || isPermissionConfirmMetadata(metadata)
-            || (!toolName.isNullOrBlank() && frontendToolCatalog.isWriteTool(toolName))
+        val requiresApproval =
+            interruptNormalizer.requiresApproval(interrupt.reason(), toolName, metadata, interrupt.responseSchema())
         return interruptNormalizer.normalizeInterrupt(
             AguiEvent.Interrupt(
                 interrupt.id(),
@@ -122,9 +119,8 @@ class AguiInterruptTracker(
         val toolInput = toolInput(state, toolCallId)
         val metadata = mergeToolMetadata(interrupt.metadata() as? Map<String, Any?>, toolName, toolInput)
         val responseSchema = interrupt.responseSchema() as? Map<String, Any?>
-        val requiresApproval = interruptNormalizer.hasApprovedSchema(responseSchema)
-            || isPermissionConfirmMetadata(metadata)
-            || (!toolName.isNullOrBlank() && frontendToolCatalog.isWriteTool(toolName))
+        val requiresApproval =
+            interruptNormalizer.requiresApproval(interrupt.reason(), toolName, metadata, responseSchema)
         val snapshot = PendingInterruptSnapshot(
             id = id,
             reason = interrupt.reason().orEmpty(),
@@ -178,9 +174,6 @@ class AguiInterruptTracker(
         }
         return merged
     }
-
-    private fun isPermissionConfirmMetadata(metadata: Map<String, Any?>?): Boolean =
-        metadata?.get("agentscope.interruptKind") == "permission_confirm"
 
     companion object {
         private val TOOL_INPUT_TYPE = object : TypeReference<Map<String, Any?>>() {}

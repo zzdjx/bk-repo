@@ -9,7 +9,6 @@
 package com.tencent.bkrepo.agent.agent
 
 object AgentIds {
-    const val CLIENT = "client"
     const val DISCOVERY = "discovery"
     const val TRANSFER_DIAGNOSTICS = "transfer-diagnostics"
 }

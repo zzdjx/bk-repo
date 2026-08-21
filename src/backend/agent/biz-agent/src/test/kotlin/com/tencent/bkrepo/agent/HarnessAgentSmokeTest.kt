@@ -31,7 +31,6 @@ import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import com.tencent.bkrepo.agent.agent.AgentCatalog
 import com.tencent.bkrepo.agent.agent.AgentFactory
-import com.tencent.bkrepo.agent.agent.client.ClientAgentDefinition
 import com.tencent.bkrepo.agent.agent.discovery.ArtifactDiscoveryAgentDefinition
 import com.tencent.bkrepo.agent.agent.transfer.TransferDiagnosticsAgentDefinition
 import com.tencent.bkrepo.agent.config.AgentHarnessConfigurer
@@ -128,7 +127,6 @@ class HarnessAgentSmokeTest {
         val modelConfiguration = AgentModelConfig()
         val agentCatalog = AgentCatalog(
             definitions = listOf(
-                ClientAgentDefinition(),
                 ArtifactDiscoveryAgentDefinition(),
                 TransferDiagnosticsAgentDefinition(),
             ),

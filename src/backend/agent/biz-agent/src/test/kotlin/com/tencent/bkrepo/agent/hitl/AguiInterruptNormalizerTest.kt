@@ -46,10 +46,10 @@ class AguiInterruptNormalizerTest {
     }
 
     @Test
-    fun `uses approval schema for write tools`() {
+    fun `uses approval schema for write tools when reason is permission_confirm`() {
         val interrupt = AguiEvent.Interrupt(
             "int-2",
-            "tool_call",
+            "permission_confirm",
             "confirm",
             "tc-2",
             null,
@@ -61,6 +61,31 @@ class AguiInterruptNormalizerTest {
         val properties = (normalized.responseSchema() as Map<*, *>)["properties"] as Map<*, *>
 
         assertTrue(properties.containsKey("approved"))
+    }
+
+    /**
+     * `reason=tool_call` 是"请客户端本地真正执行该工具"的唯一形态，即便工具本身是写工具
+     * （如 `set_download_path`），也不应被写工具兜底规则误判成需要再弹一次是/否确认框——否则
+     * 客户端 `agentRunLoop.ts` 的 `isApprovalInterrupt` 会截断掉真正的 `executeLocalTools` 调用，
+     * 写操作从始至终不会真正执行（这正是修复前的回归行为，见 [AguiInterruptNormalizer.requiresApproval]
+     * 的类注释）。
+     */
+    @Test
+    fun `does not force approval schema for write tools when reason is tool_call`() {
+        val interrupt = AguiEvent.Interrupt(
+            "int-2b",
+            "tool_call",
+            "等待客户端执行 set_download_path",
+            "tc-2b",
+            null,
+            null,
+            mapOf("toolName" to "set_download_path"),
+        )
+
+        val normalized = normalizer.normalizeInterrupt(interrupt, ttl, "set_download_path")
+        val properties = (normalized.responseSchema() as Map<*, *>)["properties"] as Map<*, *>?
+
+        assertTrue(properties == null || !properties.containsKey("approved"))
     }
 
     @Test

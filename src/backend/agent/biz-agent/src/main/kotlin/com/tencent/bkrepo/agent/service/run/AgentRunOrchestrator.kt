@@ -12,8 +12,6 @@ import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
 import com.tencent.bkrepo.agent.hitl.AguiPermissionResumeAdapter
 import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
-import com.tencent.bkrepo.agent.hitl.SubagentConfirmResumeExecutor
-import com.tencent.bkrepo.agent.hitl.SubagentHitlPromoter
 import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS
 import com.tencent.bkrepo.agent.tool.frontend.FrontendToolSanitizer
 import com.tencent.bkrepo.agent.context.AgentChatContext
@@ -66,7 +64,6 @@ class AgentRunOrchestrator(
     private val agentRunStreamOrchestrator: AgentRunStreamOrchestrator,
     private val lifecycleManager: AgentRunLifecycleManager,
     private val eventPipeline: AgentRunEventPipeline,
-    private val subagentConfirmResumeExecutor: SubagentConfirmResumeExecutor,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -89,7 +86,6 @@ class AgentRunOrchestrator(
         val threadId: String,
         val runId: String,
         val permissionConfirmResults: List<io.agentscope.core.event.ConfirmResult>,
-        val subagentResumeTarget: AguiPermissionResumeAdapter.SubagentResumeTarget?,
     )
 
     private fun prepareInput(userId: String, projectId: String, input: RunAgentInput): PreparedInput {
@@ -99,20 +95,11 @@ class AgentRunOrchestrator(
         val adapted = aguiPermissionResumeAdapter.adapt(sanitized)
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
         agentSessionService.assertActiveSession(userId, projectId, adapted.input.threadId)
-        if (adapted.subagentResumeTargets.size > 1) {
-            logger.warn(
-                "multiple subagent resume targets in one run, only the first will be driven: " +
-                    "threadId={} targets={}",
-                adapted.input.threadId,
-                adapted.subagentResumeTargets.map { it.agentId },
-            )
-        }
         return PreparedInput(
             adapted.input,
             adapted.input.threadId,
             adapted.input.runId,
             adapted.confirmResults,
-            adapted.subagentResumeTargets.firstOrNull(),
         )
     }
 
@@ -187,30 +174,15 @@ class AgentRunOrchestrator(
         val archiveState = AguiMessageArchiveHandler.State()
         messageArchiveHandler.archiveIncomingUserMessages(prepared.input, prepared.threadId, prepared.runId)
         val interruptState = AguiInterruptTracker.State()
-        val subagentHitlState = SubagentHitlPromoter.State()
-        val subagentTarget = prepared.subagentResumeTarget
-        val runtimeContext: RuntimeContext
-        val eventFlux: Flux<AguiEvent>
-        if (subagentTarget != null) {
-            // 子代理级写操作确认：绕开协调者/大模型推理，直接重新驱动该子代理会话续跑（见
-            // AguiPermissionResumeAdapter 与 SubagentConfirmResumeExecutor 的类注释）。
-            runtimeContext = chatContext.toRuntimeContext()
-            eventFlux = subagentConfirmResumeExecutor.resume(
-                threadId = prepared.threadId,
-                runId = prepared.runId,
-                userId = chatContext.userId,
-                target = subagentTarget,
-            )
-        } else {
-            var ctx = chatContext.toRuntimeContext()
-            if (prepared.permissionConfirmResults.isNotEmpty()) {
-                ctx = RuntimeContext.builder(ctx)
-                    .put(RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS, prepared.permissionConfirmResults)
-                    .build()
-            }
-            runtimeContext = ctx
-            eventFlux = aguiRequestProcessor.process(prepared.input, null, null, runtimeContext).events()
+        var ctx = chatContext.toRuntimeContext()
+        if (prepared.permissionConfirmResults.isNotEmpty()) {
+            ctx = RuntimeContext.builder(ctx)
+                .put(RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS, prepared.permissionConfirmResults)
+                .build()
         }
+        val runtimeContext = ctx
+        val eventFlux: Flux<AguiEvent> = aguiRequestProcessor.process(prepared.input, null, null, runtimeContext)
+            .events()
         val emitter = SseEmitter(properties.sseTimeout.toMillis())
         return AgentRunScope(
             userId = chatContext.userId,
@@ -223,7 +195,6 @@ class AgentRunOrchestrator(
             eventFlux = eventFlux,
             archiveState = archiveState,
             interruptState = interruptState,
-            subagentHitlState = subagentHitlState,
             emitter = emitter,
         )
     }

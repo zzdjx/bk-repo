@@ -66,18 +66,14 @@ class AgentCatalog(
 
     fun bindingFor(definition: DomainAgentDefinition): EffectiveAgentTopology.AgentBinding =
         when (definition.agentId) {
-            AgentIds.CLIENT -> runtimeProperties.topology.agents.client
             AgentIds.DISCOVERY -> runtimeProperties.topology.agents.discovery
             AgentIds.TRANSFER_DIAGNOSTICS -> runtimeProperties.topology.agents.transferDiagnostics
             else -> error("Unknown agent id: ${definition.agentId}")
         }
 
-    private fun runtimeEligible(definition: DomainAgentDefinition): Boolean {
-        if (definition.agentId == AgentIds.CLIENT) {
-            return runtimeProperties.frontendToolsEnabled
-        }
-        return true
-    }
+    // client 本地工具已拍平到协调者自身（不再以 DomainAgentDefinition/子代理形式声明），因此这里
+    // 不再需要按 agentId 特判；只读子代理目前没有额外的运行期开关。
+    private fun runtimeEligible(definition: DomainAgentDefinition): Boolean = true
 
     private fun validateDefinitions(
         definitions: List<DomainAgentDefinition>,

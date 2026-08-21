@@ -66,8 +66,9 @@ class AguiAgentConfiguration {
         properties: EffectiveAgentRuntimeProperties,
         llmProperties: EffectiveAgentLlmProperties,
     ): AguiAdapterConfig {
-        // frontend tools 经 SchemaOnlyTool 注册到 toolkit，Coordinator live toolkit 在 HarnessAgent 构建后剥离；
-        // AG-UI 使用 AGENT_ONLY，RunAgentInput.tools[] 仅做 allowlist 校验（§17.5 / Phase G-26）。
+        // frontend tools 经 ExternalLocalTool 注册到协调者自己的 toolkit 并直接留在 live toolkit 上
+        // （不再像旧版那样在 HarnessAgent 构建后剥离给独立 client 子 Agent）；AG-UI 使用 AGENT_ONLY，
+        // RunAgentInput.tools[] 仅做 allowlist 校验（§17.5 / Phase G-26）。
         val toolMergeMode = ToolMergeMode.AGENT_ONLY
         val enableReasoning = llmProperties.effectiveReasoningEffort() != null
         return AguiAdapterConfig.builder()
@@ -76,10 +77,10 @@ class AguiAgentConfiguration {
             .enableReasoning(enableReasoning)
             .emitTokenUsage(false)
             .emitToolCallArgs(true)
-            // 保持默认 false：子 Agent 事件走框架自带的 SubagentEventConverter 降级为 Custom(subagent.*)，
-            // 避免 agent_spawn 同步阻塞期间子 Agent 自身的 RUN_STARTED/TOOL_CALL_START 泄漏到顶层 AG-UI
-            // 协议状态机（会被 @ag-ui/client 判定为“run 仍处于 active”而报错）。SubagentHitlPromoter 从
-            // Custom(subagent.require_confirm) 关联前置 Custom(subagent.tool_call) 完成 HITL 上冒。
+            // 保持默认 false：discovery/transfer-diagnostics 等只读子 Agent 的事件走框架自带的
+            // SubagentEventConverter 降级为 Custom(subagent.*)，避免 agent_spawn 同步阻塞期间子 Agent
+            // 自身的 RUN_STARTED/TOOL_CALL_START 泄漏到顶层 AG-UI 协议状态机（会被 @ag-ui/client 判定为
+            // “run 仍处于 active”而报错）。这些子 Agent 都是只读的，不会触发 HITL 挂起。
             .toolMergeMode(toolMergeMode)
             .build()
     }

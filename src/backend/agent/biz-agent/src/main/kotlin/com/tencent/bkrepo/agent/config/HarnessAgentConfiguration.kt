@@ -64,14 +64,15 @@ class HarnessAgentConfiguration {
             toolkit = toolkit,
             permissionContext = permissionContext,
         )
-        if (properties.frontendToolsEnabled && properties.topology.coordinator.enabled) {
-            val removed = frontendTools.registeredToolNames.filter { toolkit.getTool(it) != null }
-            removed.forEach { toolkit.removeTool(it) }
-            logger.info(
-                "coordinator live toolkit: removed {} frontend tools (subagent factory retains build-time copy)",
-                removed.size,
-            )
-        }
+        // 拍平方案：client 本地写/读工具（set_download_path 等）不再经由独立的 client 子 Agent，
+        // 而是直接留在协调者自己的 live toolkit 上，由协调者自身的 PermissionContextState/
+        // PermissionEngine 走跟今天 domain 工具完全同构的两轮挂起/恢复（ASK -> callAsync ->
+        // TOOL_SUSPENDED -> 客户端执行结果替换）。历史上这里会在 HarnessAgent 构建完成后把这些工具
+        // 从协调者 live toolkit 移除、只留给 client 子 Agent 工厂持有——现在不再移除。
+        logger.info(
+            "coordinator live toolkit: retaining {} frontend tools for direct coordinator invocation",
+            frontendTools.registeredToolNames.size,
+        )
         val preview = properties.sysPrompt.lines().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
         logger.info(
             "HarnessAgent ready: agentId={}, sysPromptChars={}, preview=\"{}\"",

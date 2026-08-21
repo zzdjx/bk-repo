@@ -30,7 +30,6 @@ class AgentRunOutcomeTrackerTest {
     private val tracker = AgentRunOutcomeTracker(
         aguiInterruptTracker = AguiInterruptTracker(
             interruptNormalizer,
-            FrontendToolCatalog(),
             runtimeProperties,
             ObjectMapper(),
         ),
