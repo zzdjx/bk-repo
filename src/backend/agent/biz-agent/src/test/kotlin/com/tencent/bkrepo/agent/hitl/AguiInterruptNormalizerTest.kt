@@ -120,6 +120,8 @@ class AguiInterruptNormalizerTest {
         assertNotNull(normalized.responseSchema)
         assertNotNull(normalized.expiresAt)
         assertFalse(normalized.expiresAt!!.isBlank())
+        assertNotNull(normalized.message)
+        assertFalse(normalized.message!!.isBlank())
     }
 
     @Test
@@ -141,5 +143,48 @@ class AguiInterruptNormalizerTest {
 
         assertNotNull(interrupt.responseSchema())
         assertNotNull(interrupt.expiresAt())
+        assertNotNull(interrupt.message())
+        assertFalse(interrupt.message()!!.isBlank())
+    }
+
+    /**
+     * 回归 `@ag-ui/client` 报错 `outcome.interrupts[0].message: Expected string, received null`：
+     * [AguiInterruptTracker.buildPermissionAskOutcome] 合成的骨架 permission_confirm interrupt
+     * 只给了 id/reason/toolCallId，`message` 恒为 null，若这里不兜底会原样发到客户端触发该报错
+     * （拍平方案上线后在真实客户端复现过一次）。
+     */
+    @Test
+    fun `fills missing message for permission_confirm interrupt synthesized without message`() {
+        val interrupt = AguiEvent.Interrupt(
+            "permission_confirm-tc-6",
+            "permission_confirm",
+            null,
+            "tc-6",
+            null,
+            null,
+            mapOf("agentscope.interruptKind" to "permission_confirm"),
+        )
+
+        val normalized = normalizer.normalizeInterrupt(interrupt, ttl, "set_download_path")
+
+        assertNotNull(normalized.message())
+        assertFalse(normalized.message()!!.isBlank())
+        assertTrue(normalized.message()!!.contains("set_download_path"))
+    }
+
+    @Test
+    fun `fills missing message for pending snapshot without message`() {
+        val snapshot = PendingInterruptSnapshot(
+            id = "int-7",
+            reason = "permission_confirm",
+            toolCallId = "tc-7",
+            toolName = "set_download_path",
+            metadata = mapOf("agentscope.interruptKind" to "permission_confirm"),
+        )
+
+        val normalized = normalizer.normalizeSnapshot(snapshot, ttl)
+
+        assertNotNull(normalized.message)
+        assertFalse(normalized.message!!.isBlank())
     }
 }

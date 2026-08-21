@@ -16,9 +16,14 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * 补齐 AG-UI interrupt 必填字段，避免 @ag-ui/client 对 null responseSchema/expiresAt 校验失败。
+ * 补齐 AG-UI interrupt 必填字段，避免 @ag-ui/client 对 null responseSchema/expiresAt/message 校验失败。
  *
- * AG-UI 规范中二者可选，但客户端 Zod schema 在 outcome.interrupts[] 下要求 object/string。
+ * AG-UI 规范中三者可选，但客户端 Zod schema 在 outcome.interrupts[] 下要求 object/string/string——
+ * 尤其是 `message`：[com.tencent.bkrepo.agent.hitl.AguiInterruptTracker.buildPermissionAskOutcome]
+ * 合成的骨架 permission_confirm interrupt、以及框架原生 `AgentLifecycleEventConverter` 在挂起工具无
+ * 文本输出时都只给到 `message=null`，若不在这里统一兜底会直接把 `null` 发给客户端触发
+ * `Expected string, received null` 报错（拍平方案上线后在真实客户端复现过一次，随本次修复一并加上
+ * [AguiInterruptNormalizerTest] 回归用例）。
  */
 @Component
 class AguiInterruptNormalizer(
@@ -61,10 +66,12 @@ class AguiInterruptNormalizer(
             else -> GENERIC_OBJECT_SCHEMA
         }
         val expiresAt = interrupt.expiresAt()?.takeIf { it.isNotBlank() } ?: defaultExpiresAt(interruptTtl)
+        val message = interrupt.message()?.takeIf { it.isNotBlank() }
+            ?: defaultMessage(toolName, approval)
         return AguiEvent.Interrupt(
             interrupt.id(),
             interrupt.reason(),
-            interrupt.message(),
+            message,
             interrupt.toolCallId(),
             responseSchema,
             expiresAt,
@@ -81,7 +88,10 @@ class AguiInterruptNormalizer(
             else -> GENERIC_OBJECT_SCHEMA
         }
         val expiresAt = snapshot.expiresAt?.takeIf { it.isNotBlank() } ?: defaultExpiresAt(interruptTtl)
+        val message = snapshot.message?.takeIf { it.isNotBlank() }
+            ?: defaultMessage(snapshot.toolName, approval)
         return snapshot.copy(
+            message = message,
             responseSchema = responseSchema,
             expiresAt = expiresAt,
             requiresApproval = approval || hasApprovedSchema(responseSchema),
@@ -126,6 +136,17 @@ class AguiInterruptNormalizer(
         metadata?.get("agentscope.interruptKind") == "permission_confirm"
 
     private fun defaultExpiresAt(ttl: Duration): String = Instant.now().plus(ttl).toString()
+
+    /** 兜底文案，仅在上游（框架原生转换或本项目合成的骨架 interrupt）没有给出 message 时使用。 */
+    private fun defaultMessage(toolName: String?, requiresApproval: Boolean): String {
+        val name = toolName?.takeIf { it.isNotBlank() }
+        return when {
+            requiresApproval && name != null -> "确认执行 $name？"
+            requiresApproval -> "是否确认继续执行？"
+            name != null -> "等待客户端执行 $name"
+            else -> "等待处理"
+        }
+    }
 
     companion object {
         /** "请客户端本地真正执行该工具"。 */

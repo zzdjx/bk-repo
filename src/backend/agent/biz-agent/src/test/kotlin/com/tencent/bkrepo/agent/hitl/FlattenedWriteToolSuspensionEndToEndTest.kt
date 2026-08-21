@@ -160,11 +160,20 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             assertTrue(round1Interrupts.any { it.reason() == "permission_confirm" }) {
                 "第一轮应是权限确认形态（reason=permission_confirm），实际 interrupts=$round1Interrupts"
             }
+            assertTrue(round1Interrupts.all { !it.message().isNullOrBlank() }) {
+                "@ag-ui/client 的 Zod schema 要求 interrupt.message 为非空字符串（回归：拍平方案上线后" +
+                    "真实客户端报过 'outcome.interrupts[0].message: Expected string, received null'），" +
+                    "实际 interrupts=$round1Interrupts"
+            }
 
             val persistedSession = interruptStateRepository.getPendingInterrupt(threadId)
             val persistedSnapshot = persistedSession?.interrupts?.singleOrNull()
             assertNotNull(persistedSnapshot) {
                 "AgentRunOutcomeTracker 应已把第一轮的 pending interrupt 真正落到仓库，实际=${persistedSession?.interrupts}"
+            }
+            assertTrue(!persistedSnapshot!!.message.isNullOrBlank()) {
+                "持久化快照的 message 同样不能为空——reconnect 时 AgentRunStreamOrchestrator.pendingInterrupts " +
+                    "会把它原样重放给客户端，实际 snapshot=$persistedSnapshot"
             }
 
             // ---------- 第二轮：真实 resume -> Adapter 解析 confirmResults -> 同一协调者/同一 session 续跑 ----------
@@ -213,6 +222,9 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             }
             assertTrue(round2Interrupts.any { it.reason() == "tool_call" }) {
                 "第二轮应是「请客户端本地执行」形状的 interrupt（reason=tool_call），实际 interrupts=$round2Interrupts"
+            }
+            assertTrue(round2Interrupts.all { !it.message().isNullOrBlank() }) {
+                "第二轮 interrupt 的 message 同样不能为空，实际 interrupts=$round2Interrupts"
             }
         } finally {
             server.stop(0)
