@@ -15,6 +15,7 @@ import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
 import com.tencent.bkrepo.agent.session.PendingInterruptSession
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
 import io.agentscope.core.agui.event.AguiEvent
+import io.agentscope.core.event.RequireUserConfirmEvent
 import org.springframework.stereotype.Component
 
 /**
@@ -22,6 +23,20 @@ import org.springframework.stereotype.Component
  *
  * 本类是单例 Spring bean，同一实例会被所有并发 SSE run 共享，因此状态必须以 [State] 的形式
  * 由调用方每次 run 各自持有，不能存为本类的实例字段（否则并发 run 之间会互相污染 toolCallId 映射）。
+ *
+ * ## 协调者原生 PERMISSION_ASKING 缺失的 AG-UI 转换补丁
+ *
+ * `agentscope-extensions-agui` 2.0.1 的 `AgentLifecycleEventConverter` 只在 `AgentResultEvent`
+ * 携带 `GenerateReason.TOOL_SUSPENDED` 时才合成 `RunFinished(interrupt)`；`PermissionEngine` 判定
+ * ASK 时发出的 [RequireUserConfirmEvent] 没有任何内置策略转换，只会原样降级为
+ * `AguiEvent.Raw(source=null, event=RequireUserConfirmEvent)`，随后框架自行发出
+ * `Raw(RequestStopEvent)` 并以 `RunFinished(outcome=null)`（等价于"成功"）收尾——不会让客户端看到
+ * 确认弹窗。这在拍平前不是问题：`client` 子 Agent 走的是 Custom 事件降级路径，由（已删除的）
+ * `SubagentHitlPromoter` 单独促升；子 Agent拍平到协调者自身后，协调者的写工具第一轮 ASK 就直接暴露了
+ * 这个此前从未被真正走到的框架空档。这里用与 [ToolCallStart]/[ToolCallArgs] 相同的
+ * "跟踪 -> 在终态事件时回填" 结构补上：记录 [RequireUserConfirmEvent.toolCalls] 里的 toolCallId，
+ * 终态 `RunFinished(outcome=null)` 时若存在待确认的 toolCallId，合成一个 `reason=permission_confirm`
+ * 的 [AguiEvent.RunFinishedInterruptOutcome]，复用已有的 [enrichInterrupt] 补齐 toolName/toolInput。
  */
 @Component
 class AguiInterruptTracker(
@@ -34,6 +49,7 @@ class AguiInterruptTracker(
     class State {
         val toolNameByCallId = mutableMapOf<String, String>()
         val argsBufferByCallId = mutableMapOf<String, StringBuilder>()
+        val pendingPermissionAskToolCallIds = linkedSetOf<String>()
     }
 
     fun onEvent(event: AguiEvent, state: State) {
@@ -46,7 +62,15 @@ class AguiInterruptTracker(
                 val delta = event.delta()?.takeIf { it.isNotBlank() } ?: return
                 state.argsBufferByCallId.computeIfAbsent(callId) { StringBuilder() }.append(delta)
             }
+            is AguiEvent.Raw -> trackPermissionAsk(event, state)
             else -> Unit
+        }
+    }
+
+    private fun trackPermissionAsk(event: AguiEvent.Raw, state: State) {
+        val confirmEvent = event.event() as? RequireUserConfirmEvent ?: return
+        confirmEvent.toolCalls.forEach { toolCall ->
+            toolCall.id?.takeIf { it.isNotBlank() }?.let { state.pendingPermissionAskToolCallIds.add(it) }
         }
     }
 
@@ -71,7 +95,7 @@ class AguiInterruptTracker(
     }
 
     private fun enrichRunFinished(event: AguiEvent.RunFinished, state: State): AguiEvent.RunFinished {
-        val outcome = event.outcome()
+        val outcome = event.outcome() ?: buildPermissionAskOutcome(state)
         if (outcome !is AguiEvent.RunFinishedInterruptOutcome) {
             return event
         }
@@ -82,6 +106,29 @@ class AguiInterruptTracker(
             event.result(),
             AguiEvent.RunFinishedInterruptOutcome(enriched),
         )
+    }
+
+    /**
+     * 框架原生 `outcome=null`（等价于"成功"）在存在待确认 toolCallId 时是误判：
+     * `RequireUserConfirmEvent` 从未被内置策略转换为 interrupt，见类注释。这里补一个骨架
+     * [AguiEvent.Interrupt]（仅 id/reason/toolCallId + `permission_confirm` 元数据标记），
+     * 剩余字段（toolName/toolInput/responseSchema/expiresAt）交由后续 [enrichInterrupt] 与
+     * [AguiInterruptNormalizer] 按既有链路统一补齐，不在这里重复实现。
+     */
+    private fun buildPermissionAskOutcome(state: State): AguiEvent.RunFinishedOutcome? {
+        if (state.pendingPermissionAskToolCallIds.isEmpty()) return null
+        val interrupts = state.pendingPermissionAskToolCallIds.map { toolCallId ->
+            AguiEvent.Interrupt(
+                "$REASON_PERMISSION_CONFIRM-$toolCallId",
+                REASON_PERMISSION_CONFIRM,
+                null,
+                toolCallId,
+                null,
+                null,
+                mapOf("agentscope.interruptKind" to REASON_PERMISSION_CONFIRM),
+            )
+        }
+        return AguiEvent.RunFinishedInterruptOutcome(interrupts)
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -176,6 +223,7 @@ class AguiInterruptTracker(
     }
 
     companion object {
+        private const val REASON_PERMISSION_CONFIRM = "permission_confirm"
         private val TOOL_INPUT_TYPE = object : TypeReference<Map<String, Any?>>() {}
     }
 }
