@@ -117,14 +117,25 @@ class SubagentConfirmResumeExecutor(
             logger.warn("failed to check child session existence: childSessionId={}", childSessionId, ex)
             null
         }
+        // No Redis in this environment -> AgentStateConfiguration falls back to
+        // InMemoryAgentStateStore. listSessionIds gives us ground truth for what actually got
+        // persisted under this userId, so we can tell a wrong-hash mismatch apart from "the
+        // child's suspended state was never saved at all" without guessing.
+        val allSessionIdsForUser = try {
+            harnessAgent.stateStore?.listSessionIds(userId)
+        } catch (ex: Exception) {
+            logger.warn("failed to list session ids for userId={}", userId, ex)
+            null
+        }
         logger.info(
             "recomputed child sessionId for subagent confirm resume: threadId={} agentId={} spawnLabel={} " +
-                "childSessionId={} existsInStore={}",
+                "childSessionId={} existsInStore={} allSessionIdsForUser={}",
             threadId,
             target.agentId,
             target.spawnLabel,
             childSessionId,
             childSessionExistsInStore,
+            allSessionIdsForUser,
         )
         val childCtx = RuntimeContext.builder(parentRc)
             .sessionId(childSessionId)
