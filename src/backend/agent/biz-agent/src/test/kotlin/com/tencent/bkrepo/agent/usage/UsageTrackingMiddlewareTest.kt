@@ -4,56 +4,35 @@
  * Copyright (C) 2026 Tencent.  All rights reserved.
  *
  * BK-CI 蓝鲸持续集成平台 is licensed under the MIT license.
- *
- * A copy of the MIT License is included in this file.
- *
- *
- * Terms of the MIT License:
- * ---------------------------------------------------
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
- * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all copies or substantial portions of
- * the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
- * LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
- * NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
- * THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package com.tencent.bkrepo.agent
+package com.tencent.bkrepo.agent.usage
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import com.tencent.bkrepo.agent.agent.AgentCatalog
 import com.tencent.bkrepo.agent.agent.AgentFactory
 import com.tencent.bkrepo.agent.agent.discovery.ArtifactDiscoveryAgentDefinition
-import com.tencent.bkrepo.agent.agent.transfer.TransferDiagnosticsAgentDefinition
 import com.tencent.bkrepo.agent.config.AgentHarnessConfigurer
 import com.tencent.bkrepo.agent.config.AgentMemoryConfig
 import com.tencent.bkrepo.agent.config.AgentModelConfig
-import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.config.properties.AgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.AgentLlmPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
+import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PROJECT_ID
+import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.tool.domain.DomainToolNames
 import com.tencent.bkrepo.agent.tool.domain.RegisteredDomainTools
 import com.tencent.bkrepo.agent.tool.frontend.RegisteredFrontendTools
-import com.tencent.bkrepo.agent.tool.local.LocalToolDefinitions
-import com.tencent.bkrepo.agent.usage.NoopAgentUsageDailyService
-import com.tencent.bkrepo.agent.usage.UsageTrackingMiddleware
 import io.agentscope.core.agent.RuntimeContext
-import io.agentscope.core.event.AgentEvent
-import io.agentscope.core.event.TextBlockDeltaEvent
 import io.agentscope.core.message.UserMessage
+import io.agentscope.core.permission.PermissionContextState
 import io.agentscope.core.state.InMemoryAgentStateStore
+import io.agentscope.core.tool.Toolkit
+import io.agentscope.core.tool.ToolkitConfig
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -65,20 +44,15 @@ import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.time.Duration
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * 用桩模型服务跑通一次完整的[io.agentscope.harness.agent.HarnessAgent]会话。
- *
- * 这里验证的是集成风险而不是业务逻辑：AgentScope声明依赖okhttp 5，但仓库统一把okhttp锁在4.x，
- * 编译期发现不了这种降级，只有真正发出一次模型请求才会暴露链接错误。
+ * 验证 [UsageTrackingMiddleware] 真正接入 [io.agentscope.harness.agent.HarnessAgent] 后能落到用量记录，
+ * 而不仅仅是单元测试里孤立调用 `onModelCall`——回归"钩子签名对但没被框架实际调用"这类装配错误。
  */
-@DisplayName("HarnessAgent与蓝鲸模型网关的OpenAI兼容协议冒烟测试")
-class HarnessAgentSmokeTest {
+@DisplayName("UsageTrackingMiddleware接入HarnessAgent后的用量落库冒烟测试")
+class UsageTrackingMiddlewareTest {
 
     private lateinit var server: HttpServer
-    private val receivedPaths = CopyOnWriteArrayList<String>()
-    private val receivedBodies = CopyOnWriteArrayList<String>()
 
     @BeforeEach
     fun startStubModelServer() {
@@ -93,101 +67,88 @@ class HarnessAgentSmokeTest {
     }
 
     @Test
-    fun `模型返回纯文本时ReAct循环应自然结束并流出文本增量`(@TempDir workspace: Path) {
+    fun `一轮无工具对话结束后应记录一次成功的模型调用用量`(@TempDir workspace: Path) {
         val runtimeProperties = EffectiveAgentRuntimeProperties(
-            name = "smoke-agent",
+            name = "usage-smoke-agent",
             sysPrompt = "test",
             maxIters = 3,
             workspace = workspace.toString(),
-            sseTimeout = java.time.Duration.ofMinutes(10),
+            sseTimeout = Duration.ofMinutes(10),
             maxMessageLength = 32 * 1024,
             maxThreadIdLength = 128,
-            sessionTtl = java.time.Duration.ofDays(30),
-            activeRunTtl = java.time.Duration.ofMinutes(11),
-            runEventTtl = java.time.Duration.ofDays(7),
-            reconnectPollInterval = java.time.Duration.ofMillis(500),
-            reconnectTimeout = java.time.Duration.ofMinutes(10),
+            sessionTtl = Duration.ofDays(30),
+            activeRunTtl = Duration.ofMinutes(11),
+            runEventTtl = Duration.ofDays(7),
+            reconnectPollInterval = Duration.ofMillis(500),
+            reconnectTimeout = Duration.ofMinutes(10),
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
-            frontendToolsEnabled = true,
+            frontendToolsEnabled = false,
             topology = EffectiveAgentTopology.defaults(),
         )
         val llmProperties = AgentLlmPropertiesResolver.resolve(
             AgentLlmProperties(
                 baseUrl = "http://127.0.0.1:${server.address.port}/v1",
                 apiKey = "stub-api-key",
-                modelName = "stub-model",
+                modelName = "usage-stub-model",
                 stream = true,
             ),
         )
         val memoryProperties = AgentMemoryPropertiesResolver.resolve(
-            AgentMemoryProperties(
-                compactionEnabled = false,
-                toolResultEvictionEnabled = false,
-            ),
+            AgentMemoryProperties(compactionEnabled = false, toolResultEvictionEnabled = false),
         )
-        val modelConfiguration = AgentModelConfig()
         val agentCatalog = AgentCatalog(
-            definitions = listOf(
-                ArtifactDiscoveryAgentDefinition(),
-                TransferDiagnosticsAgentDefinition(),
-            ),
+            definitions = listOf(ArtifactDiscoveryAgentDefinition()),
             runtimeProperties = runtimeProperties,
             agentFactory = AgentFactory(),
             domainToolRegistrar = object : RegisteredDomainTools {
                 override val registeredToolNames = setOf(
                     DomainToolNames.LIST_REPOSITORIES,
                     DomainToolNames.GET_REPOSITORY_DETAIL,
-                    DomainToolNames.GET_TRANSFER_TASK_STATUS,
-                    DomainToolNames.GET_TRANSFER_ERROR_DETAIL,
                 )
             },
             frontendToolRegistrar = object : RegisteredFrontendTools {
-                override val registeredToolNames =
-                    LocalToolDefinitions.allTools().map { it.name }.toSet()
+                override val registeredToolNames = emptySet<String>()
             },
         )
+        val recordingUsageService = RecordingAgentUsageDailyService()
         val agentHarnessConfigurer = AgentHarnessConfigurer(
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
             permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
-            usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentUsageDailyService()),
-        )
-        val permissionContext = io.agentscope.core.permission.PermissionContextState.builder().build()
-        val toolkit = io.agentscope.core.tool.Toolkit(
-            io.agentscope.core.tool.ToolkitConfig.builder().parallel(false).build(),
+            usageTrackingMiddleware = UsageTrackingMiddleware(recordingUsageService),
         )
         val agent = agentHarnessConfigurer.configure(
             properties = runtimeProperties,
             memory = memoryProperties,
-            model = modelConfiguration.agentChatModel(llmProperties),
+            model = AgentModelConfig().agentChatModel(llmProperties),
             stateStore = InMemoryAgentStateStore(),
-            toolkit = toolkit,
-            permissionContext = permissionContext,
+            toolkit = Toolkit(ToolkitConfig.builder().parallel(false).build()),
+            permissionContext = PermissionContextState.builder().build(),
         )
         val runtimeContext = RuntimeContext.builder()
-            .userId("smoke-user")
-            .sessionId("smoke-session")
+            .userId("usage-smoke-user")
+            .sessionId("usage-smoke-session")
+            .put(RUNTIME_CONTEXT_PROJECT_ID, "usage-smoke-project")
             .build()
 
-        val events: List<AgentEvent> = agent
-            .streamEvents(UserMessage("smoke-user", "你好"), runtimeContext)
+        agent.streamEvents(UserMessage("usage-smoke-user", "你好"), runtimeContext)
             .collectList()
             .block(Duration.ofSeconds(60))
-            .orEmpty()
 
-        val streamedText = events.filterIsInstance<TextBlockDeltaEvent>().joinToString("") { it.delta }
-        assertEquals(REPLY_TEXT, streamedText)
-        assertTrue(receivedPaths.isNotEmpty()) { "桩模型服务未收到任何请求" }
-        assertTrue(receivedBodies.any { it.contains("stub-model") }) {
-            "请求体未携带配置的模型名: $receivedBodies"
+        assertEquals(1, recordingUsageService.calls.size) {
+            "应恰好记录一次模型调用用量，实际=${recordingUsageService.calls}"
         }
+        val recorded = recordingUsageService.calls.single()
+        assertEquals("usage-smoke-user", recorded.userId)
+        assertEquals("usage-smoke-project", recorded.projectId)
+        assertEquals("usage-smoke-agent", recorded.agentId)
+        assertEquals("usage-stub-model", recorded.modelName)
+        assertTrue(recorded.success) { "桩模型返回正常文本，应记为成功调用" }
     }
 
     private fun respondWithChatCompletionChunks(exchange: HttpExchange) {
         exchange.use {
-            receivedPaths.add(it.requestURI.path)
-            receivedBodies.add(it.requestBody.readBytes().toString(StandardCharsets.UTF_8))
             it.responseHeaders.add("Content-Type", "text/event-stream")
             it.sendResponseHeaders(200, 0)
             val body = REPLY_TEXT.map { char -> deltaChunk("""{"content":"$char"}""") }
@@ -201,8 +162,8 @@ class HarnessAgentSmokeTest {
 
     private fun deltaChunk(delta: String, finishReason: String? = null): String {
         val finish = finishReason?.let { "\"$it\"" } ?: "null"
-        return "data: {\"id\":\"chatcmpl-smoke\",\"object\":\"chat.completion.chunk\",\"created\":0," +
-            "\"model\":\"stub-model\",\"choices\":[{\"index\":0,\"delta\":$delta," +
+        return "data: {\"id\":\"chatcmpl-usage-smoke\",\"object\":\"chat.completion.chunk\",\"created\":0," +
+            "\"model\":\"usage-stub-model\",\"choices\":[{\"index\":0,\"delta\":$delta," +
             "\"finish_reason\":$finish}]}\n\n"
     }
 

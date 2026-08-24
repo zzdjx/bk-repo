@@ -38,6 +38,8 @@ import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
 import com.tencent.bkrepo.agent.tool.frontend.RegisteredFrontendTools
 import com.tencent.bkrepo.agent.tool.local.ExternalLocalTool
 import com.tencent.bkrepo.agent.tool.local.LocalToolDefinitions
+import com.tencent.bkrepo.agent.usage.NoopAgentUsageDailyService
+import com.tencent.bkrepo.agent.usage.UsageTrackingMiddleware
 import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.core.agui.adapter.AguiAdapterConfig
 import io.agentscope.core.agui.event.AguiEvent
@@ -266,6 +268,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
             permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
+            usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentUsageDailyService()),
         )
         val coordinatorPermissionContext = AgentPermissionRulesConfiguration()
             .agentPermissionContext(runtimeProperties)
