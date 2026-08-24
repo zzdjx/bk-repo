@@ -88,4 +88,27 @@ class AgentRunDao : SimpleMongoDao<TAgentRun>() {
     fun removeByThreadId(threadId: String) {
         remove(Query(Criteria.where(TAgentRun::threadId.name).`is`(threadId)))
     }
+
+    /**
+     * 按 runId 原子累加一次模型调用的用量到对应的 run 记录上。
+     *
+     * 用 `$inc` 而不是"先查后写"，允许同一 run 内多次模型调用（ReAct 循环、确认后二次调用等）并发安全叠加。
+     * 若对应 runId 尚不存在（理论上不应发生，[startRun] 早于任何模型调用）则静默无操作，不抛异常。
+     */
+    fun incrementUsage(
+        runId: String,
+        inputTokens: Long,
+        outputTokens: Long,
+        cachedTokens: Long,
+        durationMs: Long,
+    ) {
+        val query = Query(Criteria.where(TAgentRun::runId.name).`is`(runId))
+        val update = Update()
+            .inc(TAgentRun::modelCallCount.name, 1)
+            .inc(TAgentRun::inputTokens.name, inputTokens)
+            .inc(TAgentRun::outputTokens.name, outputTokens)
+            .inc(TAgentRun::cachedTokens.name, cachedTokens)
+            .inc(TAgentRun::totalModelDurationMs.name, durationMs)
+        updateFirst(query, update)
+    }
 }

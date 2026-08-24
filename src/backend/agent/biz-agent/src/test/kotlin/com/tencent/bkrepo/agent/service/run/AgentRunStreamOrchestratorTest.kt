@@ -165,6 +165,13 @@ class AgentRunStreamOrchestratorTest {
             errorCode: String?,
         ) = Unit
         override fun removeByThreadId(threadId: String) = Unit
+        override fun recordModelCallUsage(
+            runId: String,
+            inputTokens: Long,
+            outputTokens: Long,
+            cachedTokens: Long,
+            durationMs: Long,
+        ) = Unit
     }
 
     private class FakeRunEventService(

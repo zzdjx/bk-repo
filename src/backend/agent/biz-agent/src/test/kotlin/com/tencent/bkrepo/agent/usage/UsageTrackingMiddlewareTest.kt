@@ -22,7 +22,7 @@ import com.tencent.bkrepo.agent.config.properties.AgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
-import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PROJECT_ID
+import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_RUN_ID
 import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.tool.domain.DomainToolNames
 import com.tencent.bkrepo.agent.tool.domain.RegisteredDomainTools
@@ -35,7 +35,6 @@ import io.agentscope.core.tool.Toolkit
 import io.agentscope.core.tool.ToolkitConfig
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -46,8 +45,9 @@ import java.nio.file.Path
 import java.time.Duration
 
 /**
- * 验证 [UsageTrackingMiddleware] 真正接入 [io.agentscope.harness.agent.HarnessAgent] 后能落到用量记录，
- * 而不仅仅是单元测试里孤立调用 `onModelCall`——回归"钩子签名对但没被框架实际调用"这类装配错误。
+ * 验证 [UsageTrackingMiddleware] 真正接入 [io.agentscope.harness.agent.HarnessAgent] 后能按 runId
+ * 落到 `agent_run` 记录上，而不仅仅是单元测试里孤立调用 `onModelCall`——回归"钩子签名对但没被框架实际调用"
+ * 这类装配错误。
  */
 @DisplayName("UsageTrackingMiddleware接入HarnessAgent后的用量落库冒烟测试")
 class UsageTrackingMiddlewareTest {
@@ -111,7 +111,7 @@ class UsageTrackingMiddlewareTest {
                 override val registeredToolNames = emptySet<String>()
             },
         )
-        val recordingUsageService = RecordingAgentUsageDailyService()
+        val recordingUsageService = RecordingAgentRunRecordService()
         val agentHarnessConfigurer = AgentHarnessConfigurer(
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
@@ -129,7 +129,7 @@ class UsageTrackingMiddlewareTest {
         val runtimeContext = RuntimeContext.builder()
             .userId("usage-smoke-user")
             .sessionId("usage-smoke-session")
-            .put(RUNTIME_CONTEXT_PROJECT_ID, "usage-smoke-project")
+            .put(RUNTIME_CONTEXT_RUN_ID, "usage-smoke-run")
             .build()
 
         agent.streamEvents(UserMessage("usage-smoke-user", "你好"), runtimeContext)
@@ -140,11 +140,7 @@ class UsageTrackingMiddlewareTest {
             "应恰好记录一次模型调用用量，实际=${recordingUsageService.calls}"
         }
         val recorded = recordingUsageService.calls.single()
-        assertEquals("usage-smoke-user", recorded.userId)
-        assertEquals("usage-smoke-project", recorded.projectId)
-        assertEquals("usage-smoke-agent", recorded.agentId)
-        assertEquals("usage-stub-model", recorded.modelName)
-        assertTrue(recorded.success) { "桩模型返回正常文本，应记为成功调用" }
+        assertEquals("usage-smoke-run", recorded.runId)
     }
 
     private fun respondWithChatCompletionChunks(exchange: HttpExchange) {

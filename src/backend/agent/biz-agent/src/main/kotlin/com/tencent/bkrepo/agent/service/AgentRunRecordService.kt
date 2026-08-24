@@ -56,4 +56,16 @@ interface AgentRunRecordService {
     )
 
     fun removeByThreadId(threadId: String)
+
+    /**
+     * 累加一次模型调用的用量到 runId 对应的 run 记录上；任何异常都不应向上抛出，
+     * 用量记录失败不能影响 Agent 主链路（实现参考 [finishRun] 的容错风格）。
+     */
+    fun recordModelCallUsage(
+        runId: String,
+        inputTokens: Long = 0,
+        outputTokens: Long = 0,
+        cachedTokens: Long = 0,
+        durationMs: Long = 0,
+    )
 }

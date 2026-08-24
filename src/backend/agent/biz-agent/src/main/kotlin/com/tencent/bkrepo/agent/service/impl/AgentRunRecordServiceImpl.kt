@@ -114,6 +114,20 @@ class AgentRunRecordServiceImpl(
         agentRunDao.removeByThreadId(threadId)
     }
 
+    override fun recordModelCallUsage(
+        runId: String,
+        inputTokens: Long,
+        outputTokens: Long,
+        cachedTokens: Long,
+        durationMs: Long,
+    ) {
+        try {
+            agentRunDao.incrementUsage(runId, inputTokens, outputTokens, cachedTokens, durationMs)
+        } catch (ex: Exception) {
+            logger.warn("failed to record model call usage for run[$runId]", ex)
+        }
+    }
+
     companion object {
         private val logger = LoggerFactory.getLogger(AgentRunRecordServiceImpl::class.java)
     }

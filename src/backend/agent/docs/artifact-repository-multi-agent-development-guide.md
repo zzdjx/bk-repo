@@ -751,12 +751,12 @@ AgentScope `AgentEvent` 是内部事件源，必须由官方 `AguiAgentAdapter` 
 
 ### 11.3 用量
 
-框架提供单次 `ChatUsage`，跨请求聚合需自建：
+框架提供单次 `ChatUsage`（`ModelCallEndEvent`），跨调用聚合需自建，已落地为 `UsageTrackingMiddleware`：
 
-- 按用户、项目、Agent、模型和日期聚合；
-- 记录输入、输出、缓存 token、调用次数和耗时；
-- 支持配额、告警和成本分析；
-- 计量失败不阻塞主流程，但进入补偿队列。
+- 落在 §12.3 `agent_run` 上，按 `runId` 聚合（不是按天/按用户聚合到独立集合）：一次 run 内可能发生多次模型调用（ReAct 工具调用循环、历史压缩摘要调用等），用 `$inc` 原子累加到对应 run 记录；
+- 记录输入、输出、缓存 token、调用次数（含失败调用）和模型调用耗时之和；
+- 计量失败只捕获日志，不阻塞主流程，也不重试或进入补偿队列（保持最简单实现，用量统计允许偶发丢失）；
+- 配额、告警、成本分析看板，以及工具调用维度的审计（tool-level auditing）尚未实现，留待后续单独排期。
 
 ### 11.4 审计
 
@@ -800,9 +800,9 @@ AgentScope `AgentEvent` 是内部事件源，必须由官方 `AguiAgentAdapter` 
 - `status`、`outcome`、`entryAgentId`、`triggerType`；
 - `startedAt`、`finishedAt`；
 - `cancelReason`、`errorCode`、`traceId`；
-- 预算和实际消耗。
+- 用量：`modelCallCount`（含失败调用）、`inputTokens`、`outputTokens`、`cachedTokens`、`totalModelDurationMs`（模型调用耗时之和，区别于 run 总时长 `durationMs`），由 `UsageTrackingMiddleware` 监听 `ModelCallEndEvent` 按 runId `$inc` 累加。
 
-`runId` 全局唯一；服务端若需要内部尝试号，另建 `executionId`，不得替换 AG-UI runId。resume run 通过 interrupt/approval 记录关联前一 run。
+`runId` 全局唯一；服务端若需要内部尝试号，另建 `executionId`，不得替换 AG-UI runId。resume run 通过 interrupt/approval 记录关联前一 run，`agent_run` 本身不存父子 run 关联字段——HITL 场景下一次用户交互可能横跨两个 runId（挂起的 run 与 resume 的 run），但这层关联已经能从 `originRunId` 追溯，不在 `agent_run` 上冗余存储。
 
 ### 12.4 agent_task
 
@@ -819,14 +819,9 @@ AgentScope `AgentEvent` 是内部事件源，必须由官方 `AguiAgentAdapter` 
 - `status`、`expiresAt`、`confirmedAt`；
 - `idempotencyKey`。
 
-### 12.6 agent_usage_daily
+### 12.6 用量统计（已并入 agent_run，未单独建表）
 
-- 日期、用户、项目、Agent、模型；
-- 模型调用次数；
-- 输入/输出 token；
-- 工具调用次数；
-- 成功/失败数；
-- 累计耗时。
+最初规划为独立的按天聚合集合 `agent_usage_daily`（维度：日期、用户、项目、Agent、模型），实现后发现按天聚合会把同一用户同一天开的多个新会话摞进同一条记录、且一旦写入就无法拆分回溯，不满足"按次可查"的诉求。改为直接把用量字段挂在 §12.3 `agent_run` 上，天然按 `runId` 区分，不需要额外的聚合维度和单独的集合。工具调用次数/成功失败数的审计（tool-level auditing）留待后续单独排期，届时视需要在 `agent_run` 或专门的工具调用记录里追加字段。
 
 Redis 仅保存：
 

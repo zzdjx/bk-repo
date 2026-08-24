@@ -71,4 +71,11 @@ data class TAgentRun(
     var errorCode: String? = null,
     var traceId: String? = null,
     var durationMs: Long? = null,
+    /** 本次 run 内累计的模型调用次数（含失败调用），来自 [com.tencent.bkrepo.agent.usage.UsageTrackingMiddleware]。 */
+    var modelCallCount: Long = 0,
+    var inputTokens: Long = 0,
+    var outputTokens: Long = 0,
+    var cachedTokens: Long = 0,
+    /** 本次 run 内所有模型调用耗时之和，非 run 总时长（run 总时长见 [durationMs]）。 */
+    var totalModelDurationMs: Long = 0,
 )

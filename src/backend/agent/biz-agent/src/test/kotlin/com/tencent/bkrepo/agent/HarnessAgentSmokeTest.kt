@@ -47,7 +47,7 @@ import com.tencent.bkrepo.agent.tool.domain.DomainToolNames
 import com.tencent.bkrepo.agent.tool.domain.RegisteredDomainTools
 import com.tencent.bkrepo.agent.tool.frontend.RegisteredFrontendTools
 import com.tencent.bkrepo.agent.tool.local.LocalToolDefinitions
-import com.tencent.bkrepo.agent.usage.NoopAgentUsageDailyService
+import com.tencent.bkrepo.agent.usage.NoopAgentRunRecordService
 import com.tencent.bkrepo.agent.usage.UsageTrackingMiddleware
 import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.core.event.AgentEvent
@@ -151,7 +151,7 @@ class HarnessAgentSmokeTest {
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
             permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
-            usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentUsageDailyService()),
+            usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentRunRecordService()),
         )
         val permissionContext = io.agentscope.core.permission.PermissionContextState.builder().build()
         val toolkit = io.agentscope.core.tool.Toolkit(
