@@ -756,7 +756,7 @@ AgentScope `AgentEvent` 是内部事件源，必须由官方 `AguiAgentAdapter` 
 - 落在 §12.3 `agent_run` 上，按 `runId` 聚合（不是按天/按用户聚合到独立集合）：一次 run 内可能发生多次模型调用（ReAct 工具调用循环、历史压缩摘要调用等），用 `$inc` 原子累加到对应 run 记录；
 - 记录输入、输出、缓存 token、调用次数（含失败调用）和模型调用耗时之和；
 - 计量失败只捕获日志，不阻塞主流程，也不重试或进入补偿队列（保持最简单实现，用量统计允许偶发丢失）；
-- 配额、告警、成本分析看板，以及工具调用维度的审计（tool-level auditing）尚未实现，留待后续单独排期。
+- 配额、告警、成本分析看板尚未实现，留待后续单独排期。
 
 ### 11.4 审计
 
@@ -772,6 +772,14 @@ AgentScope `AgentEvent` 是内部事件源，必须由官方 `AguiAgentAdapter` 
 - 实际执行者仍为真实用户。
 
 审计记录行为和资源摘要，不记录凭证、完整提示词或无必要的敏感工具结果。
+
+**工具级审计（tool-level auditing）已落地为 `ToolAuditMiddleware` + `agent_tool_call`**（见 §12.7）。核心难点是拍平方案下本地写工具（`ExternalLocalTool`）要经历两段挂起——`PermissionEngine` 判 ASK 时工具还没跑，用户确认后工具才真正被放行调用、但服务端视角只能看到"已转发给客户端"（永远拿不到客户端真实的执行结果，因为服务端从不真正执行本地工具）；客户端本地执行完、把结果通过 resume 回传时，命中的是框架 `TOOL_SUSPENDED` 的"纯状态替换"恢复路径，完全不经过 `onActing`。因此审计分两个钩子：
+
+- `onActing`：工具批次开始时按 `ALLOWED` 落一条初始记录（`recordCalled`），随后依据事件流回填终态——`RequireUserConfirmEvent` → `ASKING`；`ToolResultEndEvent(state=DENIED)` → `RULE_DENIED`；其余 `ToolResultEndEvent` → 按 `ToolResultState` 映射到 `AgentToolResultState`（`RUNNING` 即"已放行、挂起转发给客户端"）。
+- `onAgent`：每次协调者被调用时检查输入消息里的 `ToolResultBlock`（resume 时由框架标准转换器产出），若其 `toolCallId` 命中一行还停在 `RUNNING` 的记录，就用其真实 `state` 补齐终态（`recordClientReportedResult`），这一步补上客户端真实执行结果，是本设计相对"只记服务端能看到的状态"最初方案的增量。
+- 用户在确认卡片点"拒绝"时，`AguiPermissionResumeAdapter` 直接调用 `recordUserDenied` 落 `ASK_DENIED`，不依赖 `onActing` 是否会重放（被拒绝的工具调用不一定会再走一次 acting 阶段）。
+- 已知的剩余缺口：同一批工具调用里如果同时出现"需要 ASK"和"命中 DENY 规则"两种工具（罕见的并行调用场景），框架会整批直接返回 `RequireUserConfirmEvent` 并跳过 `runToolBatch`，被规则拒绝的那个工具调用不会有 `ToolResultEndEvent`，对应审计行会停在初始态——这是框架事件流本身的限制，代价与收益不成正比，暂不特殊处理。
+- 记录内容做了截断（`argsDigest`/`resultDigest` 上限 2000 字符）和字段级去敏（只存摘要，不存完整工具输出），任何审计写入失败只记日志、不影响主链路。
 
 ## 12. 数据模型
 
@@ -821,7 +829,20 @@ AgentScope `AgentEvent` 是内部事件源，必须由官方 `AguiAgentAdapter` 
 
 ### 12.6 用量统计（已并入 agent_run，未单独建表）
 
-最初规划为独立的按天聚合集合 `agent_usage_daily`（维度：日期、用户、项目、Agent、模型），实现后发现按天聚合会把同一用户同一天开的多个新会话摞进同一条记录、且一旦写入就无法拆分回溯，不满足"按次可查"的诉求。改为直接把用量字段挂在 §12.3 `agent_run` 上，天然按 `runId` 区分，不需要额外的聚合维度和单独的集合。工具调用次数/成功失败数的审计（tool-level auditing）留待后续单独排期，届时视需要在 `agent_run` 或专门的工具调用记录里追加字段。
+最初规划为独立的按天聚合集合 `agent_usage_daily`（维度：日期、用户、项目、Agent、模型），实现后发现按天聚合会把同一用户同一天开的多个新会话摞进同一条记录、且一旦写入就无法拆分回溯，不满足"按次可查"的诉求。改为直接把用量字段挂在 §12.3 `agent_run` 上，天然按 `runId` 区分，不需要额外的聚合维度和单独的集合。
+
+### 12.7 agent_tool_call（工具级审计）
+
+由 `ToolAuditMiddleware`（见 §11.4）写入，每一次工具调用尝试对应一行：
+
+- `runId`、`threadId`、`userId`、`projectId`、`toolCallId`（唯一约束 `runId + toolCallId`）；
+- `toolName`、`argsDigest`（截断后的参数摘要）；
+- `decision`：`ALLOWED` / `ASKING` / `RULE_DENIED` / `ASK_DENIED`；
+- `resultState`：`SUCCESS` / `ERROR` / `INTERRUPTED` / `DENIED` / `RUNNING`（`RUNNING` 即"已放行、挂起转发给客户端，尚未拿到客户端真实执行结果"）；
+- `resultDigest`（截断后的结果摘要）；
+- `calledAt`、`resolvedAt`、`durationMs`。
+
+索引：`runId + toolCallId`（唯一）、`toolCallId + resultState`（供 `onAgent` 钩子按 `toolCallId` 快速定位仍处于 `RUNNING` 的行）、`threadId + calledAt`、`userId + projectId + calledAt`。不建独立的按天/按用户聚合视图，需要报表时直接对本集合做时间范围查询。
 
 Redis 仅保存：
 
@@ -1196,8 +1217,8 @@ Redis 仅保存：
 
 **自建设计**
 
-- usage 聚合；
-- 写操作审计；
+- usage 聚合（已完成，见 §11.3/§12.3：`UsageTrackingMiddleware` 按 `runId` 累加到 `agent_run`）；
+- 写操作审计（已完成，见 §11.4/§12.7：`ToolAuditMiddleware` + `agent_tool_call`，含客户端真实执行结果回填）；
 - 离线评估集；
 - 工具选择、权限越权、幻觉、答案质量和成本指标；
 - prompt/model/tool catalog 版本关联。

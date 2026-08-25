@@ -27,12 +27,15 @@
 
 package com.tencent.bkrepo.agent
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import com.tencent.bkrepo.agent.agent.AgentCatalog
 import com.tencent.bkrepo.agent.agent.AgentFactory
 import com.tencent.bkrepo.agent.agent.discovery.ArtifactDiscoveryAgentDefinition
 import com.tencent.bkrepo.agent.agent.transfer.TransferDiagnosticsAgentDefinition
+import com.tencent.bkrepo.agent.audit.NoopAgentToolCallRecordService
+import com.tencent.bkrepo.agent.audit.ToolAuditMiddleware
 import com.tencent.bkrepo.agent.config.AgentHarnessConfigurer
 import com.tencent.bkrepo.agent.config.AgentMemoryConfig
 import com.tencent.bkrepo.agent.config.AgentModelConfig
@@ -152,6 +155,7 @@ class HarnessAgentSmokeTest {
             agentCatalog = agentCatalog,
             permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentRunRecordService()),
+            toolAuditMiddleware = ToolAuditMiddleware(NoopAgentToolCallRecordService(), ObjectMapper()),
         )
         val permissionContext = io.agentscope.core.permission.PermissionContextState.builder().build()
         val toolkit = io.agentscope.core.tool.Toolkit(

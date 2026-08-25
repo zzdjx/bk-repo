@@ -8,6 +8,7 @@
 
 package com.tencent.bkrepo.agent.hitl
 
+import com.tencent.bkrepo.agent.service.AgentToolCallRecordService
 import io.agentscope.core.agui.model.AguiResume
 import io.agentscope.core.agui.model.RunAgentInput
 import io.agentscope.core.event.ConfirmResult
@@ -26,10 +27,16 @@ import org.springframework.stereotype.Component
  * 绕开协调者直接重新驱动子代理会话）。`client` 本地工具已拍平到协调者自身（不再是子 Agent，见
  * [com.tencent.bkrepo.agent.config.AgentHarnessConfigurer]），ASKING 现在始终挂在协调者自己身上，
  * 因此这里只保留唯一一条路径：全部走 [confirmResults] + [PermissionConfirmResumeMiddleware]。
+ *
+ * 用户在确认卡片上点"拒绝"（`approved=false`）时，[com.tencent.bkrepo.agent.audit.ToolAuditMiddleware]
+ * 的 [io.agentscope.core.middleware.MiddlewareBase.onActing] 钩子不一定能观察到——被拒绝的工具调用有
+ * 可能不会再经过一次 `onActing`（取决于框架 `applyConfirmResults` 是否重新驱动 acting 阶段），因此这里
+ * 直接、独立地把"用户拒绝"这个明确信号写进工具审计记录，不依赖 onActing 是否会重放。
  */
 @Component
 class AguiPermissionResumeAdapter(
     private val interruptStateRepository: AgentInterruptStateRepository,
+    private val agentToolCallRecordService: AgentToolCallRecordService,
 ) {
 
     data class AdaptedRun(
@@ -60,7 +67,11 @@ class AguiPermissionResumeAdapter(
                 continue
             }
             val approved = extractApproved(entry.payload) == true
-            confirmResults.add(ConfirmResult(approved, buildToolUseBlock(snapshot)))
+            val toolUseBlock = buildToolUseBlock(snapshot)
+            if (!approved) {
+                agentToolCallRecordService.recordUserDenied(pending.originRunId, toolUseBlock.id)
+            }
+            confirmResults.add(ConfirmResult(approved, toolUseBlock))
         }
 
         if (confirmResults.isEmpty()) {

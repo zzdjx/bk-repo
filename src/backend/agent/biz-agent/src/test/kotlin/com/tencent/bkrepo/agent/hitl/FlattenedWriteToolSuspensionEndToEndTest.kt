@@ -15,6 +15,8 @@ import com.tencent.bkrepo.agent.agent.AgentCatalog
 import com.tencent.bkrepo.agent.agent.AgentFactory
 import com.tencent.bkrepo.agent.agent.discovery.ArtifactDiscoveryAgentDefinition
 import com.tencent.bkrepo.agent.agent.transfer.TransferDiagnosticsAgentDefinition
+import com.tencent.bkrepo.agent.audit.RecordingAgentToolCallRecordService
+import com.tencent.bkrepo.agent.audit.ToolAuditMiddleware
 import com.tencent.bkrepo.agent.config.AgentHarnessConfigurer
 import com.tencent.bkrepo.agent.config.AgentMemoryConfig
 import com.tencent.bkrepo.agent.config.AgentModelConfig
@@ -26,8 +28,10 @@ import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimePropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS
+import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_RUN_ID
 import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
+import com.tencent.bkrepo.agent.pojo.AgentToolResultState
 import com.tencent.bkrepo.agent.service.run.AgentRunOutcomeTracker
 import com.tencent.bkrepo.agent.session.HarnessAgentResolver
 import com.tencent.bkrepo.agent.session.InMemoryAgentPendingInterruptStore
@@ -110,6 +114,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
         pendingInterruptStore = InMemoryAgentPendingInterruptStore(),
         resumeIdempotencyStore = InMemoryAgentResumeIdempotencyStore(),
     )
+    private val toolCallRecordService = RecordingAgentToolCallRecordService()
 
     @Test
     fun `协调者直接挂起set_download_path确认后应真正放行执行而不是重新自我介绍`(@TempDir workspace: Path) {
@@ -178,6 +183,14 @@ class FlattenedWriteToolSuspensionEndToEndTest {
                     "会把它原样重放给客户端，实际 snapshot=$persistedSnapshot"
             }
 
+            assertTrue(toolCallRecordService.calledEvents.any { it.toolName == "set_download_path" }) {
+                "ToolAuditMiddleware 应在 PRE_ACTING 记下 set_download_path 的调用，实际=${toolCallRecordService.calledEvents}"
+            }
+            assertTrue(toolCallRecordService.askingEvents.any { it.first == round1RunId }) {
+                "ToolAuditMiddleware 应在 RequireUserConfirmEvent 时记下第一轮的 ASKING，" +
+                    "实际=${toolCallRecordService.askingEvents}"
+            }
+
             // ---------- 第二轮：真实 resume -> Adapter 解析 confirmResults -> 同一协调者/同一 session 续跑 ----------
             val resumeInput = RunAgentInput.builder()
                 .threadId(threadId)
@@ -192,7 +205,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
                     ),
                 )
                 .build()
-            val adapted = AguiPermissionResumeAdapter(interruptStateRepository).adapt(resumeInput)
+            val adapted = AguiPermissionResumeAdapter(interruptStateRepository, toolCallRecordService).adapt(resumeInput)
             assertTrue(adapted.confirmResults.isNotEmpty()) {
                 "拍平后写工具的 ASKING 应始终挂在协调者自己身上，Adapter 应解析出非空的 confirmResults，" +
                     "实际=${adapted.confirmResults}"
@@ -227,6 +240,95 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             }
             assertTrue(round2Interrupts.all { !it.message().isNullOrBlank() }) {
                 "第二轮 interrupt 的 message 同样不能为空，实际 interrupts=$round2Interrupts"
+            }
+
+            assertTrue(
+                toolCallRecordService.executedEvents.any {
+                    it.runId == round2RunId && it.resultState == AgentToolResultState.RUNNING
+                },
+            ) {
+                "确认放行后 set_download_path 真正被调用、挂起转发给客户端，ToolAuditMiddleware 应记下" +
+                    " resultState=RUNNING 的终态（服务端视角能看到的最终态，客户端真实执行结果由" +
+                    " onAgent 钩子在后续 resume 里补齐，见 ToolAuditMiddlewareTest），" +
+                    "实际=${toolCallRecordService.executedEvents}"
+            }
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `用户在确认卡片上点拒绝时应记录ASK_DENIED且不应真正放行执行`(@TempDir workspace: Path) {
+        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange -> respondFromStub(exchange) }
+        server.start()
+        try {
+            val runtimeProperties = AgentRuntimePropertiesResolver.resolve(
+                AgentRuntimeProperties(workspace = workspace.toString(), maxIters = 6),
+            )
+            val coordinator = buildCoordinator(runtimeProperties)
+            val registry = AguiAgentRegistry()
+            registry.register(runtimeProperties.name, coordinator)
+            val agentResolver = HarnessAgentResolver(registry, runtimeProperties)
+            val adapterConfig = AguiAdapterConfig.builder()
+                .defaultAgentId(runtimeProperties.name)
+                .runTimeout(runtimeProperties.sseTimeout)
+                .enableReasoning(false)
+                .emitTokenUsage(false)
+                .emitToolCallArgs(true)
+                .toolMergeMode(ToolMergeMode.AGENT_ONLY)
+                .build()
+            val processor = AguiRequestProcessor.builder()
+                .agentResolver(agentResolver)
+                .config(adapterConfig)
+                .build()
+
+            val round1Events = runRoundAndCollectEvents(
+                processor = processor,
+                runId = round1RunId,
+                messages = listOf(AguiMessage.userMessage("msg-user-1", "帮我把下载目录改到 $downloadPath")),
+                resume = emptyList(),
+            )
+            replayThroughRealPipelineAndPersist(round1Events, round1RunId)
+            val persistedSnapshot = interruptStateRepository.getPendingInterrupt(threadId)?.interrupts?.singleOrNull()
+            assertNotNull(persistedSnapshot) {
+                "第一轮应先落一个待确认的 pending interrupt，实际=${interruptStateRepository.getPendingInterrupt(threadId)}"
+            }
+
+            // ---------- 第二轮：真实 resume，approved=false ----------
+            val resumeInput = RunAgentInput.builder()
+                .threadId(threadId)
+                .runId(round2RunId)
+                .resume(
+                    listOf(
+                        AguiResume(persistedSnapshot!!.id, AguiResume.STATUS_RESOLVED, mapOf("approved" to false)),
+                    ),
+                )
+                .build()
+            val adapted = AguiPermissionResumeAdapter(interruptStateRepository, toolCallRecordService).adapt(resumeInput)
+            assertTrue(adapted.confirmResults.isNotEmpty()) {
+                "即便是拒绝，Adapter 也应解析出对应的 confirmResults（confirmed=false），实际=${adapted.confirmResults}"
+            }
+            assertTrue(adapted.confirmResults.none { it.isConfirmed }) {
+                "本轮应是拒绝场景，confirmResults 里不应有 confirmed=true 的项，实际=${adapted.confirmResults}"
+            }
+
+            assertTrue(toolCallRecordService.userDeniedEvents.any { it.first == round1RunId }) {
+                "用户拒绝时 AguiPermissionResumeAdapter 应直接把该行标记为用户拒绝，不依赖 onActing 是否重放，" +
+                    "实际=${toolCallRecordService.userDeniedEvents}"
+            }
+
+            runRoundAndCollectEvents(
+                processor = processor,
+                runId = round2RunId,
+                messages = adapted.input.messages,
+                resume = adapted.input.resume,
+                confirmResults = adapted.confirmResults,
+            )
+
+            assertTrue(toolCallRecordService.executedEvents.none { it.resultState == AgentToolResultState.RUNNING }) {
+                "用户拒绝后 set_download_path 不应被真正放行调用（不应出现服务端已转发给客户端执行的" +
+                    " RUNNING 终态），实际=${toolCallRecordService.executedEvents}"
             }
         } finally {
             server.stop(0)
@@ -269,6 +371,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             agentCatalog = agentCatalog,
             permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentRunRecordService()),
+            toolAuditMiddleware = ToolAuditMiddleware(toolCallRecordService, ObjectMapper()),
         )
         val coordinatorPermissionContext = AgentPermissionRulesConfiguration()
             .agentPermissionContext(runtimeProperties)
@@ -304,6 +407,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
         var runtimeContext = RuntimeContext.builder()
             .userId(userId)
             .sessionId(threadId)
+            .put(RUNTIME_CONTEXT_RUN_ID, runId)
             .build()
         if (confirmResults.isNotEmpty()) {
             runtimeContext = RuntimeContext.builder(runtimeContext)

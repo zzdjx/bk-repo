@@ -8,11 +8,14 @@
 
 package com.tencent.bkrepo.agent.usage
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import com.tencent.bkrepo.agent.agent.AgentCatalog
 import com.tencent.bkrepo.agent.agent.AgentFactory
 import com.tencent.bkrepo.agent.agent.discovery.ArtifactDiscoveryAgentDefinition
+import com.tencent.bkrepo.agent.audit.NoopAgentToolCallRecordService
+import com.tencent.bkrepo.agent.audit.ToolAuditMiddleware
 import com.tencent.bkrepo.agent.config.AgentHarnessConfigurer
 import com.tencent.bkrepo.agent.config.AgentMemoryConfig
 import com.tencent.bkrepo.agent.config.AgentModelConfig
@@ -117,6 +120,7 @@ class UsageTrackingMiddlewareTest {
             agentCatalog = agentCatalog,
             permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(recordingUsageService),
+            toolAuditMiddleware = ToolAuditMiddleware(NoopAgentToolCallRecordService(), ObjectMapper()),
         )
         val agent = agentHarnessConfigurer.configure(
             properties = runtimeProperties,
