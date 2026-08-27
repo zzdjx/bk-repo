@@ -32,6 +32,7 @@ data class AgentRuntimeProperties(
     var reconnectPollInterval: Duration = DEFAULT_RECONNECT_POLL_INTERVAL,
     var reconnectTimeout: Duration = DEFAULT_RECONNECT_TIMEOUT,
     var state: State = State(),
+    var task: Task = Task(),
     var features: Features = Features(),
     var topology: Topology = Topology(),
 ) {
@@ -41,6 +42,21 @@ data class AgentRuntimeProperties(
     ) {
         companion object {
             const val DEFAULT_KEY_PREFIX = "bkrepo:agent:state:"
+        }
+    }
+
+    /**
+     * 分布式后台任务（[io.agentscope.harness.agent.subagent.task.TaskRepository]）存储配置。
+     *
+     * 只影响 `agent_spawn` 同步等待超时后被框架 promote 出的后台任务记录的持久化位置：
+     * 有 Lettuce Redis 客户端时落 Redis（跨副本可查），否则退回框架默认的本地文件系统实现
+     * （与升级前行为一致，仅限单副本内可查）。
+     */
+    data class Task(
+        var keyPrefix: String = DEFAULT_KEY_PREFIX,
+    ) {
+        companion object {
+            const val DEFAULT_KEY_PREFIX = "bkrepo:agent:task-store:"
         }
     }
 
@@ -162,6 +178,7 @@ data class EffectiveAgentRuntimeProperties(
     val reconnectTimeout: Duration,
     val stateKeyPrefix: String,
     val requireRedis: Boolean,
+    val taskStoreKeyPrefix: String,
     val frontendToolsEnabled: Boolean,
     val topology: EffectiveAgentTopology,
 ) {
@@ -188,6 +205,7 @@ object AgentRuntimePropertiesResolver {
             reconnectTimeout = runtime.reconnectTimeout,
             stateKeyPrefix = runtime.state.keyPrefix,
             requireRedis = runtime.state.requireRedis,
+            taskStoreKeyPrefix = runtime.task.keyPrefix,
             frontendToolsEnabled = runtime.features.frontendToolsEnabled,
             topology = EffectiveAgentTopology.from(runtime.topology),
         )

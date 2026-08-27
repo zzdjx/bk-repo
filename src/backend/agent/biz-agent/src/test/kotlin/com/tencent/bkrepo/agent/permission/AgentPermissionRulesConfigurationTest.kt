@@ -53,6 +53,7 @@ class AgentPermissionRulesConfigurationTest {
             reconnectTimeout = java.time.Duration.ofMinutes(10),
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
+            taskStoreKeyPrefix = "bkrepo:agent:task-store:",
             frontendToolsEnabled = true,
             topology = EffectiveAgentTopology.defaults(),
         )

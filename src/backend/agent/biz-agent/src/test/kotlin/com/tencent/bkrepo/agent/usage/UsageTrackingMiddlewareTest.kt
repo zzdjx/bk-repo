@@ -86,6 +86,7 @@ class UsageTrackingMiddlewareTest {
             reconnectTimeout = Duration.ofMinutes(10),
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
+            taskStoreKeyPrefix = "bkrepo:agent:task-store:",
             frontendToolsEnabled = false,
             topology = EffectiveAgentTopology.defaults(),
         )

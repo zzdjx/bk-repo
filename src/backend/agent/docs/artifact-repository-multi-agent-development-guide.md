@@ -1160,7 +1160,7 @@ Redis 仅保存：
 
 **自建设计**
 
-- Mongo/Redis 实现分布式 `TaskRepository`；
+- Mongo/Redis 实现分布式 `TaskRepository`（已完成第一步，见下方说明）；
 - Redis session run lock；
 - 后台结果 delivery 状态；
 - 超时、取消和恢复策略；
@@ -1172,6 +1172,19 @@ Redis 仅保存：
 - 任务结果最多重复投递、不永久丢失；
 - 同 session 不出现两个前台 run；
 - 取消不会导致写工具自动重试。
+
+**分布式 `TaskRepository` 存储（已完成，窄范围）**
+
+只解决"`agent_spawn` 同步等待超时后被框架 promote 出的后台任务记录，跨副本可查询"这一个点，不改变现有同步委派行为，也不开放 `timeout_seconds=0` 主动异步委派或 `max-parallel-delegations` 并发上限——这两块留给本阶段后续迭代。
+
+没有直接采用框架自带的 `RedisDistributedStore`（强绑定 Jedis `UnifiedJedis`），因为项目里所有其它 Redis 相关代码（`RedisAgentStateStore`、`RedisActiveRunStateStore`、`RedisLock` 等）统一使用 Lettuce，引入 Jedis 会让同一个服务并存两套 Redis 客户端。同时也没有直接换成 Mongo，因为框架的 `WorkspaceTaskRepository` 本身已经内置了 heartbeat（30s）、孤儿任务清扫（10 分钟超时、5 分钟扫描间隔、带跨节点节流 marker）、任务 JSON 记录格式等完整逻辑，且它只依赖 `WorkspaceManager`、不直接依赖任何具体存储实现，只要把 `WorkspaceManager` 背后的 `BaseStore`（namespace 化的 KV 接口：`get`/`put`/`putIfVersion`/`search`/`delete`）换成 Redis 实现即可复用这套逻辑，没必要另起一套 Mongo 版本重新实现相同的编排。
+
+最终实现（详见 `com.tencent.bkrepo.agent.task.LettuceStore` 与 `com.tencent.bkrepo.agent.config.AgentTaskRepositoryConfiguration`）：
+
+- `LettuceStore implements BaseStore`：把框架 `io.agentscope.extensions.redis.store.RedisStore`（Jedis 版）的 Redis Hash + Sorted Set + Lua `EVAL` 方案逐字迁移到 Lettuce（`RedisCommands`/`eval`/`zrangebylex`），`put`/`putIfVersion` 各用一条 Lua 脚本把"读版本 + 写值 + 更新索引"合并成一次原子操作，保证 CAS 语义在多副本下安全。
+- 用一个**专属**的 `RemoteFilesystem(lettuceStore, listOf("agents", <coordinatorName>, "tasks"))` + 专属的 `WorkspaceManager` 只服务于 `WorkspaceTaskRepository`，不经过框架的 `RemoteFilesystemSpec`（那个会把 `memory/`、`skills/`、`subagents/`、`AGENTS.md` 等所有工作区路径一起路由到远程存储）。协调者自己的工作区文件读写工具本来就已经被 `disableFilesystemTools()`/`disableDynamicSkills()` 等禁用，这里新增的远程存储只影响任务 JSON，其余部分行为完全不变。
+- 没有 Lettuce Redis 客户端（本地开发/未接 Redis）时，`AgentTaskRepositoryConfiguration.agentTaskRepository()` 返回 `null`，`AgentHarnessConfigurer` 跳过 `.taskRepository(...)` 装配，`HarnessAgent.build()` 退回框架默认的本地文件系统 `WorkspaceTaskRepository`——与升级前行为完全一致。
+- 配置项：`agent.runtime.task.key-prefix`（默认 `bkrepo:agent:task-store:`）。
 
 ### 阶段 10：长期记忆与个性化
 

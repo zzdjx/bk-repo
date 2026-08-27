@@ -43,4 +43,5 @@ dependencies {
     api("io.agentscope:agentscope-extensions-agui") {
         exclude(group = "com.squareup.okhttp3", module = "okhttp-jvm")
     }
+    testImplementation("org.mockito.kotlin:mockito-kotlin")
 }

@@ -39,6 +39,7 @@ import io.agentscope.core.permission.PermissionContextState
 import io.agentscope.core.state.AgentStateStore
 import io.agentscope.core.tool.Toolkit
 import io.agentscope.harness.agent.HarnessAgent
+import io.agentscope.harness.agent.subagent.task.TaskRepository
 import org.springframework.stereotype.Component
 import java.nio.file.Paths
 
@@ -64,6 +65,7 @@ class AgentHarnessConfigurer(
         stateStore: AgentStateStore,
         toolkit: Toolkit,
         permissionContext: PermissionContextState,
+        taskRepository: TaskRepository? = null,
     ): HarnessAgent {
         var builder = HarnessAgent.builder()
             .name(properties.name)
@@ -84,6 +86,12 @@ class AgentHarnessConfigurer(
             .middleware(permissionConfirmResumeMiddleware)
             .middleware(usageTrackingMiddleware)
             .middleware(toolAuditMiddleware)
+
+        // 没有 Redis 时 taskRepository 为 null：交给框架退回默认的本地文件系统实现（见
+        // AgentTaskRepositoryConfiguration 的 kdoc），与升级前行为一致。
+        if (taskRepository != null) {
+            builder = builder.taskRepository(taskRepository)
+        }
 
         if (properties.topology.coordinator.enabled) {
             builder = builder.enableTaskList(properties.topology.coordinator.taskListEnabled)
