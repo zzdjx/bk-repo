@@ -48,6 +48,7 @@ class AgentPermissionRulesConfiguration {
             builder.addAllowRule(toolName, toolRule(toolName, PermissionBehavior.ALLOW))
         }
         builder.addAskRule(MEMORY_SAVE_TOOL, toolRule(MEMORY_SAVE_TOOL, PermissionBehavior.ASK))
+        builder.addAskRule(MEMORY_DELETE_TOOL, toolRule(MEMORY_DELETE_TOOL, PermissionBehavior.ASK))
         if (properties.frontendToolsEnabled) {
             LocalToolDefinitions.allTools().forEach { definition ->
                 registerRule(builder, definition.name, definition.riskLevel)
@@ -110,5 +111,11 @@ class AgentPermissionRulesConfiguration {
          * 这里复用现有 HITL 确认弹窗机制，走 ASK——跟其它写工具同构，不需要新建单独的同意 UI。
          */
         const val MEMORY_SAVE_TOOL = "memory_save"
+
+        /**
+         * 长期记忆的删除入口（自建 `com.tencent.bkrepo.agent.tool.memory.MemoryDeleteTool`，框架未提供）。
+         * 与 [MEMORY_SAVE_TOOL] 同构，同样走 ASK，删除前需要用户在前端弹窗确认。
+         */
+        const val MEMORY_DELETE_TOOL = "memory_delete"
     }
 }

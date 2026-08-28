@@ -33,7 +33,9 @@ import com.tencent.bkrepo.agent.audit.ToolAuditMiddleware
 import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
 import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
+import com.tencent.bkrepo.agent.tool.memory.MemoryDeleteTool
 import com.tencent.bkrepo.agent.usage.UsageTrackingMiddleware
 import io.agentscope.core.model.Model
 import io.agentscope.core.permission.PermissionContextState
@@ -59,6 +61,7 @@ class AgentHarnessConfigurer(
     private val usageTrackingMiddleware: UsageTrackingMiddleware,
     private val toolAuditMiddleware: ToolAuditMiddleware,
     private val delegationBudgetMiddleware: DelegationBudgetMiddleware,
+    private val memoryFilesystemAccess: MemoryFilesystemAccess,
 ) {
 
     fun configure(
@@ -107,6 +110,9 @@ class AgentHarnessConfigurer(
         // 没有 Redis 时 memoryFilesystemSpec 为 null：长期记忆能力整体关闭（见
         // AgentMemoryFilesystemConfiguration 的 kdoc，为什么这里不像 taskRepository 一样退回本地实现）。
         builder = if (memoryFilesystemSpec != null) {
+            // memory_delete 是框架没有的补充工具（只有 save/search/get），用 MemoryFilesystemAccess
+            // 直接读写同一份 Redis 存储；可见性开关跟其它 memory_* 工具保持同步，只在这个分支注册。
+            toolkit.registerTool(MemoryDeleteTool(memoryFilesystemAccess))
             builder.filesystem(memoryFilesystemSpec)
         } else {
             builder.disableMemoryTools()

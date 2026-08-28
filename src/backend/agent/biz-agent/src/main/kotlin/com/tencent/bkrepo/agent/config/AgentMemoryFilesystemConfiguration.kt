@@ -28,6 +28,7 @@
 package com.tencent.bkrepo.agent.config
 
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
 import com.tencent.bkrepo.agent.task.LettuceStore
 import io.agentscope.harness.agent.IsolationScope
 import io.agentscope.harness.agent.filesystem.spec.RemoteFilesystemSpec
@@ -69,29 +70,58 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
  * `disableMemoryTools()`，长期记忆能力整体关闭，不退化为单副本本地行为——因为长期记忆的价值就在于
  * 跨会话/跨副本稳定可见，局部可用（只在恰好落到同一个副本时才能看到之前保存的记忆）比完全不可用
  * 更容易让用户困惑"我明明保存过，为什么找不到"。
+ *
+ * ## `agentMemoryStore` 为什么单独拆成一个 bean
+ *
+ * 补全阶段 10 时新增了"用户直连查看/删除记忆"的 REST 接口
+ * （[MemoryFilesystemAccess]）和 `memory_delete` LLM 工具
+ * （[com.tencent.bkrepo.agent.tool.memory.MemoryDeleteTool]），它们都需要绕开
+ * `HarnessAgent` 内部私有的 `WorkspaceManager`、直接访问同一份底层存储。把 [LettuceStore] 单独
+ * 拆成一个 bean（而不是像最初实现那样只在 `agentMemoryFilesystemSpec` 内部 `new`），
+ * 是为了让这几处共用同一条 Redis 连接，而不是各自重新创建连接。
+ *
+ * ## `memoryFilesystemAccess` 为什么不用 `@Component` 自注册
+ *
+ * [MemoryFilesystemAccess] 依赖抽象的 `BaseStore` 接口而不是具体的 [LettuceStore]，构造函数只接受
+ * `(store: BaseStore?, agentId: String)`。这里像阶段 9 `AgentTaskRepositoryConfiguration` 构造
+ * `LimitedWorkspaceTaskRepository` 一样，用 `@Bean` 工厂方法而不是类自身 `@Component` 注解来完成 Spring
+ * 装配——这样单测可以绕开 Spring 容器和真实 Lettuce 连接，直接 `new MemoryFilesystemAccess(fakeStore, id)`
+ * 传入一个内存态的 `BaseStore` 假实现。
  */
 @Configuration(proxyBeanMethods = false)
 class AgentMemoryFilesystemConfiguration {
 
     @Bean
-    fun agentMemoryFilesystemSpec(
+    fun agentMemoryStore(
         properties: EffectiveAgentRuntimeProperties,
         connectionFactory: ObjectProvider<RedisConnectionFactory>,
-    ): RemoteFilesystemSpec? {
+    ): LettuceStore? {
         val client = (connectionFactory.getIfAvailable() as? LettuceConnectionFactory)?.nativeClient as? RedisClient
         if (client == null) {
             logger.warn(
                 "No lettuce redis client available, long-term memory tools (memory_save/memory_search/" +
-                    "memory_get) stay disabled. Without cross-replica storage the feature would silently " +
-                    "fragment per replica, so it is kept off entirely instead of falling back to local disk.",
+                    "memory_get/memory_delete) and the direct memory view/delete REST API stay disabled. " +
+                    "Without cross-replica storage the feature would silently fragment per replica, so it is " +
+                    "kept off entirely instead of falling back to local disk.",
             )
             return null
         }
-        val store = LettuceStore(client, properties.memoryStoreKeyPrefix)
+        return LettuceStore(client, properties.memoryStoreKeyPrefix)
+    }
+
+    @Bean
+    fun agentMemoryFilesystemSpec(store: ObjectProvider<LettuceStore>): RemoteFilesystemSpec? {
+        val memoryStore = store.getIfAvailable() ?: return null
         // IsolationScope.USER（也是 RemoteFilesystemSpec 的默认值）：按 userId 隔离，同一用户跨会话
         // 共享记忆，不同用户之间互不可见；显式写出来是为了让隔离维度的选择在代码里一目了然，不依赖默认值。
-        return RemoteFilesystemSpec(store).isolationScope(IsolationScope.USER)
+        return RemoteFilesystemSpec(memoryStore).isolationScope(IsolationScope.USER)
     }
+
+    @Bean
+    fun memoryFilesystemAccess(
+        store: ObjectProvider<LettuceStore>,
+        properties: EffectiveAgentRuntimeProperties,
+    ): MemoryFilesystemAccess = MemoryFilesystemAccess(store.getIfAvailable(), properties.name)
 
     companion object {
         private val logger = LoggerFactory.getLogger(AgentMemoryFilesystemConfiguration::class.java)

@@ -29,6 +29,7 @@ import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_RUN_ID
 import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
 import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
+import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
 import com.tencent.bkrepo.agent.subagent.NoopTaskRepositoryProvider
 import com.tencent.bkrepo.agent.tool.domain.DomainToolNames
 import com.tencent.bkrepo.agent.tool.domain.RegisteredDomainTools
@@ -131,6 +132,7 @@ class UsageTrackingMiddlewareTest {
                 DelegationConcurrencyGuard(),
                 NoopTaskRepositoryProvider(),
             ),
+            memoryFilesystemAccess = MemoryFilesystemAccess(null, runtimeProperties.name),
         )
         val agent = agentHarnessConfigurer.configure(
             properties = runtimeProperties,

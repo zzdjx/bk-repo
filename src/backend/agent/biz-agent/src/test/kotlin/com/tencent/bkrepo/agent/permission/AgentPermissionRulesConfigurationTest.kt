@@ -65,6 +65,19 @@ class AgentPermissionRulesConfigurationTest {
         )
     }
 
+    @Test
+    fun `memory_delete是唯一删除入口必须走ASK确认`() {
+        val context = configuration.agentPermissionContext(defaultRuntimeProperties())
+
+        val askRules = context.askRules[AgentPermissionRulesConfiguration.MEMORY_DELETE_TOOL].orEmpty()
+        assertTrue(askRules.isNotEmpty(), "memory_delete should have ASK rule")
+        assertEquals(PermissionBehavior.ASK, askRules.first().behavior)
+        assertTrue(
+            context.allowRules[AgentPermissionRulesConfiguration.MEMORY_DELETE_TOOL].orEmpty().isEmpty(),
+            "memory_delete should not be auto-allowed",
+        )
+    }
+
     private fun defaultRuntimeProperties(): EffectiveAgentRuntimeProperties =
         EffectiveAgentRuntimeProperties(
             name = "bkrepo-assistant",

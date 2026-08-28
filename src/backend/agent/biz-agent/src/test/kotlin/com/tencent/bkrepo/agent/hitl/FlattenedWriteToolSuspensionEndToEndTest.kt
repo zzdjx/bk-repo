@@ -36,6 +36,7 @@ import com.tencent.bkrepo.agent.service.run.AgentRunOutcomeTracker
 import com.tencent.bkrepo.agent.session.HarnessAgentResolver
 import com.tencent.bkrepo.agent.session.InMemoryAgentPendingInterruptStore
 import com.tencent.bkrepo.agent.session.InMemoryAgentResumeIdempotencyStore
+import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
 import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
 import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
 import com.tencent.bkrepo.agent.subagent.NoopTaskRepositoryProvider
@@ -380,6 +381,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
                 DelegationConcurrencyGuard(),
                 NoopTaskRepositoryProvider(),
             ),
+            memoryFilesystemAccess = MemoryFilesystemAccess(null, runtimeProperties.name),
         )
         val coordinatorPermissionContext = AgentPermissionRulesConfiguration()
             .agentPermissionContext(runtimeProperties)

@@ -48,6 +48,7 @@ import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimePropertie
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
 import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
 import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
+import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
 import com.tencent.bkrepo.agent.subagent.NoopTaskRepositoryProvider
 import com.tencent.bkrepo.agent.tool.domain.DomainToolNames
 import com.tencent.bkrepo.agent.tool.domain.RegisteredDomainTools
@@ -166,6 +167,7 @@ class HarnessAgentSmokeTest {
                 DelegationConcurrencyGuard(),
                 NoopTaskRepositoryProvider(),
             ),
+            memoryFilesystemAccess = MemoryFilesystemAccess(null, runtimeProperties.name),
         )
         val permissionContext = io.agentscope.core.permission.PermissionContextState.builder().build()
         val toolkit = io.agentscope.core.tool.Toolkit(
