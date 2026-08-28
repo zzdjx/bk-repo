@@ -1224,6 +1224,37 @@ Redis 仅保存：
 内置工具 + 复用阶段 9 的 `LettuceStore` 做跨副本、按用户隔离的存储；用户直接查看/删除记忆的独立接口
 留给后续阶段补充（`memory_search`/`memory_get` 目前只能通过 LLM 间接查，没有绕开 Agent 的直连 API）。
 
+**删除能力与用户直连接口（已完成）**
+
+窄范围完成之后补齐了两块：框架内置工具只有 `memory_save`/`memory_search`/`memory_get`，没有对应的
+删除工具；且用户没有任何绕开 LLM、直接管理自己长期记忆的入口。
+
+- `com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess`：直接访问长期记忆底层存储的公共组件，
+  被 `memory_delete` 工具和用户直连 REST 接口共用。因为框架的 `WorkspaceManager` 是
+  `HarnessAgent.Builder.build()` 内部构造的私有实例、没有公开注入点，这里选择照抄
+  `RemoteFilesystemSpec` 对 `MEMORY.md`/`memory/` 两个路由的命名空间规则（`["agents", <agentId>,
+  "users", <uid>, <段>]`），独立构造两个 `RemoteFilesystem` 直接读写同一份 Redis 数据。这段命名空间
+  逻辑因此在代码里存在两份（框架内部一份、这里复刻一份），是刻意接受的成本——框架没有给"绕开
+  `WorkspaceManager` 直接读写记忆存储"这条路径提供公开 API。依赖的是 `BaseStore` 接口而非具体的
+  `LettuceStore`，且不加 `@Component`，改由 `AgentMemoryFilesystemConfiguration` 用 `@Bean` 工厂方法
+  装配，测试时可以直接传一个内存态的 `BaseStore` 假实现，不需要真实 Lettuce 连接。
+- `memory_delete` LLM 工具（`com.tencent.bkrepo.agent.tool.memory.MemoryDeleteTool`）：寻址方式与
+  内置 `memory_get` 对齐——`path + startLine/endLine`，按 1-based 闭区间行号删除，要求模型先用
+  `memory_search`/`memory_get` 定位到具体行号再调用。删除通过 `RemoteFilesystem.edit` 的 CAS 字符串
+  替换实现整篇覆盖式更新（内部自带最多 5 次版本冲突重试），而不是自己实现"读版本号 → 拼装新内容 →
+  CAS 写回"，因为 `RemoteFilesystem` 没有对外暴露底层 `BaseStore` 或版本号。接入
+  `AgentPermissionRulesConfiguration` 的 `MEMORY_DELETE_TOOL` ASK 规则，跟 `memory_save` 一样需要用户
+  确认。
+- 用户直连 REST 接口（`UserAgentMemoryResource`/`AgentMemoryService`）：文件级粒度，四个接口——列出
+  我保存过的全部记忆文件、查看某个文件的完整内容、删除单个文件、清空全部记忆。直接复用
+  `MemoryFilesystemAccess`，不经过 LLM/Toolkit/PermissionEngine（用户对自己的数据有完全控制权，不需要
+  再走一次 HITL 确认自己主动发起的删除请求）。
+- `MemoryFilesystemAccess` 的 `listFiles`/`readFile`/`deleteFile`/`deleteAll` 只覆盖框架
+  `OverlayFilesystem` 的 upper 层（per-user、持久化在 Redis 的用户实际保存内容），不处理 lower 层的只读
+  本地模板兜底——这符合"用户自己保存过的记忆"的语义定位，代价是如果工作区配置了 `MEMORY.md` 模板且
+  用户从未调用过 `memory_save`，这里会认为文件不存在而不是显示模板内容；当前部署形态下（协调者已
+  `disableWorkspaceContext()`）这个模板文件通常并不存在，属于可接受的边界行为。
+
 **同意机制与一个关键冲突：自动 flush 钩子无法接入 HITL**
 
 产品要求"记忆写入需用户明确同意"，选择的实现方式是复用现有 HITL/PermissionEngine：`memory_save`
@@ -1277,8 +1308,8 @@ bean：有 Lettuce Redis 客户端时，用阶段 9 写好的 `LettuceStore`（�
 
 **验收**
 
-- ~~用户可以查看和删除记忆~~（窄范围未做，留给后续阶段：目前只能让 LLM 通过 `memory_search`/`memory_get`
-  间接查，没有独立的查看/删除接口）；
+- 用户可以查看和删除记忆（已完成：`UserAgentMemoryResource` 提供列表/查看/删除单个/清空全部四个接口，
+  `memory_delete` 工具让 LLM 也能按用户指示精确删除指定行）；
 - 不保存凭证和权限快照（`memory_save` 走 ASK 确认，模型没有理由主动把凭证类信息写入记忆，且没有自动
   flush 兜底扫描对话）；
 - 记忆不会跨用户泄漏（`IsolationScope.USER` 按 `userId` 隔离存储命名空间）；
