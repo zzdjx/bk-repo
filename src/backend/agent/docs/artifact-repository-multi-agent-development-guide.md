@@ -1160,11 +1160,11 @@ Redis 仅保存：
 
 **自建设计**
 
-- Mongo/Redis 实现分布式 `TaskRepository`（已完成第一步，见下方说明）；
-- Redis session run lock；
-- 后台结果 delivery 状态；
-- 超时、取消和恢复策略；
-- 只有独立子任务才并行。
+- Mongo/Redis 实现分布式 `TaskRepository`（已完成，见下方说明）；
+- Redis session run lock（已具备，见 `ActiveRunManager`/`RedisActiveRunStateStore`）；
+- 后台结果 delivery 状态（已具备，见框架 `SubagentsMiddleware` 的 `<system-reminder>` 投递机制）；
+- 超时、取消和恢复策略（已具备，见框架 `task_cancel`/pending tool recovery）；
+- 只有独立子任务才并行（`max-parallel-delegations` 并发上限已完成，见下方"混合方案"说明）。
 
 **验收**
 
@@ -1175,7 +1175,7 @@ Redis 仅保存：
 
 **分布式 `TaskRepository` 存储（已完成，窄范围）**
 
-只解决"`agent_spawn` 同步等待超时后被框架 promote 出的后台任务记录，跨副本可查询"这一个点，不改变现有同步委派行为，也不开放 `timeout_seconds=0` 主动异步委派或 `max-parallel-delegations` 并发上限——这两块留给本阶段后续迭代。
+只解决"`agent_spawn` 同步等待超时后被框架 promote 出的后台任务记录，跨副本可查询"这一个点，不改变现有同步委派行为，也不开放 `timeout_seconds=0` 主动异步委派或 `max-parallel-delegations` 并发上限——后者已在下方"混合方案"一节完成。
 
 没有直接采用框架自带的 `RedisDistributedStore`（强绑定 Jedis `UnifiedJedis`），因为项目里所有其它 Redis 相关代码（`RedisAgentStateStore`、`RedisActiveRunStateStore`、`RedisLock` 等）统一使用 Lettuce，引入 Jedis 会让同一个服务并存两套 Redis 客户端。同时也没有直接换成 Mongo，因为框架的 `WorkspaceTaskRepository` 本身已经内置了 heartbeat（30s）、孤儿任务清扫（10 分钟超时、5 分钟扫描间隔、带跨节点节流 marker）、任务 JSON 记录格式等完整逻辑，且它只依赖 `WorkspaceManager`、不直接依赖任何具体存储实现，只要把 `WorkspaceManager` 背后的 `BaseStore`（namespace 化的 KV 接口：`get`/`put`/`putIfVersion`/`search`/`delete`）换成 Redis 实现即可复用这套逻辑，没必要另起一套 Mongo 版本重新实现相同的编排。
 
@@ -1185,6 +1185,24 @@ Redis 仅保存：
 - 用一个**专属**的 `RemoteFilesystem(lettuceStore, listOf("agents", <coordinatorName>, "tasks"))` + 专属的 `WorkspaceManager` 只服务于 `WorkspaceTaskRepository`，不经过框架的 `RemoteFilesystemSpec`（那个会把 `memory/`、`skills/`、`subagents/`、`AGENTS.md` 等所有工作区路径一起路由到远程存储）。协调者自己的工作区文件读写工具本来就已经被 `disableFilesystemTools()`/`disableDynamicSkills()` 等禁用，这里新增的远程存储只影响任务 JSON，其余部分行为完全不变。
 - 没有 Lettuce Redis 客户端（本地开发/未接 Redis）时，`AgentTaskRepositoryConfiguration.agentTaskRepository()` 返回 `null`，`AgentHarnessConfigurer` 跳过 `.taskRepository(...)` 装配，`HarnessAgent.build()` 退回框架默认的本地文件系统 `WorkspaceTaskRepository`——与升级前行为完全一致。
 - 配置项：`agent.runtime.task.key-prefix`（默认 `bkrepo:agent:task-store:`）。
+
+**`max-parallel-delegations` 并发上限（已完成，混合方案）**
+
+在窄范围完成之后，继续调研了 `agent_spawn(timeout_seconds=0)` 主动异步委派、后台结果 delivery、取消/恢复策略、session run lock、HITL 豁免等能力，发现除了并发上限之外的其余能力框架本身或项目此前都已具备（异步委派与结果投递走 `SubagentsMiddleware` 的 `<system-reminder>` 机制、取消走 `task_cancel`、session 互斥走既有的 `ActiveRunManager`/`RedisActiveRunStateStore`、编排工具已豁免 HITL），真正缺失的只有 `agent.runtime.topology.coordinator.max-delegations`/`max-parallel-delegations` 这两个配置项——此前只做了参数校验，从未在 `agent_spawn`/`agent_send` 调用处真正生效。
+
+`agent_spawn`/`agent_send` 有两条执行路径，对硬限制的可行性完全不同：
+
+- **异步路径**（`timeout_seconds=0` 主动异步，或同步等待超时后被框架 promote）：调用最终一定会落进 `TaskRepository.putTask(...)`，而这个接口已经是项目自己接管的组件（见上一节），可以在真正提交任务前插入一次预算检查。
+- **同步路径**（`timeout_seconds>0` 且未超时）：完全在框架内部的 `AgentSpawnTool`/`SubagentsMiddleware` 包私有逻辑里跑完，中途没有任何项目侧可挂钩的落点；唯一能接触到"替换整个委派工具"的入口是 `HarnessAgent.Builder.externalSubagentTool(Object)`，但这意味着要复制并长期维护框架内部子 Agent 的完整装配逻辑（工具 schema、参数校验、错误信息、事件流拼装等），维护成本和框架升级风险都远超收益。
+
+因此采用**混合方案**：
+
+- **异步任务：硬限制**——`com.tencent.bkrepo.agent.task.LimitedWorkspaceTaskRepository` 继承（而非包装）`WorkspaceTaskRepository`，只覆盖 `putTask`：提交前用 `listTasks(...)` 统计当前 session 未终态的后台任务数，加上下面提到的同步在跑计数，达到 `maxParallelDelegations` 时直接返回一个已失败的 `BackgroundTask`（`super.putTask(...)` 根本不会被调用，子 Agent 不会被真正启动），不需要修改或替换 `AgentSpawnTool`。选择继承而不是装饰器，是因为 `HarnessAgent` 关闭时用 `instanceof WorkspaceTaskRepository` 判断要不要调用 `.shutdown()`（停 heartbeat/孤儿任务清扫线程），装饰器会让这个判断失效导致线程泄漏。
+- **同步委派：动态软提醒**——新增 `com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard`，进程内按 `sessionId` 统计当前正在同步执行、尚未返回的 `agent_spawn`/`agent_send` 调用数（不需要跨副本：`ActiveRunManager` 已保证同一 session 同一时刻只有一个副本在跑前台 run）。配套的 `com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware` 在 `onActing` 阶段给这个计数器加/减账，在 `onReasoning` 阶段把"计数器里同步在跑的数量"与"`TaskRepository` 里未终态的后台任务数量"相加，一旦达到或超过预算，就在当轮额外注入一条 `<system-reminder>` 系统提示，要求模型停止新开委派、等现有的跑完或自己完成工作。这是基于实时计数的动态提醒而不是写死的固定文案，但本质仍是软约束——模型可以选择不听，因此不覆盖"同步委派在超时前已经跑完"这条硬限制打不到的路径。
+- 两者共享同一个 `DelegationConcurrencyGuard` 实例，保证"当前活跃委派数"这个概念在硬限制和软提醒之间口径一致。
+- 没有 Redis（`agentTaskRepository` bean 为 `null`）时，异步任务退回框架默认的本地 `WorkspaceTaskRepository`，不再有硬限制，只剩 `DelegationBudgetMiddleware` 的软提醒兜底——与阶段 9 窄范围部分"无 Redis 退化为单副本本地行为"的原则一致。
+
+已知的非原子性权衡：`LimitedWorkspaceTaskRepository.putTask` 里"读取当前活跃数 → 判断 → 写入新任务"不是一次原子操作，极端并发下可能短暂超出预算一两个名额；目标是防止后台任务无限堆积失控，不是做精确的信号量限流，用这个代价换取实现复杂度和框架侵入性的大幅降低。
 
 ### 阶段 10：长期记忆与个性化
 

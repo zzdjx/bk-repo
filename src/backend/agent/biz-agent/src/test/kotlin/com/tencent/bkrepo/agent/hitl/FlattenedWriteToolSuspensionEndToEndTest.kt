@@ -36,6 +36,9 @@ import com.tencent.bkrepo.agent.service.run.AgentRunOutcomeTracker
 import com.tencent.bkrepo.agent.session.HarnessAgentResolver
 import com.tencent.bkrepo.agent.session.InMemoryAgentPendingInterruptStore
 import com.tencent.bkrepo.agent.session.InMemoryAgentResumeIdempotencyStore
+import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
+import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
+import com.tencent.bkrepo.agent.subagent.NoopTaskRepositoryProvider
 import com.tencent.bkrepo.agent.tool.domain.DomainToolNames
 import com.tencent.bkrepo.agent.tool.domain.RegisteredDomainTools
 import com.tencent.bkrepo.agent.tool.frontend.FrontendToolCatalog
@@ -372,6 +375,11 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentRunRecordService()),
             toolAuditMiddleware = ToolAuditMiddleware(toolCallRecordService, ObjectMapper()),
+            delegationBudgetMiddleware = DelegationBudgetMiddleware(
+                runtimeProperties,
+                DelegationConcurrencyGuard(),
+                NoopTaskRepositoryProvider(),
+            ),
         )
         val coordinatorPermissionContext = AgentPermissionRulesConfiguration()
             .agentPermissionContext(runtimeProperties)

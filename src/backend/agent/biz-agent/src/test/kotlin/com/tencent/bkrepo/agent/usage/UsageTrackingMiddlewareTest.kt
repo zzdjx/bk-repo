@@ -27,6 +27,9 @@ import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimePropertie
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
 import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_RUN_ID
 import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
+import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
+import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
+import com.tencent.bkrepo.agent.subagent.NoopTaskRepositoryProvider
 import com.tencent.bkrepo.agent.tool.domain.DomainToolNames
 import com.tencent.bkrepo.agent.tool.domain.RegisteredDomainTools
 import com.tencent.bkrepo.agent.tool.frontend.RegisteredFrontendTools
@@ -122,6 +125,11 @@ class UsageTrackingMiddlewareTest {
             permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(recordingUsageService),
             toolAuditMiddleware = ToolAuditMiddleware(NoopAgentToolCallRecordService(), ObjectMapper()),
+            delegationBudgetMiddleware = DelegationBudgetMiddleware(
+                runtimeProperties,
+                DelegationConcurrencyGuard(),
+                NoopTaskRepositoryProvider(),
+            ),
         )
         val agent = agentHarnessConfigurer.configure(
             properties = runtimeProperties,

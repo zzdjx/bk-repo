@@ -28,10 +28,11 @@
 package com.tencent.bkrepo.agent.config
 
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
 import com.tencent.bkrepo.agent.task.LettuceStore
+import com.tencent.bkrepo.agent.task.LimitedWorkspaceTaskRepository
 import io.agentscope.harness.agent.filesystem.remote.RemoteFilesystem
 import io.agentscope.harness.agent.subagent.task.TaskRepository
-import io.agentscope.harness.agent.subagent.task.WorkspaceTaskRepository
 import io.agentscope.harness.agent.workspace.WorkspaceManager
 import io.lettuce.core.RedisClient
 import org.slf4j.LoggerFactory
@@ -43,15 +44,17 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import java.nio.file.Paths
 
 /**
- * 阶段 9（分布式子任务）第一步：让 `agent_spawn` 同步等待超时后被框架 promote 出的后台任务
- * （见 `AgentSpawnTool` 的 `AdoptedTaskRunSpec` 分支）跨副本可查询。
- *
- * 只替换 [io.agentscope.harness.agent.subagent.task.TaskRepository] 落地用的
- * [io.agentscope.harness.agent.filesystem.remote.store.BaseStore]，不改变 `WorkspaceTaskRepository`
- * 本身的 heartbeat/orphan sweeper/JSON 记录格式等逻辑，也完全不影响协调者自己的
- * memory/skills/AGENTS.md 等工作区文件——那些仍然走本地磁盘（[AgentHarnessConfigurer] 已经
- * `disableFilesystemTools()`/`disableDynamicSkills()` 等禁用了协调者自身对工作区文件的读写工具，
- * 这里新增的 [RemoteFilesystem] 只服务于这一个专属的 [WorkspaceManager] 实例，二者互不影响）。
+ * 阶段 9（分布式子任务）：
+ * 1. 让 `agent_spawn` 同步等待超时后被框架 promote 出的后台任务（见 `AgentSpawnTool` 的
+ *    `AdoptedTaskRunSpec` 分支）跨副本可查询——只替换
+ *    [io.agentscope.harness.agent.subagent.task.TaskRepository] 落地用的
+ *    [io.agentscope.harness.agent.filesystem.remote.store.BaseStore]，不改变
+ *    `WorkspaceTaskRepository` 本身的 heartbeat/orphan sweeper/JSON 记录格式等逻辑，也完全不影响
+ *    协调者自己的 memory/skills/AGENTS.md 等工作区文件——那些仍然走本地磁盘（[AgentHarnessConfigurer]
+ *    已经 `disableFilesystemTools()`/`disableDynamicSkills()` 等禁用了协调者自身对工作区文件的读写
+ *    工具，这里新增的 [RemoteFilesystem] 只服务于这一个专属的 [WorkspaceManager] 实例，二者互不影响）。
+ * 2. 在此基础上叠加 `max-parallel-delegations` 硬限制（[LimitedWorkspaceTaskRepository]），详见该
+ *    类的 kdoc。
  */
 @Configuration(proxyBeanMethods = false)
 class AgentTaskRepositoryConfiguration {
@@ -66,13 +69,15 @@ class AgentTaskRepositoryConfiguration {
     fun agentTaskRepository(
         properties: EffectiveAgentRuntimeProperties,
         connectionFactory: ObjectProvider<RedisConnectionFactory>,
+        delegationConcurrencyGuard: DelegationConcurrencyGuard,
     ): TaskRepository? {
         val client = (connectionFactory.getIfAvailable() as? LettuceConnectionFactory)?.nativeClient as? RedisClient
         if (client == null) {
             logger.warn(
                 "No lettuce redis client available, background subagent tasks will use the local " +
                     "filesystem TaskRepository. Task records will be lost on restart and cannot be " +
-                    "queried from another replica.",
+                    "queried from another replica, and the max-parallel-delegations hard limit below " +
+                    "will not be enforced for this replica (only the soft reminder middleware applies).",
             )
             return null
         }
@@ -83,7 +88,14 @@ class AgentTaskRepositoryConfiguration {
         // index=null：任务记录规模小，WorkspaceTaskRepository 的 orphan sweeper 直接用
         // filesystem.glob 做全量扫描即可，没有必要为此再起一个本地 SQLite 索引。
         val workspaceManager = WorkspaceManager(Paths.get(properties.workspace), filesystem, null, null)
-        return WorkspaceTaskRepository(workspaceManager, properties.name)
+        // LimitedWorkspaceTaskRepository 继承（而不是包装）WorkspaceTaskRepository，在 putTask 前加一次
+        // max-parallel-delegations 预算检查，见该类 kdoc 里"为什么继承而不是装饰器"的说明。
+        return LimitedWorkspaceTaskRepository(
+            workspaceManager,
+            properties.name,
+            properties.topology.coordinator.maxParallelDelegations,
+            delegationConcurrencyGuard,
+        )
     }
 
     companion object {

@@ -33,6 +33,7 @@ import com.tencent.bkrepo.agent.audit.ToolAuditMiddleware
 import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
 import com.tencent.bkrepo.agent.usage.UsageTrackingMiddleware
 import io.agentscope.core.model.Model
 import io.agentscope.core.permission.PermissionContextState
@@ -56,6 +57,7 @@ class AgentHarnessConfigurer(
     private val permissionConfirmResumeMiddleware: PermissionConfirmResumeMiddleware,
     private val usageTrackingMiddleware: UsageTrackingMiddleware,
     private val toolAuditMiddleware: ToolAuditMiddleware,
+    private val delegationBudgetMiddleware: DelegationBudgetMiddleware,
 ) {
 
     fun configure(
@@ -86,6 +88,7 @@ class AgentHarnessConfigurer(
             .middleware(permissionConfirmResumeMiddleware)
             .middleware(usageTrackingMiddleware)
             .middleware(toolAuditMiddleware)
+            .middleware(delegationBudgetMiddleware)
 
         // 没有 Redis 时 taskRepository 为 null：交给框架退回默认的本地文件系统实现（见
         // AgentTaskRepositoryConfiguration 的 kdoc），与升级前行为一致。
