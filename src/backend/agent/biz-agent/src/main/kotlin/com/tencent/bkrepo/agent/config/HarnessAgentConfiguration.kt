@@ -35,6 +35,7 @@ import io.agentscope.core.permission.PermissionContextState
 import io.agentscope.core.state.AgentStateStore
 import io.agentscope.core.tool.Toolkit
 import io.agentscope.harness.agent.HarnessAgent
+import io.agentscope.harness.agent.filesystem.spec.RemoteFilesystemSpec
 import io.agentscope.harness.agent.subagent.task.TaskRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
@@ -58,6 +59,7 @@ class HarnessAgentConfiguration {
         agentHarnessConfigurer: AgentHarnessConfigurer,
         frontendTools: RegisteredFrontendTools,
         taskRepository: ObjectProvider<TaskRepository>,
+        memoryFilesystemSpec: ObjectProvider<RemoteFilesystemSpec>,
     ): HarnessAgent {
         val agent = agentHarnessConfigurer.configure(
             properties = properties,
@@ -67,6 +69,7 @@ class HarnessAgentConfiguration {
             toolkit = toolkit,
             permissionContext = permissionContext,
             taskRepository = taskRepository.getIfAvailable(),
+            memoryFilesystemSpec = memoryFilesystemSpec.getIfAvailable(),
         )
         // 拍平方案：client 本地写/读工具（set_download_path 等）不再经由独立的 client 子 Agent，
         // 而是直接留在协调者自己的 live toolkit 上，由协调者自身的 PermissionContextState/

@@ -90,6 +90,7 @@ class UsageTrackingMiddlewareTest {
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
             taskStoreKeyPrefix = "bkrepo:agent:task-store:",
+            memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
             frontendToolsEnabled = false,
             topology = EffectiveAgentTopology.defaults(),
         )

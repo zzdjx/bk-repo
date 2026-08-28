@@ -37,6 +37,34 @@ class AgentPermissionRulesConfigurationTest {
         }
     }
 
+    @Test
+    fun `memory_search和memory_get是只读工具应直接ALLOW`() {
+        val context = configuration.agentPermissionContext(defaultRuntimeProperties())
+
+        AgentPermissionRulesConfiguration.MEMORY_READ_TOOLS.forEach { toolName ->
+            val rules = context.allowRules[toolName].orEmpty()
+            assertTrue(rules.isNotEmpty(), "$toolName should have ALLOW rule")
+            assertEquals(PermissionBehavior.ALLOW, rules.first().behavior)
+            assertTrue(
+                context.askRules[toolName].orEmpty().isEmpty(),
+                "$toolName should not require ASK",
+            )
+        }
+    }
+
+    @Test
+    fun `memory_save是唯一写入入口必须走ASK确认`() {
+        val context = configuration.agentPermissionContext(defaultRuntimeProperties())
+
+        val askRules = context.askRules[AgentPermissionRulesConfiguration.MEMORY_SAVE_TOOL].orEmpty()
+        assertTrue(askRules.isNotEmpty(), "memory_save should have ASK rule")
+        assertEquals(PermissionBehavior.ASK, askRules.first().behavior)
+        assertTrue(
+            context.allowRules[AgentPermissionRulesConfiguration.MEMORY_SAVE_TOOL].orEmpty().isEmpty(),
+            "memory_save should not be auto-allowed",
+        )
+    }
+
     private fun defaultRuntimeProperties(): EffectiveAgentRuntimeProperties =
         EffectiveAgentRuntimeProperties(
             name = "bkrepo-assistant",
@@ -54,6 +82,7 @@ class AgentPermissionRulesConfigurationTest {
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
             taskStoreKeyPrefix = "bkrepo:agent:task-store:",
+            memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
             frontendToolsEnabled = true,
             topology = EffectiveAgentTopology.defaults(),
         )

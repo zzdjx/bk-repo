@@ -40,6 +40,7 @@ import io.agentscope.core.permission.PermissionContextState
 import io.agentscope.core.state.AgentStateStore
 import io.agentscope.core.tool.Toolkit
 import io.agentscope.harness.agent.HarnessAgent
+import io.agentscope.harness.agent.filesystem.spec.RemoteFilesystemSpec
 import io.agentscope.harness.agent.subagent.task.TaskRepository
 import org.springframework.stereotype.Component
 import java.nio.file.Paths
@@ -68,6 +69,7 @@ class AgentHarnessConfigurer(
         toolkit: Toolkit,
         permissionContext: PermissionContextState,
         taskRepository: TaskRepository? = null,
+        memoryFilesystemSpec: RemoteFilesystemSpec? = null,
     ): HarnessAgent {
         var builder = HarnessAgent.builder()
             .name(properties.name)
@@ -83,8 +85,14 @@ class AgentHarnessConfigurer(
             .disableShellTool()
             .disableDynamicSkills()
             .disableDynamicSubagents()
-            .disableMemoryTools()
             .disableWorkspaceContext()
+            // 框架自带的自动 flush（每轮对话结束后另起一次 LLM 调用，把它认为重要的内容静默写进
+            // MEMORY.md/memory/*.md）不经过 Toolkit/PermissionEngine，没有 HITL 钩子可挂。产品上要求
+            // "记忆写入需用户明确同意"，而同意机制选择的是 memory_save 工具走 ASK 确认——这个前提只对
+            // 显式工具调用成立，覆盖不到自动 flush，所以这里无条件关闭自动 flush/maintenance 钩子，
+            // 长期记忆只能通过 memory_save 显式写入。副作用：暂时没有 MemoryMaintenanceMiddleware 提供
+            // 的每日文件归档/MEMORY.md 定期整理，阶段 10 窄范围内先不补，后续如需要再补一个独立的定时任务。
+            .disableMemoryHooks()
             .middleware(permissionConfirmResumeMiddleware)
             .middleware(usageTrackingMiddleware)
             .middleware(toolAuditMiddleware)
@@ -94,6 +102,14 @@ class AgentHarnessConfigurer(
         // AgentTaskRepositoryConfiguration 的 kdoc），与升级前行为一致。
         if (taskRepository != null) {
             builder = builder.taskRepository(taskRepository)
+        }
+
+        // 没有 Redis 时 memoryFilesystemSpec 为 null：长期记忆能力整体关闭（见
+        // AgentMemoryFilesystemConfiguration 的 kdoc，为什么这里不像 taskRepository 一样退回本地实现）。
+        builder = if (memoryFilesystemSpec != null) {
+            builder.filesystem(memoryFilesystemSpec)
+        } else {
+            builder.disableMemoryTools()
         }
 
         if (properties.topology.coordinator.enabled) {

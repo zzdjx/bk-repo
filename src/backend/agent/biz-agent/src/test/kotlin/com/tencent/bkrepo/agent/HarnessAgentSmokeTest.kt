@@ -116,6 +116,7 @@ class HarnessAgentSmokeTest {
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
             taskStoreKeyPrefix = "bkrepo:agent:task-store:",
+            memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
             frontendToolsEnabled = true,
             topology = EffectiveAgentTopology.defaults(),
         )

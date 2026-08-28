@@ -1218,20 +1218,73 @@ Redis 仅保存：
 - `MemorySaveTool`、`MemorySearchTool`、`MemoryGetTool`；
 - 分布式 workspace/store。
 
-**设计**
+**设计（窄范围，已完成）**
 
-- 默认关闭模型自主写记忆；
-- 记忆写入需策略或用户明确同意；
-- 按用户和租户隔离；
-- 设置 TTL、删除和纠错接口；
-- 实时资源状态不进入长期记忆。
+第一次开启长期记忆能力，选择的是窄范围：只接入 `memory_save`/`memory_search`/`memory_get` 三个框架
+内置工具 + 复用阶段 9 的 `LettuceStore` 做跨副本、按用户隔离的存储；用户直接查看/删除记忆的独立接口
+留给后续阶段补充（`memory_search`/`memory_get` 目前只能通过 LLM 间接查，没有绕开 Agent 的直连 API）。
+
+**同意机制与一个关键冲突：自动 flush 钩子无法接入 HITL**
+
+产品要求"记忆写入需用户明确同意"，选择的实现方式是复用现有 HITL/PermissionEngine：`memory_save`
+接入 ASK 规则，跟其它写工具走同一套确认弹窗（见 `AgentPermissionRulesConfiguration` 里的
+`MEMORY_SAVE_TOOL`），不需要为此新建同意 UI；只读的 `memory_search`/`memory_get` 走 ALLOW
+（`MEMORY_READ_TOOLS`），不需要每次打断用户。
+
+调研中发现框架的长期记忆管线还有第二条写入路径——`MemoryFlushMiddleware`：不是工具调用，而是在每轮
+`onAgent` 结束后自动触发的钩子，另起一次 LLM 调用从对话里提炼"事实"直接写入
+`MEMORY.md`/`memory/*.md`，默认每轮都触发（`FlushMode.ALWAYS`），同一个钩子还会无条件把原始对话写进
+`agents/<agentId>/sessions/*.log.jsonl`（框架自己的会话续跑/搜索机制，与 bk-repo 现有的 AG-UI 事件归档
+是两套并行的东西）。这条路径完全不经过 Toolkit/PermissionEngine，结构上没有 HITL 钩子可挂——也就是说
+"写入需用户同意"这个要求，天然只能覆盖 `memory_save`，覆盖不到自动 flush。
+
+**这里还有一个值得记录的意外发现**：在这次改动之前，`AgentHarnessConfigurer` 只调用了
+`disableMemoryTools()`，从未调用过 `disableMemoryHooks()`。而框架安装
+`MemoryFlushMiddleware`/`MemoryMaintenanceMiddleware` 的条件是"配置了记忆模型（默认取 agent 主模型，
+永远非空）且未调用 `disableMemoryHooks()`"——与 `disableMemoryTools()` 完全独立。这意味着自动 flush
+钩子从项目一开始就在悄悄运行：每轮对话结束后都会额外发起一次 LLM 调用把内容写到本地磁盘（借助框架默认的
+`IsolationScope.USER`，写入路径按 `userId` 自动加了前缀，不会跨用户串），只是因为
+`memory_save`/`memory_search`/`memory_get` 工具当时被禁用，没有任何读路径会用到这些文件，所以从未被
+发现。这次改动确认了这一权衡后，选择无条件调用 `disableMemoryHooks()`：长期记忆只能通过 `memory_save`
+显式写入，彻底关闭自动 flush，順带修复了这个"每轮多一次静默 LLM 调用+本地磁盘写入"的历史行为。
+
+代价：`disableMemoryHooks()` 是一个粗粒度开关，关掉自动 flush 的同时也关掉了
+`MemoryMaintenanceMiddleware` 提供的每日文件归档、`MEMORY.md` 定期整理、旧会话日志清理——阶段 10
+窄范围内暂不补，TTL/定期整理留给后续阶段用独立的定时任务实现（不依赖框架这个和自动 flush 绑在一起的
+每轮 hook）。
+
+**存储实现**
+
+`com.tencent.bkrepo.agent.config.AgentMemoryFilesystemConfiguration` 提供一个 `RemoteFilesystemSpec?`
+bean：有 Lettuce Redis 客户端时，用阶段 9 写好的 `LettuceStore`（换一个独立的 key 前缀
+`agent.runtime.memory.key-prefix`，默认 `bkrepo:agent:memory-store:`）构造
+`RemoteFilesystemSpec(store).isolationScope(IsolationScope.USER)`；没有 Redis 时返回 `null`。
+
+选择 `RemoteFilesystemSpec`而不是像阶段 9 `TaskRepository` 那样另起一个专属 `WorkspaceManager`，是因为
+框架的记忆工具/钩子在 `HarnessAgent.Builder.build()` 内部固定共享同一个 `WorkspaceManager`
+实例，没有独立注入点，只能通过 `HarnessAgent.Builder.filesystem(RemoteFilesystemSpec)`
+把协调者的整个工作区换成远程存储。这在当前装配下是安全的：协调者已经对
+`disableFilesystemTools()`/`disableDynamicSkills()`/`disableDynamicSubagents()`/
+`disableWorkspaceContext()`全部禁用，工作区里除了记忆文件之外没有任何工具会碰其它路径；`agent_spawn`
+的后台任务另有阶段 9 建的专属 `WorkspaceManager`，不受这里影响。
+
+没有 Redis 时不像 `TaskRepository` 一样退回本地文件系统实现，而是让 `AgentHarnessConfigurer` 保持
+`disableMemoryTools()`、整个长期记忆能力关闭——因为长期记忆的价值在于跨会话/跨副本稳定可见，"只在恰好
+落到同一个副本时才能看到之前保存的记忆"这种局部可用，比完全不可用更容易让用户困惑。`RemoteFilesystemSpec`
+要求 `AgentStateStore` 必须是分布式实现（否则 `HarnessAgent` 构建时直接抛异常）——这里与
+`AgentStateConfiguration.agentStateStore` 用的是同一个 Lettuce 客户端可用性信号，两者总是同时具备或同时
+缺失，不会触发这个校验失败。
 
 **验收**
 
-- 用户可以查看和删除记忆；
-- 不保存凭证和权限快照；
-- 记忆不会跨用户泄漏；
-- 记忆冲突时实时工具结果优先。
+- ~~用户可以查看和删除记忆~~（窄范围未做，留给后续阶段：目前只能让 LLM 通过 `memory_search`/`memory_get`
+  间接查，没有独立的查看/删除接口）；
+- 不保存凭证和权限快照（`memory_save` 走 ASK 确认，模型没有理由主动把凭证类信息写入记忆，且没有自动
+  flush 兜底扫描对话）；
+- 记忆不会跨用户泄漏（`IsolationScope.USER` 按 `userId` 隔离存储命名空间）；
+- 记忆冲突时实时工具结果优先（本阶段未接入任何"记忆内容注入上下文"的机制——`disableWorkspaceContext()`
+  仍然禁用了 AGENTS.md/记忆的自动材料化，记忆只在 LLM 主动调用 `memory_search`/`memory_get` 时才会出现
+  在对话里，不会静默覆盖实时工具结果）。
 
 ### 阶段 11：观测、用量、审计和评估
 

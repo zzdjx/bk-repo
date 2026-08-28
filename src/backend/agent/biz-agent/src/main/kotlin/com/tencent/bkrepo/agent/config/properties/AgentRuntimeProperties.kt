@@ -33,6 +33,7 @@ data class AgentRuntimeProperties(
     var reconnectTimeout: Duration = DEFAULT_RECONNECT_TIMEOUT,
     var state: State = State(),
     var task: Task = Task(),
+    var memory: Memory = Memory(),
     var features: Features = Features(),
     var topology: Topology = Topology(),
 ) {
@@ -57,6 +58,22 @@ data class AgentRuntimeProperties(
     ) {
         companion object {
             const val DEFAULT_KEY_PREFIX = "bkrepo:agent:task-store:"
+        }
+    }
+
+    /**
+     * 长期记忆（`memory_save`/`memory_search`/`memory_get`，见
+     * [com.tencent.bkrepo.agent.config.AgentMemoryFilesystemConfiguration]）存储配置。
+     *
+     * 只影响 `MEMORY.md` 与 `memory` 目录下 `*.md` 文件的持久化位置：有 Lettuce Redis 客户端时落 Redis
+     * （跨副本可查、按用户隔离），否则整个长期记忆能力保持关闭——不退回单副本本地文件系统，
+     * 因为长期记忆需要跨会话/跨副本稳定可见，局部可用比完全不可用更容易造成"记忆丢失"的用户困惑。
+     */
+    data class Memory(
+        var keyPrefix: String = DEFAULT_KEY_PREFIX,
+    ) {
+        companion object {
+            const val DEFAULT_KEY_PREFIX = "bkrepo:agent:memory-store:"
         }
     }
 
@@ -179,6 +196,7 @@ data class EffectiveAgentRuntimeProperties(
     val stateKeyPrefix: String,
     val requireRedis: Boolean,
     val taskStoreKeyPrefix: String,
+    val memoryStoreKeyPrefix: String,
     val frontendToolsEnabled: Boolean,
     val topology: EffectiveAgentTopology,
 ) {
@@ -206,6 +224,7 @@ object AgentRuntimePropertiesResolver {
             stateKeyPrefix = runtime.state.keyPrefix,
             requireRedis = runtime.state.requireRedis,
             taskStoreKeyPrefix = runtime.task.keyPrefix,
+            memoryStoreKeyPrefix = runtime.memory.keyPrefix,
             frontendToolsEnabled = runtime.features.frontendToolsEnabled,
             topology = EffectiveAgentTopology.from(runtime.topology),
         )

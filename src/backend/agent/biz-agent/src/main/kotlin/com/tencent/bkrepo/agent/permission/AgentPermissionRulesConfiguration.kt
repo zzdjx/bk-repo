@@ -44,6 +44,10 @@ class AgentPermissionRulesConfiguration {
         HARNESS_ORCHESTRATION_TOOLS.forEach { toolName ->
             builder.addAllowRule(toolName, toolRule(toolName, PermissionBehavior.ALLOW))
         }
+        MEMORY_READ_TOOLS.forEach { toolName ->
+            builder.addAllowRule(toolName, toolRule(toolName, PermissionBehavior.ALLOW))
+        }
+        builder.addAskRule(MEMORY_SAVE_TOOL, toolRule(MEMORY_SAVE_TOOL, PermissionBehavior.ASK))
         if (properties.frontendToolsEnabled) {
             LocalToolDefinitions.allTools().forEach { definition ->
                 registerRule(builder, definition.name, definition.riskLevel)
@@ -94,5 +98,17 @@ class AgentPermissionRulesConfiguration {
             "task_cancel",
             "task_list",
         )
+
+        /**
+         * 长期记忆的只读工具（框架内置 `MemorySearchTool`/`MemoryGetTool`），风险等级等同于其它只读
+         * 工具，直接 ALLOW，不需要每次都打断用户确认。
+         */
+        val MEMORY_READ_TOOLS: List<String> = listOf("memory_search", "memory_get")
+
+        /**
+         * 长期记忆的唯一写入入口（框架内置 `MemorySaveTool`）。产品要求"记忆写入需用户明确同意"，
+         * 这里复用现有 HITL 确认弹窗机制，走 ASK——跟其它写工具同构，不需要新建单独的同意 UI。
+         */
+        const val MEMORY_SAVE_TOOL = "memory_save"
     }
 }
