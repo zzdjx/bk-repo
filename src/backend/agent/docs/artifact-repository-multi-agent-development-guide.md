@@ -1334,16 +1334,70 @@ bean：有 Lettuce Redis 客户端时，用阶段 9 写好的 `LettuceStore`（�
 
 - usage 聚合（已完成，见 §11.3/§12.3：`UsageTrackingMiddleware` 按 `runId` 累加到 `agent_run`）；
 - 写操作审计（已完成，见 §11.4/§12.7：`ToolAuditMiddleware` + `agent_tool_call`，含客户端真实执行结果回填）；
-- 离线评估集；
-- 工具选择、权限越权、幻觉、答案质量和成本指标；
-- prompt/model/tool catalog 版本关联。
+- 离线评估集 + 工具选择/权限越权/幻觉/答案质量指标（窄范围，已完成，见下文）；
+- 成本指标（已随 usage 聚合具备，token 用量已按 `runId` 落库，本阶段未额外扩展）；
+- prompt/model/tool catalog 版本关联（未做正式版本注册表，见下文"已知边界"）。
+
+**离线评估集：真实模型 vs 桩模型的取舍（已完成）**
+
+阶段 9/10 已有的 HITL/权限回归测试（`FlattenedWriteToolSuspensionEndToEndTest`、
+`AgentPermissionRulesConfigurationTest` 等）全部用桩 HTTP 服务器返回脚本化的固定模型响应——这类测试
+验证的是"框架管线接不接得住给定的响应"，测的是代码回归，不是模型质量本身：响应是写死的，模型选没选对
+工具、会不会越权，桩模型模式根本观察不到，因为决策权从一开始就不在模型手里。
+
+`ClientToolEvalSuite`（`biz-agent/src/test/kotlin/.../evaluation/`）反过来，调用**真实模型网关**跑一遍
+BKArtifacts 下载客户端场景，真正评估工具选择是否正确、破坏性操作是否触发 ASK 确认、有没有在没拿到真实
+`taskId` 时凭空编造、会不会把无关请求也当成任务来做。真实模型调用意味着需要网络、真实凭据、有成本，且
+存在非确定性，因此这套用例**不作为每次 PR 必须跑通过的自动化 CI 门禁**——公开的 GitHub Actions
+`backend.yml` 也没有配置内部模型网关凭据。用 JUnit5 的
+`@EnabledIfEnvironmentVariable(named = "AGENT_EVAL_LLM_BASE_URL", ...)` 让整个类在没有配置真实网关时被
+直接跳过（`SKIPPED`，不是失败），接入常规 `./gradlew test`/CI 零风险；需要真正跑一遍时（改了系统提示词、
+换了模型、调了工具目录），在能访问内部模型网关的环境里配置：
+
+```
+AGENT_EVAL_LLM_BASE_URL=https://xxx/v1
+AGENT_EVAL_LLM_MODEL_NAME=xxx
+# 二选一鉴权方式
+AGENT_EVAL_LLM_API_KEY=xxx
+# 或
+AGENT_EVAL_LLM_BK_APP_CODE=xxx
+AGENT_EVAL_LLM_BK_APP_SECRET=xxx
+```
+
+再执行 `./gradlew :agent:biz-agent:test --tests "com.tencent.bkrepo.agent.evaluation.*"`。这是一个**人工在
+改动前后各跑一遍、对比结果**的流程性门禁，不是自动化门禁；每个用例作为独立的 `DynamicTest` 出现在标准
+JUnit 报告里，不需要额外的报告生成器，失败信息里会附带实际调用的工具与最终回复文本方便判断是措辞误报
+还是真实退化。
+
+**评估断言的观察边界**：本地客户端工具（`ExternalLocalTool`）真正执行前必定挂起（`callAsync` 恒抛
+`ToolSuspendException`，交给客户端本地执行），所以一次 `HarnessAgent.streamEvents(...)` 调用天然只能
+推进到"模型决定调用某个工具"或"直接给出文本回复"为止，观察不到"客户端把结果传回来之后模型会怎么做"。
+首批用例（`ClientToolEvalCases`，9 个）因此只覆盖用户第一句话触发的"首次决策"：
+
+- 工具选择正确性：查失败任务要调 `list_download_tasks(state=failed)`，查空间要调 `get_disk_space`；
+- 破坏性操作必须触发 ASK：`clear_completed_records`/`run_disk_cleanup`/`set_download_path`；
+- 防止编造：没给 `taskId` 时要求先 `list_download_tasks` 拿真实 ID，不能直接尝试 `delete_download_tasks`；
+- 防止跳过诊断直接下重手：模糊的"卡住了"描述不应直接触发 `restart_download_engine`/`delete_download_tasks`；
+- 越界请求应拒绝而非照做：与下载客户端无关的请求不应调用任何工具；
+- 不应误委派：客户端本地问题不应触发 `agent_spawn` 委派给制品库领域子 Agent。
+
+覆盖 discovery/transfer 领域工具、多轮工具结果之后的后续决策（例如反幻觉场景"列表返回空后模型是否如实
+说明找不到"）需要额外的假实现或完整 AG-UI resume 协议驱动，成本明显更高，留给后续按需补充，属于刻意
+接受的窄范围。真实模型存在非确定性，个别用例偶发失败是预期内的，出现失败应先看断言信息里的实际转录，
+判断是措辞误报还是真实退化，而不是不加分析地当成构建失败处理。
+
+**已知边界**：没有做 prompt/model/tool catalog 的正式版本注册表——`ClientToolEvalSuite` 只在跑之前把
+`baseUrl`/`modelName`/鉴权方式打到日志里，供人工核对"这次评估用的是哪个模型"，没有把评估结果落库或做
+历史趋势对比。这套评估集本身也不覆盖"在线持续评测"（对生产真实流量抽样打分）——按窄范围决策，在线评测
+留给后续单独讨论。
 
 **验收**
 
-- 可追踪主 Agent 到子 Agent 再到工具；
-- 可统计每种 Agent 的成本和成功率；
-- 权限回归用例全部通过；
-- 模型或提示词变更未达阈值不能发布。
+- 可追踪主 Agent 到子 Agent 再到工具（已完成，见阶段 11.4 审计）；
+- 可统计每种 Agent 的成本和成功率（已完成，见 usage 聚合）；
+- 权限回归用例全部通过（已完成：阶段 9/10 的桩模型 HITL/权限回归测试持续接入常规 `./gradlew test`）；
+- 模型或提示词变更前必须人工跑一遍离线评估集并比对结果（已完成：`ClientToolEvalSuite`，流程性门禁而非
+  自动化门禁，见上文）。
 
 ### 阶段 12：灰度、容量与生产发布
 
