@@ -60,6 +60,7 @@ class HarnessAgentConfiguration {
         frontendTools: RegisteredFrontendTools,
         taskRepository: ObjectProvider<TaskRepository>,
         memoryFilesystemSpec: ObjectProvider<RemoteFilesystemSpec>,
+        modelResilience: AgentModelResilience,
     ): HarnessAgent {
         val agent = agentHarnessConfigurer.configure(
             properties = properties,
@@ -70,6 +71,7 @@ class HarnessAgentConfiguration {
             permissionContext = permissionContext,
             taskRepository = taskRepository.getIfAvailable(),
             memoryFilesystemSpec = memoryFilesystemSpec.getIfAvailable(),
+            modelResilience = modelResilience,
         )
         // 拍平方案：client 本地写/读工具（set_download_path 等）不再经由独立的 client 子 Agent，
         // 而是直接留在协调者自己的 live toolkit 上，由协调者自身的 PermissionContextState/

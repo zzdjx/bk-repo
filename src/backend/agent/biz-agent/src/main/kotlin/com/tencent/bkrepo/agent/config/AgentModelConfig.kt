@@ -10,6 +10,7 @@ package com.tencent.bkrepo.agent.config
 
 import com.tencent.bkrepo.agent.config.properties.AgentLlmAuthMode
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentLlmProperties
+import io.agentscope.core.model.ExecutionConfig
 import io.agentscope.core.model.GenerateOptions
 import io.agentscope.core.model.Model
 import io.agentscope.extensions.model.openai.OpenAIChatModel
@@ -21,7 +22,40 @@ import org.springframework.context.annotation.Configuration
 class AgentModelConfig {
 
     @Bean
-    fun agentChatModel(properties: EffectiveAgentLlmProperties): Model {
+    fun agentChatModel(properties: EffectiveAgentLlmProperties): Model =
+        buildModel(properties, properties.modelName)
+
+    /**
+     * 模型调用的韧性配置，与主模型 bean 分开是因为它要整体交给 HarnessAgent.Builder：
+     * 超时/重试走 `modelExecutionConfig`，备用模型走 `fallbackModel`，两者都是 Agent 级而非 Model 级配置。
+     *
+     * 备用模型是一个独立的 [Model] 实例，但**不注册成 bean**——容器里出现第二个 [Model] 会让现有的
+     * `model: Model` 注入点变歧义，而它除了喂给 Builder 之外没有别的消费方。
+     */
+    @Bean
+    fun agentModelResilience(properties: EffectiveAgentLlmProperties): AgentModelResilience {
+        val executionConfig = ExecutionConfig.builder()
+            .timeout(properties.requestTimeout)
+            .maxAttempts(properties.maxAttempts)
+            .initialBackoff(properties.initialBackoff)
+            .maxBackoff(properties.maxBackoff)
+            // 沿用框架的可重试判定：超时、IO、429、5xx 重试，4xx 与鉴权失败立即失败。
+            .retryOn(ExecutionConfig.RETRYABLE_ERRORS)
+            .build()
+        val fallbackModel = properties.fallbackModelName
+            .takeIf { it.isNotBlank() }
+            ?.let { buildModel(properties, it) }
+        logger.info(
+            "agent model resilience: requestTimeout={}, maxAttempts={}, fallbackModel={}, worstCaseBudget={}",
+            properties.requestTimeout,
+            properties.maxAttempts,
+            properties.fallbackModelName.ifBlank { "<unset>" },
+            properties.worstCaseModelCallBudget(),
+        )
+        return AgentModelResilience(executionConfig, fallbackModel)
+    }
+
+    private fun buildModel(properties: EffectiveAgentLlmProperties, modelName: String): Model {
         require(properties.baseUrl.isNotBlank()) { "agent.llm.base-url is required" }
         require(properties.modelName.isNotBlank()) { "agent.llm.model-name is required" }
 
@@ -29,14 +63,14 @@ class AgentModelConfig {
         logger.info(
             "Initializing agent chat model: baseUrl={}, modelName={}, authMode={}, reasoningEffort={}",
             properties.baseUrl,
-            properties.modelName,
+            modelName,
             properties.authMode,
             reasoningEffort ?: "<unset>",
         )
 
         val builder = OpenAIChatModel.builder()
             .baseUrl(properties.baseUrl)
-            .modelName(properties.modelName)
+            .modelName(modelName)
             .stream(properties.stream)
 
         when (properties.authMode) {
@@ -79,3 +113,11 @@ class AgentModelConfig {
         private val logger = LoggerFactory.getLogger(AgentModelConfig::class.java)
     }
 }
+
+/**
+ * 交给 `HarnessAgent.Builder` 的模型韧性配置。[fallbackModel] 为 null 表示未配备用模型。
+ */
+data class AgentModelResilience(
+    val executionConfig: ExecutionConfig,
+    val fallbackModel: Model?,
+)

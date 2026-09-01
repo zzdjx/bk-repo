@@ -25,6 +25,11 @@ class InMemoryActiveRunStateStore : ActiveRunStateStore {
         locks.remove(scopeKey(userId, threadId))
     }
 
+    /** 进程内的锁不会自己过期，因此续期只需回答"归属还在不在"。 */
+    override fun renewLock(userId: String, threadId: String, runId: String): Boolean {
+        return activeRuns[scopeKey(userId, threadId)] == runId
+    }
+
     override fun isLockHeld(userId: String, threadId: String): Boolean {
         return locks.containsKey(scopeKey(userId, threadId))
     }

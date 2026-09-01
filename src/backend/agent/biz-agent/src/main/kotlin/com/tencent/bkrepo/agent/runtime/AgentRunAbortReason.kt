@@ -25,4 +25,10 @@ enum class AgentRunAbortReason(val value: String) {
      * `shutdownInterrupted`，重发会从断点继续而不是从头重跑。
      */
     SERVER_SHUTDOWN("server_shutdown"),
+
+    /**
+     * 会话锁已经不属于这个 run 了（续期时发现活跃 run 绑定被别人接管）。继续跑下去两个 run 会交替写
+     * 同一份 AgentState，所以主动中止本地这一个。正常情况不该出现，出现即说明续期链路被拖住了。
+     */
+    LOCK_LOST("lock_lost"),
 }

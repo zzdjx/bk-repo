@@ -120,6 +120,38 @@ class ActiveRunManager(
         return aborted
     }
 
+    /**
+     * 给本副本所有在跑的 run 续上会话锁，返回续期成功的条数；由 [ActiveRunLockHeartbeat] 周期调用。
+     *
+     * 会话锁是一把 TTL 固定的 Redis 锁，没有续期就意味着"run 必须在 TTL 内结束"，而一个 run 的时长
+     * 取决于模型和工具，不受我们控制。锁先于 run 过期的后果不是慢，而是同一会话上能并发起第二个 run，
+     * 两个 run 交替写同一份 AgentState。
+     *
+     * 发现归属已经不在（[ActiveRunStateStore.renewLock] 返回 false）时中止本地这个 run：此时会话已经
+     * 被别人接管，继续跑只会污染状态。中止走的是与用户停止同一条收尾路径，其中的 [releaseRun] 会先比对
+     * 活跃 run 绑定，因此不会误删接管方的锁。
+     */
+    fun renewLocalRunLocks(): Int {
+        var renewed = 0
+        localHandles.values.toList().forEach { handle ->
+            try {
+                if (stateStore.renewLock(handle.userId, handle.threadId, handle.runId)) {
+                    renewed++
+                } else {
+                    logger.warn(
+                        "run[${handle.runId}] lost its session lock for user[${handle.userId}] " +
+                            "thread[${handle.threadId}], aborting local run",
+                    )
+                    handle.abort(AgentRunAbortReason.LOCK_LOST)
+                }
+            } catch (exception: Exception) {
+                // 续期失败大多是 Redis 抖动，下一轮还会再试；这里不能把 run 直接中止掉。
+                logger.warn("failed to renew session lock for run[${handle.runId}]", exception)
+            }
+        }
+        return renewed
+    }
+
     fun removeHandle(scope: ActiveRunScope) {
         localHandles.remove(scopeKey(scope))
     }

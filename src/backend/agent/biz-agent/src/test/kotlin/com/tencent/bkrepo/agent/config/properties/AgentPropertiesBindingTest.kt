@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
+import java.time.Duration
 
 @DisplayName("Agent 配置绑定")
 class AgentPropertiesBindingTest {
@@ -32,6 +33,60 @@ class AgentPropertiesBindingTest {
         assertEquals("qwen-max", effective.modelName)
         assertEquals("high", effective.effectiveReasoningEffort())
         assertEquals(AgentLlmAuthMode.API_KEY, effective.authMode)
+    }
+
+    @Test
+    fun `默认模型调用预算应明显小于会话锁TTL`() {
+        val llm = AgentLlmPropertiesResolver.resolve(AgentLlmProperties())
+        val activeRunTtl = AgentRuntimeProperties.DEFAULT_ACTIVE_RUN_TTL
+
+        // 两次尝试各 90s，加一次退避（2s 按 jitter 上界算 3s）
+        assertEquals(Duration.ofSeconds(183), llm.worstCaseModelCallBudget())
+        assertTrue(llm.worstCaseModelCallBudget() < activeRunTtl)
+        assertFalse(llm.fallbackEnabled())
+    }
+
+    @Test
+    fun `配了备用模型时预算翻倍但仍应留在锁TTL之内`() {
+        val llm = AgentLlmPropertiesResolver.resolve(
+            AgentLlmProperties(fallbackModelName = "qwen-plus"),
+        )
+
+        assertTrue(llm.fallbackEnabled())
+        assertEquals(Duration.ofSeconds(366), llm.worstCaseModelCallBudget())
+        assertTrue(llm.worstCaseModelCallBudget() < AgentRuntimeProperties.DEFAULT_ACTIVE_RUN_TTL)
+    }
+
+    @Test
+    fun `不重试时预算就是单次超时且不含退避`() {
+        val llm = AgentLlmPropertiesResolver.resolve(
+            AgentLlmProperties(maxAttempts = 1, requestTimeout = Duration.ofSeconds(30)),
+        )
+
+        assertEquals(Duration.ofSeconds(30), llm.worstCaseModelCallBudget())
+    }
+
+    @Test
+    fun `退避应按maxBackoff截顶而不是无限翻倍`() {
+        val llm = AgentLlmPropertiesResolver.resolve(
+            AgentLlmProperties(
+                maxAttempts = 4,
+                requestTimeout = Duration.ofSeconds(10),
+                initialBackoff = Duration.ofSeconds(8),
+                maxBackoff = Duration.ofSeconds(10),
+            ),
+        )
+
+        // 4 次尝试各 10s；三次退避按 jitter 上界为 8s->12s、10s->15s、10s->15s
+        assertEquals(Duration.ofSeconds(40 + 12 + 15 + 15), llm.worstCaseModelCallBudget())
+    }
+
+    @Test
+    fun `maxAttempts 配成非法值时应被兜底为至少一次`() {
+        val llm = AgentLlmPropertiesResolver.resolve(AgentLlmProperties(maxAttempts = 0))
+
+        assertEquals(1, llm.maxAttempts)
+        assertEquals(AgentLlmProperties.DEFAULT_REQUEST_TIMEOUT, llm.worstCaseModelCallBudget())
     }
 
     @Test
@@ -58,6 +113,11 @@ class AgentPropertiesBindingTest {
             reasoningEffort = null,
             stream = true,
             authMode = AgentLlmAuthMode.API_KEY,
+            fallbackModelName = "",
+            requestTimeout = AgentLlmProperties.DEFAULT_REQUEST_TIMEOUT,
+            maxAttempts = AgentLlmProperties.DEFAULT_MAX_ATTEMPTS,
+            initialBackoff = AgentLlmProperties.DEFAULT_INITIAL_BACKOFF,
+            maxBackoff = AgentLlmProperties.DEFAULT_MAX_BACKOFF,
         )
 
         val text = effective.toString()

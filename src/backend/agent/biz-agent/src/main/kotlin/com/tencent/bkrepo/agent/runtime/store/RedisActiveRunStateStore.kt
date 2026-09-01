@@ -37,6 +37,23 @@ class RedisActiveRunStateStore(
         activeLocks.remove(lockKey(userId, threadId))?.unlock()
     }
 
+    /**
+     * 续期用活跃 run 绑定当作归属凭证：[RedisLock] 的随机 token 是私有的，拿不到也就没法做
+     * "compare-and-expire"；而活跃 run 绑定（`activeRunKey` 里存的 runId）是本项目自己写进去的，
+     * 与锁同生共死（一起设、一起清），用它判断"这把锁还是不是这个 run 的"信息量等价。
+     *
+     * 先判断再 expire 不是原子的，但两个 key 一起续、窗口是毫秒级；对比之下不续期的话锁会在分钟级
+     * 之后必然过期，取舍很清楚。
+     */
+    override fun renewLock(userId: String, threadId: String, runId: String): Boolean {
+        if (redisOperation.get(activeRunKey(userId, threadId)) != runId) {
+            return false
+        }
+        redisOperation.expire(lockKey(userId, threadId), lockTtlSeconds)
+        redisOperation.expire(activeRunKey(userId, threadId), activeTtlSeconds)
+        return true
+    }
+
     override fun isLockHeld(userId: String, threadId: String): Boolean {
         return redisOperation.get(lockKey(userId, threadId)) != null
     }

@@ -15,6 +15,14 @@ interface ActiveRunStateStore {
 
     fun releaseLock(userId: String, threadId: String)
 
+    /**
+     * 为仍在跑的 [runId] 续上会话锁与活跃 run 绑定的过期时间。
+     *
+     * @return 是否仍然持有；false 表示这个 run 已经不是会话的活跃 run（锁被别人接管），调用方应中止它，
+     *   而不是继续续期——见 [com.tencent.bkrepo.agent.runtime.AgentRunAbortReason.LOCK_LOST]。
+     */
+    fun renewLock(userId: String, threadId: String, runId: String): Boolean
+
     fun isLockHeld(userId: String, threadId: String): Boolean
 
     fun bindActiveRun(userId: String, threadId: String, runId: String)

@@ -18,6 +18,14 @@ agent:
     bk-app-secret:
     model-name:
     # reasoning-effort: high  # no_think | low | high；非空时开启深度思考请求与 REASONING_* SSE
+    # 模型调用韧性。request-timeout 是「每次尝试」的超时，不是整个 run 的；
+    # maxAttempts * request-timeout + 退避 就是单次调用的最坏预算，配了 fallback-model-name 时翻倍，
+    # 启动期由 AgentModelBudgetValidator 与 active-run-ttl 一起算进日志（超了只告警，锁由看门狗续期）
+    # request-timeout: 90s
+    # max-attempts: 2        # 含首次；只对超时/429/5xx/IO 重试，4xx 与鉴权失败立即失败
+    # initial-backoff: 2s
+    # max-backoff: 10s
+    # fallback-model-name:   # 非空时启用备用模型（同网关同鉴权，仅换模型名）
   memory:
     compaction-enabled: true
     flush-before-compact: false

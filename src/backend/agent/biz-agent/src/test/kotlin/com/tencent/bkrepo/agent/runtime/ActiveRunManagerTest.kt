@@ -8,6 +8,7 @@
 
 package com.tencent.bkrepo.agent.runtime
 
+import com.tencent.bkrepo.agent.runtime.store.ActiveRunStateStore
 import com.tencent.bkrepo.agent.runtime.store.InMemoryActiveRunStateStore
 import io.agentscope.core.state.InMemoryAgentStateStore
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -92,6 +93,60 @@ class ActiveRunManagerTest {
 
         assertEquals(1, aborted)
         assertTrue(healthyAborted)
+    }
+
+    @Test
+    fun `续期应覆盖本副本全部在跑run`() {
+        val first = ActiveRunScope("user-1", "project-1", "thread-1")
+        val second = ActiveRunScope("user-2", "project-1", "thread-2")
+        listOf(first to "run-1", second to "run-2").forEach { (scope, runId) ->
+            assertTrue(manager.tryAcquire(scope))
+            manager.bindActiveRun(scope, runId)
+            manager.registerHandle(scope, runId, runtimeContext = stubRuntimeContext()) { }
+        }
+
+        assertEquals(2, manager.renewLocalRunLocks())
+    }
+
+    @Test
+    fun `没有在跑run时续期是空操作`() {
+        assertEquals(0, manager.renewLocalRunLocks())
+    }
+
+    @Test
+    fun `会话已被别人接管时续期应中止本地run且不误删接管方的锁`() {
+        val scope = ActiveRunScope("user-1", "project-1", "thread-1")
+        assertTrue(manager.tryAcquire(scope))
+        manager.bindActiveRun(scope, "run-mine")
+        val reasons = mutableListOf<AgentRunAbortReason>()
+        manager.registerHandle(scope, "run-mine", runtimeContext = stubRuntimeContext()) { reason ->
+            reasons += reason
+            manager.releaseRun(scope, "run-mine")
+        }
+        // 锁过期后被另一个 run 接管：活跃 run 绑定已经不是我们的 runId
+        manager.bindActiveRun(scope, "run-theirs")
+
+        val renewed = manager.renewLocalRunLocks()
+
+        assertEquals(0, renewed)
+        assertEquals(listOf(AgentRunAbortReason.LOCK_LOST), reasons)
+        assertTrue(manager.isRunning(scope), "接管方的会话锁不能被我们的收尾流程释放")
+        assertEquals("run-theirs", manager.getActiveRunId(scope))
+    }
+
+    @Test
+    fun `续期抛异常时不应中止run而是等下一轮重试`() {
+        val scope = ActiveRunScope("user-1", "project-1", "thread-1")
+        val flaky = object : ActiveRunStateStore by InMemoryActiveRunStateStore() {
+            override fun renewLock(userId: String, threadId: String, runId: String): Boolean =
+                throw IllegalStateException("redis is flaky")
+        }
+        val flakyManager = ActiveRunManager(flaky, InMemoryAgentStateStore(), ApplicationEventPublisher { })
+        var aborted = false
+        flakyManager.registerHandle(scope, "run-1", runtimeContext = stubRuntimeContext()) { aborted = true }
+
+        assertEquals(0, flakyManager.renewLocalRunLocks())
+        assertFalse(aborted, "Redis 抖动不该让正在跑的对话被杀掉")
     }
 
     private fun stubRuntimeContext(): io.agentscope.core.agent.RuntimeContext {

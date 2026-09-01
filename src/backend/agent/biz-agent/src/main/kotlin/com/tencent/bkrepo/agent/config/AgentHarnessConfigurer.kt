@@ -73,6 +73,7 @@ class AgentHarnessConfigurer(
         permissionContext: PermissionContextState,
         taskRepository: TaskRepository? = null,
         memoryFilesystemSpec: RemoteFilesystemSpec? = null,
+        modelResilience: AgentModelResilience? = null,
     ): HarnessAgent {
         var builder = HarnessAgent.builder()
             .name(properties.name)
@@ -100,6 +101,13 @@ class AgentHarnessConfigurer(
             .middleware(usageTrackingMiddleware)
             .middleware(toolAuditMiddleware)
             .middleware(delegationBudgetMiddleware)
+
+        // 不配时沿用框架默认（每次尝试超时 5 分钟、最多 3 次尝试），那套默认值的最坏耗时超过会话锁
+        // TTL，见 AgentModelBudgetValidator。测试里造 Agent 通常不关心这块，所以留成可空参数。
+        if (modelResilience != null) {
+            builder = builder.modelExecutionConfig(modelResilience.executionConfig)
+            modelResilience.fallbackModel?.let { builder = builder.fallbackModel(it) }
+        }
 
         // 没有 Redis 时 taskRepository 为 null：交给框架退回默认的本地文件系统实现（见
         // AgentTaskRepositoryConfiguration 的 kdoc），与升级前行为一致。
