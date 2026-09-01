@@ -19,9 +19,11 @@ import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import io.agentscope.core.agui.model.AguiResume
 import io.agentscope.core.agui.model.RunAgentInput
 import org.springframework.stereotype.Component
+import java.time.Instant
 
 /**
- * 校验 AG-UI resume[]：覆盖全部 pending interrupt、拒绝非法 interruptId，并在写工具执行前重新 IAM 鉴权。
+ * 校验 AG-UI resume[]：覆盖全部 pending interrupt、拒绝非法 interruptId、拒绝已过期的确认卡片，
+ * 并在写工具执行前重新 IAM 鉴权。
  */
 @Component
 class AguiResumeValidator(
@@ -66,6 +68,8 @@ class AguiResumeValidator(
         snapshot: PendingInterruptSnapshot,
         entry: AguiResume,
     ) {
+        assertNotExpired(entry.interruptId, snapshot)
+
         if (!interruptStateRepository.tryMarkResume(threadId, entry.interruptId, fingerprint(entry))) {
             throw ParameterInvalidException("resume: duplicate resume for interrupt[${entry.interruptId}]")
         }
@@ -90,6 +94,25 @@ class AguiResumeValidator(
 
         if (frontendToolCatalog.isWriteTool(toolName) && isExecutableResume(entry, snapshot)) {
             permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
+        }
+    }
+
+    /**
+     * `snapshot.expiresAt` 在持久化时由 [AguiInterruptNormalizer.normalizeSnapshot] 按
+     * `activeRunTtl` 兜底填充，是客户端确认卡片上展示的"多久后失效"。此前这里从未校验，真正拦住过老
+     * resume 的只是 Redis 存储本身的 TTL（`sessionTtl`，默认 30 天，远长于 `activeRunTtl` 的 11 分钟）
+     * ——也就是说过期的确认卡片在这个窗口内其实一直能被 resume 执行，与 UI 上的过期时间不符。
+     * 这里显式按 `expiresAt` 拒绝迟到的 resume，让服务端行为与客户端展示的过期时间一致。
+     */
+    private fun assertNotExpired(interruptId: String, snapshot: PendingInterruptSnapshot) {
+        val expiresAt = snapshot.expiresAt?.takeIf { it.isNotBlank() } ?: return
+        val deadline = try {
+            Instant.parse(expiresAt)
+        } catch (_: Exception) {
+            return
+        }
+        if (Instant.now().isAfter(deadline)) {
+            throw ParameterInvalidException("resume: interrupt[$interruptId] has expired at $expiresAt")
         }
     }
 

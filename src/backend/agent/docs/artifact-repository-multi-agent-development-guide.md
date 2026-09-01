@@ -1086,6 +1086,15 @@ Redis 仅保存：
 - 同意、拒绝、过期、重复 resume 和缺失 interrupt 均有确定结果；
 - 链路中不存在 `externalExecutionResults` 或自定义确认事件。
 
+**补记（阶段 12 之后回查发现并修复）**：「过期」此前只是客户端确认卡片上的展示时间——
+`AguiInterruptNormalizer` 按 `active-run-ttl`（默认 11 分钟）算出 `expiresAt` 写进去，但
+`AguiResumeValidator` 从未读取它；真正拦住迟到 resume 的只有 `AgentPendingInterruptStore` 的 Redis
+key TTL，用的是 `sessionTtl`（默认 30 天）。也就是说一张写操作确认卡片，UI 上写着 11 分钟后过期，
+服务端实际上在 30 天内都会接受并执行迟到的 resume。已在 `AguiResumeValidator.validateEntry` 里加上
+按 `expiresAt` 的显式拒绝（早于重复 resume 检查），让服务端行为与客户端展示一致；`expiresAt` 缺失
+（历史快照、字段解析失败）时按不过期处理，向后兼容。同时补齐了这个类此前完全没有的单测
+（`AguiResumeValidatorTest`：过期拒绝、未过期放行、缺字段兼容、重复 resume、缺失 interrupt）。
+
 ### 阶段 7：上下文压缩和工具结果治理
 
 **目标**
