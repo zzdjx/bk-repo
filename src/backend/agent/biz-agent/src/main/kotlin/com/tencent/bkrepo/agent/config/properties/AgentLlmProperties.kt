@@ -42,6 +42,8 @@ data class AgentLlmProperties(
     var maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
     var initialBackoff: Duration = DEFAULT_INITIAL_BACKOFF,
     var maxBackoff: Duration = DEFAULT_MAX_BACKOFF,
+    var circuitBreaker: CircuitBreaker = CircuitBreaker(),
+    var concurrency: Concurrency = Concurrency(),
 ) {
     override fun toString(): String =
         "AgentLlmProperties(baseUrl=$baseUrl, modelName=$modelName, stream=$stream, " +
@@ -50,7 +52,44 @@ data class AgentLlmProperties(
             "bkAppSecret=${AgentPropertiesRedaction.redactSecret(bkAppSecret)}, " +
             "reasoningEffort=${reasoningEffort ?: "<unset>"}, " +
             "fallbackModelName=${fallbackModelName.ifBlank { "<unset>" }}, " +
-            "requestTimeout=$requestTimeout, maxAttempts=$maxAttempts)"
+            "requestTimeout=$requestTimeout, maxAttempts=$maxAttempts, " +
+            "circuitBreaker=$circuitBreaker, concurrency=$concurrency)"
+
+    /**
+     * 连续失败熔断。整个模型调用（framework 内部重试 + fallback 都试过之后）连续失败达到阈值即熔断，
+     * 熔断期内直接拒绝、不再打模型；冷却结束后放一个探测请求过去，成功则关闭熔断、失败则重新计时。
+     *
+     * 默认开启：模型健康时这套逻辑永远不触发，只在真的连续出问题（网关抖动、模型下线、配额耗尽）时
+     * 才生效，属于"默认开对用户无感、真出事时才有用"的安全网，不同于会主动限流合法请求的并发上限。
+     */
+    data class CircuitBreaker(
+        var enabled: Boolean = DEFAULT_ENABLED,
+        var failureThreshold: Int = DEFAULT_FAILURE_THRESHOLD,
+        var cooldown: Duration = DEFAULT_COOLDOWN,
+    ) {
+        companion object {
+            const val DEFAULT_ENABLED = true
+            const val DEFAULT_FAILURE_THRESHOLD = 5
+            val DEFAULT_COOLDOWN: Duration = Duration.ofSeconds(30)
+        }
+    }
+
+    /**
+     * 模型调用并发上限（单副本进程内计数，语义与
+     * [com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard] 的委派并发计数一致：不追求跨副本
+     * 精确配额，只做本地的尽力而为限流）。任一项 ≤ 0 表示不限制该维度。
+     *
+     * 默认两项都不限制：这是一个会主动拒绝合法请求的限流开关，不像熔断那样默认打开也不影响健康流量，
+     * 因此需要显式配置才生效，与 `read-only-mode`/`require-redis` 一样"限制性功能默认关闭"。
+     */
+    data class Concurrency(
+        var maxGlobal: Int = DEFAULT_UNLIMITED,
+        var maxPerUser: Int = DEFAULT_UNLIMITED,
+    ) {
+        companion object {
+            const val DEFAULT_UNLIMITED = 0
+        }
+    }
 
     companion object {
         const val DEFAULT_STREAM = true
@@ -58,6 +97,38 @@ data class AgentLlmProperties(
         val DEFAULT_REQUEST_TIMEOUT: Duration = Duration.ofSeconds(90)
         val DEFAULT_INITIAL_BACKOFF: Duration = Duration.ofSeconds(2)
         val DEFAULT_MAX_BACKOFF: Duration = Duration.ofSeconds(10)
+    }
+}
+
+data class EffectiveAgentModelCircuitBreaker(
+    val enabled: Boolean,
+    val failureThreshold: Int,
+    val cooldown: Duration,
+) {
+    companion object {
+        fun from(config: AgentLlmProperties.CircuitBreaker): EffectiveAgentModelCircuitBreaker =
+            EffectiveAgentModelCircuitBreaker(
+                enabled = config.enabled,
+                failureThreshold = config.failureThreshold.coerceAtLeast(1),
+                cooldown = config.cooldown,
+            )
+
+        fun defaults(): EffectiveAgentModelCircuitBreaker = from(AgentLlmProperties.CircuitBreaker())
+    }
+}
+
+data class EffectiveAgentModelConcurrency(
+    val maxGlobal: Int,
+    val maxPerUser: Int,
+) {
+    companion object {
+        fun from(config: AgentLlmProperties.Concurrency): EffectiveAgentModelConcurrency =
+            EffectiveAgentModelConcurrency(
+                maxGlobal = config.maxGlobal,
+                maxPerUser = config.maxPerUser,
+            )
+
+        fun defaults(): EffectiveAgentModelConcurrency = from(AgentLlmProperties.Concurrency())
     }
 }
 
@@ -78,6 +149,8 @@ data class EffectiveAgentLlmProperties(
     val maxAttempts: Int,
     val initialBackoff: Duration,
     val maxBackoff: Duration,
+    val circuitBreaker: EffectiveAgentModelCircuitBreaker,
+    val concurrency: EffectiveAgentModelConcurrency,
 ) {
     fun effectiveReasoningEffort(): String? = reasoningEffort?.takeIf { it.isNotBlank() }
 
@@ -132,6 +205,8 @@ object AgentLlmPropertiesResolver {
         maxAttempts = llm.maxAttempts.coerceAtLeast(1),
         initialBackoff = llm.initialBackoff,
         maxBackoff = llm.maxBackoff,
+        circuitBreaker = EffectiveAgentModelCircuitBreaker.from(llm.circuitBreaker),
+        concurrency = EffectiveAgentModelConcurrency.from(llm.concurrency),
     )
 
     private fun resolveAuthMode(bkAppCode: String, apiKey: String): AgentLlmAuthMode = when {

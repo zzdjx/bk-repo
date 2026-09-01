@@ -118,6 +118,8 @@ class AgentPropertiesBindingTest {
             maxAttempts = AgentLlmProperties.DEFAULT_MAX_ATTEMPTS,
             initialBackoff = AgentLlmProperties.DEFAULT_INITIAL_BACKOFF,
             maxBackoff = AgentLlmProperties.DEFAULT_MAX_BACKOFF,
+            circuitBreaker = EffectiveAgentModelCircuitBreaker.defaults(),
+            concurrency = EffectiveAgentModelConcurrency.defaults(),
         )
 
         val text = effective.toString()
@@ -224,6 +226,36 @@ class AgentPropertiesBindingTest {
         assertEquals(java.time.Duration.ofDays(30), custom.run)
         assertEquals(java.time.Duration.ZERO, custom.memory, "0 表示永不过期，不应被规整成默认值")
         assertEquals(AgentRuntimeProperties.DEFAULT_MESSAGE_RETENTION, custom.message)
+    }
+
+    @Test
+    fun `熔断默认应开启且并发限制默认不限制`() {
+        val defaults = AgentLlmPropertiesResolver.resolve(AgentLlmProperties())
+
+        assertTrue(defaults.circuitBreaker.enabled, "熔断默认必须开启，对健康流量无感、只在真出事时兜底")
+        assertTrue(defaults.circuitBreaker.failureThreshold > 0)
+        assertTrue(defaults.circuitBreaker.cooldown > Duration.ZERO)
+        assertEquals(0, defaults.concurrency.maxGlobal, "并发限制是主动限流开关，默认必须不限制")
+        assertEquals(0, defaults.concurrency.maxPerUser)
+    }
+
+    @Test
+    fun `熔断阈值配成非法值时应被兜底为至少一次失败`() {
+        val effective = AgentLlmPropertiesResolver.resolve(
+            AgentLlmProperties(circuitBreaker = AgentLlmProperties.CircuitBreaker(failureThreshold = 0)),
+        )
+
+        assertEquals(1, effective.circuitBreaker.failureThreshold)
+    }
+
+    @Test
+    fun `并发限制可按维度分别配置`() {
+        val effective = AgentLlmPropertiesResolver.resolve(
+            AgentLlmProperties(concurrency = AgentLlmProperties.Concurrency(maxGlobal = 50, maxPerUser = 5)),
+        )
+
+        assertEquals(50, effective.concurrency.maxGlobal)
+        assertEquals(5, effective.concurrency.maxPerUser)
     }
 
     @Test

@@ -26,6 +26,17 @@ agent:
     # initial-backoff: 2s
     # max-backoff: 10s
     # fallback-model-name:   # 非空时启用备用模型（同网关同鉴权，仅换模型名）
+    # 连续失败熔断：整条调用链（重试+fallback都试过）连续失败达到阈值即熔断，冷却后放一个探测请求。
+    # 默认开启，对健康流量无感，只在真的连续出问题时才生效
+    # circuit-breaker:
+    #   enabled: true
+    #   failure-threshold: 5
+    #   cooldown: 30s
+    # 模型调用并发上限（进程内尽力而为限流，不跨副本）。任一项 <=0 表示不限制该维度，默认都不限制——
+    # 这是会主动拒绝合法请求的限流阀，需要按环境容量显式打开
+    # concurrency:
+    #   max-global: 0
+    #   max-per-user: 0
   memory:
     compaction-enabled: true
     flush-before-compact: false

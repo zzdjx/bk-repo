@@ -47,6 +47,8 @@ import com.tencent.bkrepo.agent.config.properties.EffectiveAgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
+import com.tencent.bkrepo.agent.resilience.ModelCircuitBreakerMiddleware
+import com.tencent.bkrepo.agent.resilience.ModelConcurrencyLimitMiddleware
 import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
 import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
 import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
@@ -209,6 +211,8 @@ class ClientToolEvalSuite {
                 DelegationConcurrencyGuard(),
                 NoopTaskRepositoryProvider(),
             ),
+            modelCircuitBreakerMiddleware = ModelCircuitBreakerMiddleware(llmProperties),
+            modelConcurrencyLimitMiddleware = ModelConcurrencyLimitMiddleware(llmProperties),
             memoryFilesystemAccess = MemoryFilesystemAccess(null, runtimeProperties.name),
         )
         val permissionContext: PermissionContextState =
