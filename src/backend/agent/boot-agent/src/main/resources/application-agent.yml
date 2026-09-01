@@ -66,6 +66,12 @@ agent:
     # （多副本下会话会飘、确认卡片恢复不了、后台任务查不到）
     # state:
     #   require-redis: true
+    # 灰度总闸：只回答"这个项目/用户能不能进"，不区分能用哪些子 Agent 或工具（那需要更大的改造）。
+    # 默认关闭；开启后项目名单与用户名单是 OR 关系，任一命中即放行，改名单需要重启或重建配置 Bean
+    # gray:
+    #   enabled: true
+    #   allowed-project-ids: [ "project-a", "project-b" ]
+    #   allowed-user-ids: [ "internal-tester-1" ]      # 内部测试用户，跨项目豁免
 
 rate:
   limiter:

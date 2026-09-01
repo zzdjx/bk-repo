@@ -23,6 +23,7 @@ import com.tencent.bkrepo.agent.config.properties.AgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.AgentLlmPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryPropertiesResolver
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentGray
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
@@ -99,6 +100,7 @@ class UsageTrackingMiddlewareTest {
             readOnlyMode = false,
             retention = EffectiveAgentRetention.defaults(),
             topology = EffectiveAgentTopology.defaults(),
+            gray = EffectiveAgentGray.defaults(),
         )
         val llmProperties = AgentLlmPropertiesResolver.resolve(
             AgentLlmProperties(

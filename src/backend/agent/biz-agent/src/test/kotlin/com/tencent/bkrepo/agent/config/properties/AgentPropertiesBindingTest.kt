@@ -259,6 +259,34 @@ class AgentPropertiesBindingTest {
     }
 
     @Test
+    fun `灰度总闸默认关闭且名单为空`() {
+        val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties()).gray
+
+        assertFalse(defaults.enabled, "灰度默认必须关闭，不能影响现有部署")
+        assertTrue(defaults.allowedProjectIds.isEmpty())
+        assertTrue(defaults.allowedUserIds.isEmpty())
+        // 关闭时不管名单内容，任何项目/用户都应该放行
+        assertTrue(defaults.isAllowed("any-user", "any-project"))
+    }
+
+    @Test
+    fun `灰度开启后项目或用户命中任一名单即放行`() {
+        val gray = AgentRuntimePropertiesResolver.resolve(
+            AgentRuntimeProperties(
+                gray = AgentRuntimeProperties.Gray(
+                    enabled = true,
+                    allowedProjectIds = setOf("project-1"),
+                    allowedUserIds = setOf("user-1"),
+                ),
+            ),
+        ).gray
+
+        assertTrue(gray.isAllowed("stranger", "project-1"), "项目命中名单应放行")
+        assertTrue(gray.isAllowed("user-1", "stranger-project"), "用户命中名单应放行")
+        assertFalse(gray.isAllowed("stranger", "stranger-project"), "两者都不命中应拒绝")
+    }
+
+    @Test
     fun `未配置 sys-prompt 时应默认使用 AgentSystemPrompts`() {
         val runtime = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
 

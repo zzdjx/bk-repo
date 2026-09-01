@@ -46,6 +46,7 @@ data class AgentRuntimeProperties(
     var retention: Retention = Retention(),
     var features: Features = Features(),
     var topology: Topology = Topology(),
+    var gray: Gray = Gray(),
 ) {
     data class State(
         var keyPrefix: String = DEFAULT_KEY_PREFIX,
@@ -139,6 +140,29 @@ data class AgentRuntimeProperties(
          */
         var readOnlyMode: Boolean = DEFAULT_READ_ONLY_MODE,
     )
+
+    /**
+     * 灰度分流总闸（`agent.runtime.gray`）：控制哪些项目/用户能访问 Agent 服务。
+     *
+     * 这里管的是"能不能进"，判断点只在 [com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 入口，
+     * 不深入到任何子 Agent 或工具——那需要把 `AgentCatalog`/`PermissionEngine`/`FrontendToolRegistrar`
+     * 这些启动期就装配好的全局单例改造成按请求动态计算，成本和风险与之前评估过的"委派硬并发限制"是
+     * 同一个量级，窄范围内先不做；等有了"按名单决定能用哪些子 Agent/工具"的真实需求再付这个代价。
+     *
+     * 默认 [enabled] = false：不开灰度时对现有部署零影响，与 `read-only-mode`/`require-redis` 同样是
+     * "限制性功能默认关闭"。
+     */
+    data class Gray(
+        var enabled: Boolean = DEFAULT_ENABLED,
+        /** 项目名单，主维度——bk-repo 本来就按项目隔离，是运营侧最自然的放量单位。 */
+        var allowedProjectIds: Set<String> = emptySet(),
+        /** 用户名单，用于内部测试/白名单用户跨项目验证；与项目名单是 OR 关系，任一命中即放行。 */
+        var allowedUserIds: Set<String> = emptySet(),
+    ) {
+        companion object {
+            const val DEFAULT_ENABLED = false
+        }
+    }
 
     data class Topology(
         var coordinator: Coordinator = Coordinator(),
@@ -272,6 +296,29 @@ data class EffectiveAgentRetention(
     }
 }
 
+/** 见 [AgentRuntimeProperties.Gray]。 */
+data class EffectiveAgentGray(
+    val enabled: Boolean,
+    val allowedProjectIds: Set<String>,
+    val allowedUserIds: Set<String>,
+) {
+    /** 灰度关闭时永远放行；开启时项目或用户命中任一名单即放行（OR 语义）。 */
+    fun isAllowed(userId: String, projectId: String): Boolean {
+        if (!enabled) return true
+        return projectId in allowedProjectIds || userId in allowedUserIds
+    }
+
+    companion object {
+        fun from(gray: AgentRuntimeProperties.Gray): EffectiveAgentGray = EffectiveAgentGray(
+            enabled = gray.enabled,
+            allowedProjectIds = gray.allowedProjectIds,
+            allowedUserIds = gray.allowedUserIds,
+        )
+
+        fun defaults(): EffectiveAgentGray = from(AgentRuntimeProperties.Gray())
+    }
+}
+
 data class EffectiveAgentRuntimeProperties(
     val name: String,
     val sysPrompt: String,
@@ -293,6 +340,7 @@ data class EffectiveAgentRuntimeProperties(
     val readOnlyMode: Boolean,
     val retention: EffectiveAgentRetention,
     val topology: EffectiveAgentTopology,
+    val gray: EffectiveAgentGray,
 ) {
     companion object {
         fun defaults(): EffectiveAgentRuntimeProperties = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
@@ -323,5 +371,6 @@ object AgentRuntimePropertiesResolver {
             readOnlyMode = runtime.features.readOnlyMode,
             retention = EffectiveAgentRetention.from(runtime.retention),
             topology = EffectiveAgentTopology.from(runtime.topology),
+            gray = EffectiveAgentGray.from(runtime.gray),
         )
 }

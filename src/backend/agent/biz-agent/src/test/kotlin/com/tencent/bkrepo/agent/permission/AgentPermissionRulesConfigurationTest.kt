@@ -8,6 +8,7 @@
 
 package com.tencent.bkrepo.agent.permission
 
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentGray
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
@@ -160,5 +161,6 @@ class AgentPermissionRulesConfigurationTest {
             readOnlyMode = readOnly,
             retention = EffectiveAgentRetention.defaults(),
             topology = EffectiveAgentTopology.defaults(),
+            gray = EffectiveAgentGray.defaults(),
         )
 }

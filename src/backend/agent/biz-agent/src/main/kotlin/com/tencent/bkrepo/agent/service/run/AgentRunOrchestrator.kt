@@ -34,6 +34,7 @@ import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.exception.TooManyRequestsException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
+import com.tencent.bkrepo.common.security.exception.PermissionException
 import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.core.agui.event.AguiEvent
 import io.agentscope.core.agui.model.RunAgentInput
@@ -75,6 +76,7 @@ class AgentRunOrchestrator(
 
     fun run(userId: String, projectId: String, input: RunAgentInput): SseEmitter {
         assertAcceptingRequests()
+        assertGrayAllowed(userId, projectId)
         val prepared = prepareInput(userId, projectId, input)
         resolveExistingRun(prepared.input)?.let { return it }
         val runScope = ActiveRunScope(userId, projectId, prepared.threadId)
@@ -107,6 +109,24 @@ class AgentRunOrchestrator(
             status = HttpStatus.SERVICE_UNAVAILABLE,
             messageCode = CommonMessageCode.SYSTEM_ERROR,
         )
+    }
+
+    /**
+     * 灰度总闸：只回答"这个项目/用户能不能进"，不管进来之后能用哪些子 Agent 或工具——那需要把
+     * `AgentCatalog`/`PermissionEngine`/`FrontendToolRegistrar` 这些启动期装配好的全局单例改造成
+     * 按请求动态计算，是明显更大的改造，见 [com.tencent.bkrepo.agent.config.properties
+     * .AgentRuntimeProperties.Gray] 的说明。
+     *
+     * 放在 [assertAcceptingRequests] 之后、`prepareInput` 之前：比停机检查晚一步是因为停机是更紧急的
+     * 拒绝信号（关系到能不能启动新 run），比输入校验、会话归属检查早是为了不白做那些校验——名单外的
+     * 项目/用户应该尽快拿到明确的"未开通"反馈，而不是先看到别的校验错误。
+     */
+    private fun assertGrayAllowed(userId: String, projectId: String) {
+        if (properties.gray.isAllowed(userId, projectId)) {
+            return
+        }
+        logger.info("Rejecting agent run: project[$projectId] user[$userId] is not in the gray release allowlist")
+        throw PermissionException("Project[$projectId] is not in the agent gray release allowlist")
     }
 
     private data class PreparedInput(
