@@ -28,13 +28,17 @@ import com.tencent.bkrepo.agent.runtime.ActiveRunScope
 import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
 import com.tencent.bkrepo.agent.session.AgentSessionStore
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.common.api.constant.HttpStatus
 import com.tencent.bkrepo.common.api.constant.StringPool
+import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.exception.TooManyRequestsException
+import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.core.agui.event.AguiEvent
 import io.agentscope.core.agui.model.RunAgentInput
 import io.agentscope.core.agui.processor.AguiRequestProcessor
+import io.agentscope.core.shutdown.GracefulShutdownManager
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
@@ -64,11 +68,13 @@ class AgentRunOrchestrator(
     private val agentRunStreamOrchestrator: AgentRunStreamOrchestrator,
     private val lifecycleManager: AgentRunLifecycleManager,
     private val eventPipeline: AgentRunEventPipeline,
+    private val shutdownManager: GracefulShutdownManager,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
     fun run(userId: String, projectId: String, input: RunAgentInput): SseEmitter {
+        assertAcceptingRequests()
         val prepared = prepareInput(userId, projectId, input)
         resolveExistingRun(prepared.input)?.let { return it }
         val runScope = ActiveRunScope(userId, projectId, prepared.threadId)
@@ -79,6 +85,28 @@ class AgentRunOrchestrator(
 
     fun replayTerminal(input: RunAgentInput, existingRun: TAgentRun): SseEmitter {
         return agentRunStreamOrchestrator.replayTerminalForRun(input, existingRun)
+    }
+
+    /**
+     * 停机窗口内直接回 503，让客户端重试到别的副本，而不是先建 run 记录、抢会话锁，再在订阅事件流时被框架的
+     * `AgentShuttingDownException` 打断——那条路径上异常发生在异步的 Flux 里，HTTP 状态码早已发出，客户端只会
+     * 收到一个语义模糊的失败流。
+     *
+     * K8s 摘流量是异步的：`preStop`/SIGTERM 之后 Service 的 endpoint 更新要等一小会儿，这段时间里新请求照旧
+     * 会打到正在停机的副本上，所以这个前置判断不是理论上的边角情况。
+     *
+     * 判断与订阅之间仍有竞态（判断通过之后才开始停机），那种情况下由 [AgentRunEventPipeline] 的错误处理按普通
+     * run 失败收尾，用户重试即可。这里只负责把常见情况做成干净的 503。
+     */
+    private fun assertAcceptingRequests() {
+        if (shutdownManager.isAcceptingRequests()) {
+            return
+        }
+        logger.info("Rejecting new agent run: replica is shutting down")
+        throw ErrorCodeException(
+            status = HttpStatus.SERVICE_UNAVAILABLE,
+            messageCode = CommonMessageCode.SYSTEM_ERROR,
+        )
     }
 
     private data class PreparedInput(

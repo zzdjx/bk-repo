@@ -43,6 +43,7 @@ import org.mockito.invocation.InvocationOnMock
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import org.mockito.stubbing.Answer
+import java.time.Duration
 
 /**
  * [LettuceStore] 单测。
@@ -52,8 +53,9 @@ import org.mockito.stubbing.Answer
  * `io.agentscope.extensions.redis.store.RedisStore`（已随 AgentScope 发布验证过）逐字迁移的，
  * 这里只验证 [LettuceStore] 对外暴露的 `BaseStore` 行为语义（CAS、分页、命名空间隔离）是否正确。
  *
- * `eval` 调用按 vararg 元素个数区分是 put（2 个：value、key）、putIfVersion（3 个：value、key、
- * expectedVersion）还是 delete（1 个：key）——个数足以稳定区分，不依赖脚本文本内容。
+ * `eval` 调用按 vararg 元素个数区分是 put（3 个：value、key、ttl）、putIfVersion（4 个：value、key、
+ * expectedVersion、ttl）还是 delete（1 个：key）——个数足以稳定区分，不依赖脚本文本内容。假 Redis 也照着
+ * Lua 里的 `if ttl > 0 then PEXPIRE` 记录过期时间，用于验证保留期是否按预期落到 key 上。
  */
 @DisplayName("LettuceStore单测")
 class LettuceStoreTest {
@@ -64,20 +66,29 @@ class LettuceStoreTest {
     /** key -> 有序成员列表（测试里 key 本身按预期字典序构造，用 sorted() 模拟 ZRANGEBYLEX）。 */
     private val sortedSets = mutableMapOf<String, MutableList<String>>()
 
+    /** key -> 最后一次设置的过期毫秒数，模拟 PEXPIRE；没有条目表示该 key 当前不会过期。 */
+    private val expirations = mutableMapOf<String, Long>()
+
+    private lateinit var client: RedisClient
     private lateinit var store: LettuceStore
 
     @BeforeEach
     fun setUp() {
         hashes.clear()
         sortedSets.clear()
+        expirations.clear()
         val commands: RedisCommands<String, String> =
             mock(defaultAnswer = Answer { invocation -> fakeRedis(invocation) })
         val connection = mock<StatefulRedisConnection<String, String>>()
         whenever(connection.sync()).thenReturn(commands)
-        val client = mock<RedisClient>()
+        client = mock<RedisClient>()
         whenever(client.connect()).thenReturn(connection)
         store = LettuceStore(client, "test:task-store:")
     }
+
+    /** 与 [store] 共用同一个假 Redis，只是换一套保留期参数。 */
+    private fun storeWith(ttl: Duration?, refreshTtlOnRead: Boolean = false): LettuceStore =
+        LettuceStore(client, "test:task-store:", ttl = ttl, refreshTtlOnRead = refreshTtlOnRead)
 
     @Suppress("UNCHECKED_CAST")
     private fun fakeRedis(invocation: InvocationOnMock): Any? {
@@ -97,16 +108,17 @@ class LettuceStoreTest {
                 val itemKey = keys[0]
                 val idxKey = keys[1]
                 when (values.size) {
-                    2 -> { // put(namespace, key, value)
-                        val (json, member) = values
+                    3 -> { // put(namespace, key, value)
+                        val (json, member, ttlMillis) = values
                         val newVersion = (hashes[itemKey]?.get("version")?.toLong() ?: 0L) + 1
                         hashes[itemKey] = mutableMapOf("value" to json, "version" to newVersion.toString())
                         sortedSets.getOrPut(idxKey) { mutableListOf() }.let { if (member !in it) it.add(member) }
+                        pexpire(ttlMillis, itemKey, idxKey)
                         newVersion.toString()
                     }
 
-                    3 -> { // putIfVersion(namespace, key, value, expectedVersion)
-                        val (json, member, expectedVersionStr) = values
+                    4 -> { // putIfVersion(namespace, key, value, expectedVersion)
+                        val (json, member, expectedVersionStr, ttlMillis) = values
                         val expectedVersion = expectedVersionStr.toLong()
                         val currentVersion = hashes[itemKey]?.get("version")?.toLong() ?: 0L
                         if (currentVersion != expectedVersion) {
@@ -115,6 +127,7 @@ class LettuceStoreTest {
                             val newVersion = currentVersion + 1
                             hashes[itemKey] = mutableMapOf("value" to json, "version" to newVersion.toString())
                             sortedSets.getOrPut(idxKey) { mutableListOf() }.let { if (member !in it) it.add(member) }
+                            pexpire(ttlMillis, itemKey, idxKey)
                             newVersion.toString()
                         }
                     }
@@ -123,11 +136,18 @@ class LettuceStoreTest {
                         val member = values[0]
                         hashes.remove(itemKey)
                         sortedSets[idxKey]?.remove(member)
+                        expirations.remove(itemKey)
                         1L
                     }
 
                     else -> error("unexpected eval values arity: ${values.size}")
                 }
+            }
+
+            "pexpire" -> {
+                val key = invocation.arguments[0] as String
+                expirations[key] = invocation.arguments[1] as Long
+                true
             }
 
             "zrangebylex" -> {
@@ -145,6 +165,14 @@ class LettuceStoreTest {
 
             else -> null
         }
+    }
+
+    /** 模拟 Lua 里 `if ttl > 0 then PEXPIRE ... end` 那段。 */
+    private fun pexpire(ttlMillis: String, vararg keys: String) {
+        if (ttlMillis.toLong() <= 0) {
+            return
+        }
+        keys.forEach { expirations[it] = ttlMillis.toLong() }
     }
 
     @Test
@@ -258,5 +286,94 @@ class LettuceStoreTest {
         assertThrows(IllegalArgumentException::class.java) {
             store.put(ns, "bad\u0000key", mutableMapOf<String, Any>("content" to "v1"))
         }
+    }
+
+    @Test
+    fun `未配保留期时put不应给任何key设置过期时间`() {
+        val ns = mutableListOf("agents", "coordinator", "tasks")
+
+        store.put(ns, "task-1.json", mutableMapOf<String, Any>("content" to "v1"))
+
+        assertTrue(expirations.isEmpty())
+    }
+
+    @Test
+    fun `配了保留期时put应同时给item与命名空间索引设置过期时间`() {
+        val ttl = Duration.ofDays(7)
+        val ns = mutableListOf("agents", "coordinator", "tasks")
+
+        storeWith(ttl).put(ns, "task-1.json", mutableMapOf<String, Any>("content" to "v1"))
+
+        assertEquals(ttl.toMillis(), expirations[ITEM_KEY])
+        assertEquals(ttl.toMillis(), expirations[INDEX_KEY])
+    }
+
+    @Test
+    fun `putIfVersion在CAS失败时不应续期`() {
+        val ttl = Duration.ofDays(7)
+        val ns = mutableListOf("agents", "coordinator", "tasks")
+        val ttlStore = storeWith(ttl)
+        ttlStore.put(ns, "task-1.json", mutableMapOf<String, Any>("content" to "v1"))
+        expirations.clear()
+
+        val written = ttlStore.putIfVersion(ns, "task-1.json", mutableMapOf<String, Any>("content" to "v2"), 0L)
+
+        assertFalse(written)
+        assertTrue(expirations.isEmpty())
+    }
+
+    @Test
+    fun `未开启读续期时get不应刷新过期时间`() {
+        val ns = mutableListOf("agents", "coordinator", "tasks")
+        val ttlStore = storeWith(Duration.ofDays(7))
+        ttlStore.put(ns, "task-1.json", mutableMapOf<String, Any>("content" to "v1"))
+        expirations.clear()
+
+        assertEquals("v1", ttlStore.get(ns, "task-1.json")!!.value()["content"])
+
+        assertTrue(expirations.isEmpty())
+    }
+
+    @Test
+    fun `开启读续期时get应把item与索引一起往后推`() {
+        val ttl = Duration.ofDays(180)
+        val ns = mutableListOf("memory", "alice")
+        val memoryStore = storeWith(ttl, refreshTtlOnRead = true)
+        memoryStore.put(ns, "MEMORY.md", mutableMapOf<String, Any>("content" to "prefers dark mode"))
+        expirations.clear()
+
+        assertEquals("prefers dark mode", memoryStore.get(ns, "MEMORY.md")!!.value()["content"])
+
+        assertEquals(ttl.toMillis(), expirations["test:task-store:item:memory\u0000alice\u0000MEMORY.md"])
+        assertEquals(ttl.toMillis(), expirations["test:task-store:idx:memory\u0000alice"])
+    }
+
+    @Test
+    fun `开启读续期时search应刷新命中条目与索引`() {
+        val ttl = Duration.ofDays(180)
+        val ns = mutableListOf("memory", "alice")
+        val memoryStore = storeWith(ttl, refreshTtlOnRead = true)
+        memoryStore.put(ns, "MEMORY.md", mutableMapOf<String, Any>("content" to "v1"))
+        expirations.clear()
+
+        assertEquals(1, memoryStore.search(ns, 100, 0).size)
+
+        assertEquals(ttl.toMillis(), expirations["test:task-store:item:memory\u0000alice\u0000MEMORY.md"])
+        assertEquals(ttl.toMillis(), expirations["test:task-store:idx:memory\u0000alice"])
+    }
+
+    @Test
+    fun `get未命中时不应续期`() {
+        val ns = mutableListOf("memory", "alice")
+        val memoryStore = storeWith(Duration.ofDays(180), refreshTtlOnRead = true)
+
+        assertNull(memoryStore.get(ns, "MEMORY.md"))
+
+        assertTrue(expirations.isEmpty())
+    }
+
+    companion object {
+        private const val ITEM_KEY = "test:task-store:item:agents\u0000coordinator\u0000tasks\u0000task-1.json"
+        private const val INDEX_KEY = "test:task-store:idx:agents\u0000coordinator\u0000tasks"
     }
 }

@@ -41,17 +41,21 @@ class AgentPermissionRulesConfiguration {
     @Bean
     fun agentPermissionContext(properties: EffectiveAgentRuntimeProperties): PermissionContextState {
         val builder = PermissionContextState.builder()
+        val readOnly = properties.readOnlyMode
         HARNESS_ORCHESTRATION_TOOLS.forEach { toolName ->
             builder.addAllowRule(toolName, toolRule(toolName, PermissionBehavior.ALLOW))
         }
         MEMORY_READ_TOOLS.forEach { toolName ->
             builder.addAllowRule(toolName, toolRule(toolName, PermissionBehavior.ALLOW))
         }
-        builder.addAskRule(MEMORY_SAVE_TOOL, toolRule(MEMORY_SAVE_TOOL, PermissionBehavior.ASK))
-        builder.addAskRule(MEMORY_DELETE_TOOL, toolRule(MEMORY_DELETE_TOOL, PermissionBehavior.ASK))
+        // 记忆写工具由框架的 filesystem(spec) 一次性带进来，没法像客户端工具那样只摘掉写的那几个，
+        // 所以只读模式下只能靠规则表把 ASK 收紧成 DENY——这也是必须保留 PermissionEngine 这一层的原因。
+        MEMORY_WRITE_TOOLS.forEach { toolName ->
+            registerWriteRule(builder, toolName, readOnly)
+        }
         if (properties.frontendToolsEnabled) {
             LocalToolDefinitions.allTools().forEach { definition ->
-                registerRule(builder, definition.name, definition.riskLevel)
+                registerRule(builder, definition.name, definition.riskLevel, readOnly)
             }
         }
         return builder.build()
@@ -61,6 +65,7 @@ class AgentPermissionRulesConfiguration {
         builder: PermissionContextState.Builder,
         toolName: String,
         riskLevel: ToolRiskLevel,
+        readOnly: Boolean,
     ) {
         when (riskLevel) {
             ToolRiskLevel.READ_SAFE, ToolRiskLevel.READ_SENSITIVE -> builder.addAllowRule(
@@ -68,15 +73,32 @@ class AgentPermissionRulesConfiguration {
                 toolRule(toolName, PermissionBehavior.ALLOW),
             )
 
-            ToolRiskLevel.WRITE_REVERSIBLE, ToolRiskLevel.WRITE_DESTRUCTIVE -> builder.addAskRule(
+            ToolRiskLevel.WRITE_REVERSIBLE, ToolRiskLevel.WRITE_DESTRUCTIVE -> registerWriteRule(
+                builder,
                 toolName,
-                toolRule(toolName, PermissionBehavior.ASK),
+                readOnly,
             )
 
             ToolRiskLevel.PROHIBITED -> builder.addDenyRule(
                 toolName,
                 toolRule(toolName, PermissionBehavior.DENY),
             )
+        }
+    }
+
+    /**
+     * 写工具的默认行为是 ASK（弹确认卡片）；只读模式下一律 DENY，连"用户点确认"这条路都不留——
+     * 只读模式是生产应急阀，语义是"这个副本此刻绝对不写"，不是"多问一句"。
+     */
+    private fun registerWriteRule(
+        builder: PermissionContextState.Builder,
+        toolName: String,
+        readOnly: Boolean,
+    ) {
+        if (readOnly) {
+            builder.addDenyRule(toolName, toolRule(toolName, PermissionBehavior.DENY))
+        } else {
+            builder.addAskRule(toolName, toolRule(toolName, PermissionBehavior.ASK))
         }
     }
 
@@ -117,5 +139,8 @@ class AgentPermissionRulesConfiguration {
          * 与 [MEMORY_SAVE_TOOL] 同构，同样走 ASK，删除前需要用户在前端弹窗确认。
          */
         const val MEMORY_DELETE_TOOL = "memory_delete"
+
+        /** 记忆的两个写入口，风险等级等同客户端写工具：默认 ASK，只读模式下 DENY。 */
+        val MEMORY_WRITE_TOOLS: List<String> = listOf(MEMORY_SAVE_TOOL, MEMORY_DELETE_TOOL)
     }
 }

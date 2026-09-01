@@ -31,6 +31,7 @@ import com.tencent.bkrepo.agent.dao.AgentRunDao
 import com.tencent.bkrepo.agent.model.TAgentRun
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.pojo.AgentRunTriggerType
+import com.tencent.bkrepo.agent.retention.AgentRetentionPolicy
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -40,6 +41,7 @@ import java.util.concurrent.ConcurrentHashMap
 @Service
 class AgentRunRecordServiceImpl(
     private val agentRunDao: AgentRunDao,
+    private val retentionPolicy: AgentRetentionPolicy,
 ) : AgentRunRecordService {
 
     private val startedAtByRunId = ConcurrentHashMap<String, LocalDateTime>()
@@ -75,6 +77,7 @@ class AgentRunRecordServiceImpl(
                     entryAgentId = entryAgentId,
                     triggerType = triggerType,
                     startedAt = startedAt,
+                    expiresAt = retentionPolicy.runExpiry(),
                 ),
             )
         } catch (ex: Exception) {

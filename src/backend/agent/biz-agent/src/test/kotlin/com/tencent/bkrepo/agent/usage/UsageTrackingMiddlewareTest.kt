@@ -23,6 +23,7 @@ import com.tencent.bkrepo.agent.config.properties.AgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.AgentLlmPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryPropertiesResolver
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
 import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_RUN_ID
@@ -85,14 +86,16 @@ class UsageTrackingMiddlewareTest {
             maxThreadIdLength = 128,
             sessionTtl = Duration.ofDays(30),
             activeRunTtl = Duration.ofMinutes(11),
-            runEventTtl = Duration.ofDays(7),
             reconnectPollInterval = Duration.ofMillis(500),
             reconnectTimeout = Duration.ofMinutes(10),
+            shutdownTimeout = Duration.ofSeconds(15),
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
             taskStoreKeyPrefix = "bkrepo:agent:task-store:",
             memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
             frontendToolsEnabled = false,
+            readOnlyMode = false,
+            retention = EffectiveAgentRetention.defaults(),
             topology = EffectiveAgentTopology.defaults(),
         )
         val llmProperties = AgentLlmPropertiesResolver.resolve(

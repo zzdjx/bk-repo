@@ -101,6 +101,72 @@ class AgentPropertiesBindingTest {
     }
 
     @Test
+    fun `停机超时默认为有限值且可按配置覆盖`() {
+        val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
+
+        // 有限值是硬要求：null/0 会让 JVM 停机钩子无限等待，且框架的强制中断分支不会触发
+        assertTrue(defaults.shutdownTimeout > java.time.Duration.ZERO)
+
+        val custom = AgentRuntimePropertiesResolver.resolve(
+            AgentRuntimeProperties().apply { shutdownTimeout = java.time.Duration.ofSeconds(8) },
+        )
+
+        assertEquals(java.time.Duration.ofSeconds(8), custom.shutdownTimeout)
+    }
+
+    @Test
+    fun `只读模式与requireRedis默认关闭可按配置开启`() {
+        val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
+
+        assertFalse(defaults.readOnlyMode, "本地开发默认不进只读模式")
+        assertFalse(defaults.requireRedis, "本地开发默认允许退化为进程内存储")
+
+        val hardened = AgentRuntimePropertiesResolver.resolve(
+            AgentRuntimeProperties().apply {
+                features = AgentRuntimeProperties.Features(readOnlyMode = true)
+                state = AgentRuntimeProperties.State(requireRedis = true)
+            },
+        )
+
+        assertTrue(hardened.readOnlyMode)
+        assertTrue(hardened.requireRedis)
+    }
+
+    @Test
+    fun `数据保留期默认都是有限值且可按项覆盖`() {
+        val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties()).retention
+
+        // 这几张表/键都是只写不删的，默认必须有上限，否则会单调增长
+        listOf(
+            defaults.runEvent,
+            defaults.run,
+            defaults.toolCall,
+            defaults.message,
+            defaults.session,
+            defaults.task,
+            defaults.memory,
+        ).forEach { assertTrue(it > java.time.Duration.ZERO, "默认保留期必须是有限正值") }
+
+        // 约束见 AgentRuntimeProperties.Retention：事件流不能比 run 元数据活得久，
+        // 会话元数据不能比它的消息先过期
+        assertTrue(defaults.runEvent <= defaults.run)
+        assertTrue(defaults.session >= defaults.message)
+
+        val custom = AgentRuntimePropertiesResolver.resolve(
+            AgentRuntimeProperties().apply {
+                retention = AgentRuntimeProperties.Retention(
+                    run = java.time.Duration.ofDays(30),
+                    memory = java.time.Duration.ZERO,
+                )
+            },
+        ).retention
+
+        assertEquals(java.time.Duration.ofDays(30), custom.run)
+        assertEquals(java.time.Duration.ZERO, custom.memory, "0 表示永不过期，不应被规整成默认值")
+        assertEquals(AgentRuntimeProperties.DEFAULT_MESSAGE_RETENTION, custom.message)
+    }
+
+    @Test
     fun `未配置 sys-prompt 时应默认使用 AgentSystemPrompts`() {
         val runtime = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
 

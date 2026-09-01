@@ -31,7 +31,9 @@ import com.tencent.bkrepo.agent.pojo.AgentToolCallDecision
 import com.tencent.bkrepo.agent.pojo.AgentToolResultState
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.CompoundIndexes
+import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
+import java.time.Instant
 import java.time.LocalDateTime
 
 /**
@@ -84,4 +86,7 @@ data class TAgentToolCall(
     var calledAt: LocalDateTime,
     var resolvedAt: LocalDateTime? = null,
     var durationMs: Long? = null,
+    /** 见 [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy]；`null` 表示不参与 TTL 清理。 */
+    @Indexed(expireAfter = "0s", background = true)
+    var expiresAt: Instant? = null,
 )

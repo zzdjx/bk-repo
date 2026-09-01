@@ -12,6 +12,7 @@ import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
+import com.tencent.bkrepo.agent.runtime.AgentRunAbortReason
 import com.tencent.bkrepo.agent.service.AgentRunEventService
 import io.agentscope.core.agui.event.AguiEvent
 import org.slf4j.LoggerFactory
@@ -85,7 +86,7 @@ class AgentRunEventPipeline(
             AgentRunLifecycleManager.FinishOptions(
                 abortAgent = true,
                 runStatus = AgentRunStatus.CANCELLED,
-                cancelReason = "user_stop",
+                cancelReason = AgentRunAbortReason.USER_STOP.value,
             ),
         )
         return true

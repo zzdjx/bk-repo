@@ -36,6 +36,12 @@ class FrontendToolRegistrar(
     private val catalog: FrontendToolCatalog,
 ) : RegisteredFrontendTools {
 
+    /**
+     * 服务端 authoritative 工具名 allowlist，用途是给 [com.tencent.bkrepo.agent.agent.AgentCatalog]
+     * 校验子 Agent 的 allowedToolNames，以及给恢复校验识别工具名——因此**不随只读模式收缩**：
+     * 只读模式下写工具虽然不注册给模型，但工具名本身仍要认得（否则历史挂起调用恢复时会被判为
+     * 未知工具，报错信息会误导人）。真正"能不能执行"由 toolkit 注册与 PermissionEngine 决定。
+     */
     override val registeredToolNames: Set<String> = catalog.registeredToolNames
 
     @PostConstruct
@@ -44,13 +50,20 @@ class FrontendToolRegistrar(
             logger.info("frontend tools disabled, skipping ExternalLocalTool registration")
             return
         }
-        LocalToolDefinitions.allTools().forEach { definition ->
-            toolkit.registerAgentTool(ExternalLocalTool(definition))
-        }
+        // 只读模式下写工具压根不注册：模型看不到它们，也就不会承诺"我去帮你改配置/删任务"再被
+        // PermissionEngine 拒掉（既省一轮无用调用，回答也更自洽）。PermissionEngine 侧还有一层
+        // DENY 兜底（见 AgentPermissionRulesConfiguration），防的是别处又把写工具挂回 toolkit。
+        val readOnly = runtimeProperties.readOnlyMode
+        val registered = LocalToolDefinitions.allTools()
+            .filterNot { readOnly && catalog.isWriteTool(it.name) }
+            .onEach { toolkit.registerAgentTool(ExternalLocalTool(it)) }
+            .map { it.name }
         logger.info(
-            "registered {} frontend ExternalLocalTools: {}",
-            registeredToolNames.size,
-            registeredToolNames.sorted(),
+            "registered {} frontend ExternalLocalTools (readOnlyMode={}, skipped={}): {}",
+            registered.size,
+            readOnly,
+            (registeredToolNames - registered.toSet()).sorted(),
+            registered.sorted(),
         )
     }
 

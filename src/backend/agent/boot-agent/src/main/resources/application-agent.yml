@@ -1,35 +1,61 @@
-spring:
-  application:
-    name: agent
-server:
-  port: 25915
-
-# 本地开发时可在此覆盖；生产环境通常由配置中心注入 llm / memory / runtime 与限流
-agent:
-  llm:
-    base-url:
-    api-key:
-    bk-app-code:
-    bk-app-secret:
-    model-name:
-    # reasoning-effort: high  # no_think | low | high；非空时开启深度思考请求与 REASONING_* SSE
-  memory:
-    compaction-enabled: true
-    flush-before-compact: false
-    offload-before-compact: false
-    tool-result-eviction-enabled: true
-  runtime:
-    features:
-      frontend-tools-enabled: true
-
-rate:
-  limiter:
-    enabled: false
-    rules:
-      - algo: TOKEN_BUCKET
-        resource: "*:/api/agent/run"
-        limitDimension: USER_URL
-        limit: 10
-        duration: 60s
-        capacity: 20
-        scope: GLOBAL
+spring:
+  application:
+    name: agent
+  lifecycle:
+    # SIGTERM 后排空在途 HTTP 请求的上限；停机时序与超时预算见 AgentGracefulShutdownConfiguration
+    timeout-per-shutdown-phase: 5s
+server:
+  port: 25915
+  # 优雅停机：先排空在途请求再停 Web 容器，避免发布瞬间的请求被直接掐断
+  shutdown: graceful
+
+# 本地开发时可在此覆盖；生产环境通常由配置中心注入 llm / memory / runtime 与限流
+agent:
+  llm:
+    base-url:
+    api-key:
+    bk-app-code:
+    bk-app-secret:
+    model-name:
+    # reasoning-effort: high  # no_think | low | high；非空时开启深度思考请求与 REASONING_* SSE
+  memory:
+    compaction-enabled: true
+    flush-before-compact: false
+    offload-before-compact: false
+    tool-result-eviction-enabled: true
+  runtime:
+    # 停机时等待在跑 Agent 调用收尾的上限，必须是有限值，且与 K8s terminationGracePeriodSeconds 对齐
+    shutdown-timeout: 15s
+    # 数据保留期：Agent 自己产生的运行数据多久之后自动清理。Mongo 侧靠写入时打的 expiresAt + TTL 索引，
+    # Redis 侧靠 key TTL；改配置只影响之后新写入的数据。任一项配 0 表示永不过期。
+    # 约束：run-event 不应大于 run（事件流不能比 run 元数据活得久），
+    #      session 不应小于 message（会话行先过期会让消息成为列不出来的孤儿数据）
+    # retention:
+    #   run-event: 7d     # AG-UI 事件流，同时决定断线重连能回放多久以前的 run
+    #   run: 90d          # run 元数据与用量统计
+    #   tool-call: 90d     # 工具调用审计
+    #   message: 180d     # 会话消息（用户可见的聊天记录）
+    #   session: 180d     # 会话元数据，按最后活跃时间滚动续期
+    #   task: 7d          # 被 promote 出的后台子任务记录（Redis）
+    #   memory: 180d      # 长期记忆（Redis），按最后一次使用滚动续期
+    features:
+      frontend-tools-enabled: true
+      # 生产应急阀：置为 true 后 Agent 的写能力整体停用（客户端写工具不再注册给模型，
+      # 记忆的 memory_save/memory_delete 由 ASK 收紧为 DENY）；用户自己的记忆管理接口不受影响
+      # read-only-mode: false
+    # 生产环境应置为 require-redis: true——缺 Redis 时直接启动失败，而不是静默退化为进程内存储
+    # （多副本下会话会飘、确认卡片恢复不了、后台任务查不到）
+    # state:
+    #   require-redis: true
+
+rate:
+  limiter:
+    enabled: false
+    rules:
+      - algo: TOKEN_BUCKET
+        resource: "*:/api/agent/run"
+        limitDimension: USER_URL
+        limit: 10
+        duration: 60s
+        capacity: 20
+        scope: GLOBAL

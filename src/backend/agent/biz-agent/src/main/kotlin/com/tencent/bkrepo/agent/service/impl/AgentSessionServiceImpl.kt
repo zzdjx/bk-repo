@@ -20,10 +20,12 @@ import com.tencent.bkrepo.agent.pojo.AgentSessionDeleteRequest
 import com.tencent.bkrepo.agent.pojo.AgentSessionInfo
 import com.tencent.bkrepo.agent.pojo.AgentSessionStatus
 import com.tencent.bkrepo.agent.pojo.AgentSessionUpdateRequest
+import com.tencent.bkrepo.agent.retention.AgentRetentionPolicy
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
 import com.tencent.bkrepo.agent.runtime.ActiveRunScope
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import com.tencent.bkrepo.agent.service.AgentSessionService
+import com.tencent.bkrepo.agent.service.AgentToolCallRecordService
 import com.tencent.bkrepo.agent.session.AgentPendingInterruptStore
 import com.tencent.bkrepo.agent.session.AgentSessionStore
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
@@ -44,10 +46,12 @@ class AgentSessionServiceImpl(
     private val agentSessionDao: AgentSessionDao,
     private val agentMessageDao: AgentMessageDao,
     private val agentRunRecordService: AgentRunRecordService,
+    private val agentToolCallRecordService: AgentToolCallRecordService,
     private val agentSessionStore: AgentSessionStore,
     private val activeRunManager: ActiveRunManager,
     private val pendingInterruptStore: AgentPendingInterruptStore,
     private val properties: EffectiveAgentRuntimeProperties,
+    private val retentionPolicy: AgentRetentionPolicy,
 ) : AgentSessionService {
 
     override fun createSession(userId: String, projectId: String): AgentSessionCreateResult {
@@ -102,7 +106,7 @@ class AgentSessionServiceImpl(
 
     override fun assertActiveSession(userId: String, projectId: String, threadId: String) {
         val session = agentSessionDao.findByThreadId(threadId)
-            ?: agentSessionDao.insertSession(threadId, userId, projectId)
+            ?: agentSessionDao.insertSession(threadId, userId, projectId, retentionPolicy.sessionExpiry())
         if (session.status != AgentSessionStatus.ACTIVE) {
             throw NotFoundException(CommonMessageCode.RESOURCE_NOT_FOUND, "Thread[$threadId]")
         }
@@ -113,7 +117,7 @@ class AgentSessionServiceImpl(
     }
 
     override fun touchSession(threadId: String, runId: String) {
-        agentSessionDao.touchSession(threadId, runId, LocalDateTime.now())
+        agentSessionDao.touchSession(threadId, runId, LocalDateTime.now(), retentionPolicy.sessionExpiry())
     }
 
     private fun insertSessionRecord(
@@ -121,7 +125,7 @@ class AgentSessionServiceImpl(
         userId: String,
         projectId: String,
     ): AgentSessionCreateResult {
-        val session = agentSessionDao.insertSession(threadId, userId, projectId)
+        val session = agentSessionDao.insertSession(threadId, userId, projectId, retentionPolicy.sessionExpiry())
         if (session.status != AgentSessionStatus.ACTIVE) {
             throw NotFoundException(CommonMessageCode.RESOURCE_NOT_FOUND, "Thread[$threadId]")
         }
@@ -143,6 +147,9 @@ class AgentSessionServiceImpl(
         agentSessionDao.markDeleted(threadId, now)
         agentMessageDao.removeByThreadId(threadId)
         agentRunRecordService.removeByThreadId(threadId)
+        // 工具调用审计跟着 run 一起删：run 记录已经硬删了，留下的审计行会指向不存在的 run，
+        // 既查不出完整链路又占着地方。真正需要长期留痕的是网关侧的 @LogOperate 操作日志。
+        agentToolCallRecordService.removeByThreadId(threadId)
         agentSessionStore.removeSession(projectId, threadId)
         activeRunManager.clearAgentRuntimeState(userId, threadId)
     }

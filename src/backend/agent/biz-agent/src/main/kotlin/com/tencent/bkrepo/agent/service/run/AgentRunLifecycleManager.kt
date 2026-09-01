@@ -43,13 +43,13 @@ class AgentRunLifecycleManager(
             scope = scope.activeRunScope(),
             runId = scope.runId,
             runtimeContext = scope.runtimeContext,
-            abort = {
+            abort = { reason ->
                 finish(
                     scope,
                     FinishOptions(
                         abortAgent = true,
                         runStatus = AgentRunStatus.CANCELLED,
-                        cancelReason = "user_stop",
+                        cancelReason = reason.value,
                     ),
                 )
             },

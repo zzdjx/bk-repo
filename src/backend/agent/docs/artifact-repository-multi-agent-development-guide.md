@@ -1408,25 +1408,202 @@ JUnit 报告里，不需要额外的报告生成器，失败信息里会附带�
 
 **框架使用**
 
-- model fallback；
-- graceful shutdown middleware；
-- state recovery。
+- model fallback（未做）；
+- graceful shutdown middleware（已完成，见下文"优雅停机"；框架的 `GracefulShutdownMiddleware` 由
+  `ReActAgent` 无条件装载，本项目要做的是给它配上有限超时并补齐框架不知道的资源清理）；
+- state recovery（框架侧已具备：停机打断会把 AgentState 落库并标记 `shutdownInterrupted`，用户重发时
+  自动变成"继续"语义；配合上面的 `require-redis` 保证状态落在 Redis 而不是进程内）。
 
 **自建设计**
 
-- 按用户、项目和 Agent 灰度；
-- 只读模式开关；
-- 单用户和全局模型并发限制；
-- 熔断、降级和预算；
-- 数据保留与删除策略；
-- 演练模型不可用、Redis 故障、Mongo 延迟、IAM 超时和任务重复投递。
+- 按用户、项目和 Agent 灰度（未做，当前只有全局开关，没有按维度分流的能力）；
+- 只读模式开关（已完成，见下文）；
+- Redis 依赖的生产强制校验（已完成，见下文；原计划外补充，属于"滚动发布不丢状态"的前置条件）；
+- 优雅停机与发布安全（已完成，见下文；同样是原计划外补充）；
+- 单用户和全局模型并发限制（未做；阶段 9 已有委派并发的硬限制与软提醒，但没有覆盖模型调用本身）；
+- 熔断、降级和预算（未做）；
+- 数据保留与删除策略（已完成，见下文"数据保留与清理"）；
+- 演练模型不可用、Redis 故障、Mongo 延迟、IAM 超时和任务重复投递（未做）。
+
+**只读模式开关（已完成）**
+
+配置项 `agent.runtime.features.read-only-mode`，默认 `false`。开启后 Agent 的一切写能力立即不可用，
+用途是生产应急阀：客户端行为异常、模型出现明显退化、或者刚上线想先只放开查询时，改一个配置重启即可，
+不需要回滚版本或摘流量。
+
+生效方式是两层，各有不可替代的作用：
+
+1. **不注册**（`FrontendToolRegistrar`）：客户端写工具（`set_download_path`/`delete_download_tasks`/
+   `run_disk_cleanup` 等，按 `LocalToolDefinition.riskLevel` 判定）压根不挂到 toolkit 上，模型看不到。
+   这一层的价值是回答自洽——如果只在权限层拦，模型会先承诺"我去帮你改配置"再被拒掉，既浪费一轮调用，
+   用户也会看到自相矛盾的过程。
+2. **DENY 兜底**（`AgentPermissionRulesConfiguration`）：同一批工具在 PermissionEngine 规则表里由 ASK
+   收紧为 DENY。这一层不是冗余：长期记忆的 `memory_save`/`memory_delete` 是框架 `filesystem(spec)` 一次性
+   带进来的，没法像客户端工具那样只摘掉写的那几个，只能靠规则表拦；同时它也防住"别处又把写工具挂回
+   toolkit"这类改动。
+
+注意只读模式下写工具是 **DENY 而不是 ASK**——不留"用户点确认就能执行"的口子。只读模式的语义是"这个副本
+此刻绝对不写"，如果还能被确认放行，它就退化成了"多问一句"，起不到应急阀的作用。
+
+另外追加 `AgentSystemPrompts.READ_ONLY_MODE` 提示词片段（拼在 `ClientAgentPrompt.DEFAULT` 之后，因为后者
+仍在描述写工具的用法，需要靠它纠偏）：告诉模型当前处于只读模式、遇到写请求直接说明并给出替代排查建议。
+工具已经物理不可见，补这段话纯粹是为了让**回答**别含糊——否则模型只会发现"没有对应工具"，可能反复尝试
+别的工具或说得模棱两可。
+
+**边界（刻意的）**：这个开关只约束"模型能做什么"，不冻结用户自己发起的操作。用户直连的记忆管理接口
+（`UserAgentMemoryResource` 的删除/清空）与会话删除仍然可用——用户对自己的数据始终有完全控制权，这个
+开关防的是 Agent 误操作。另外它是配置项，改动需要重启（或配置中心推送后重建 bean），不是运行时热开关；
+真正的秒级热切换需要把开关下沉到每次工具调用时读取，属于更大的改造，窄范围内先不做。
+
+**Redis 依赖的生产强制校验（已完成）**
+
+Agent 有六处存储各自 `ObjectProvider.getIfAvailable()`，拿不到 Redis 就退回进程内实现并只打一行 warn：
+Agent 运行态（`AgentStateStore`）、会话归属、挂起中断、恢复幂等、活跃运行、后台任务，加上长期记忆
+（无 Redis 时整体关闭）。本地开发需要这种退化，生产不需要，而且危险：单副本能跑通、多副本才暴露问题
+（会话飘到另一个副本就丢上下文、确认卡片恢复不了、后台任务查不到），这类故障往往发布很久之后才被用户
+投诉出来。
+
+`AgentRedisRequirementValidator` 在启动期集中校验一次：`agent.runtime.state.require-redis=true`（生产应
+配置）时，缺原生 Lettuce 客户端或缺 `RedisOperation` 就直接抛异常让 Spring 上下文刷新失败，异常信息里带
+上缺的是哪一层、哪些能力会退化、以及想显式接受退化该把哪个配置置为 `false`。默认 `false` 保持本地开发
+体验不变，只打告警。
+
+两个设计取舍值得记下来：
+
+- **集中校验而不是散在各 Configuration 里**：各存储的 bean 可能先于校验器构造完成，那几行退化 warn 照旧
+  会打，但只要上下文最终起不来就不会有流量进来，fail-fast 的目的已经达到，代价是不用在六处重复同一段
+  判断逻辑。
+- **只校验"客户端有没有被装配出来"，不做连通性探测（ping）**：这里防的是配置漏配。连通性是另一类问题
+  （网络抖动、实例故障），用启动探测去卡会把瞬时抖动放大成"起不来"，交给健康检查与告警更合适。
+
+**优雅停机与发布安全（已完成）**
+
+不做这件事的后果非常具体：会话锁（`ActiveRunStateStore`）只在 run 自己的收尾逻辑里释放，进程被杀时那段
+逻辑随进程一起消失，锁只能等 `agent.runtime.active-run-ttl`（默认 11 分钟）自然过期。也就是说**每次滚动
+发布，正在对话的用户重发消息都会撞上"上一次运行还在进行中"，最长要等 11 分钟**——用户视角是"这个助手
+坏了"，不是"服务在发布"。
+
+第二个坑在框架默认值上。`GracefulShutdownConfig.DEFAULT` 的 `shutdownTimeout` 是 `null`（无限）：
+`AgentScopeJvmShutdownHook` 收到 SIGTERM 后会 `awaitTermination(null)` 一直等所有在跑调用结束，而
+`GracefulShutdownManager` 的强制中断分支又只在配了有限超时时才会触发（`if (timeout != null)`）。两者叠加
+的结果是：**一次卡住的模型调用就能让进程永远不退**，最后被 SIGKILL 硬杀，比有序退出更糟。
+
+实现分三层，对应三个不同的责任人：
+
+1. **`AgentRunShutdownHandler`（自建，挂在 `ContextClosedEvent`）**：先调
+   `GracefulShutdownManager.performGracefulShutdown()` 让管理器进入 SHUTTING_DOWN——新的 Agent 调用直接抛
+   `AgentShuttingDownException`（K8s 摘流量是异步的，这段窗口里仍会有请求打进来）；再调
+   `ActiveRunManager.abortLocalRuns(SERVER_SHUTDOWN)` 中止本副本在跑的 run。顺序不能反：先中止后拒绝的
+   话，刚腾出来的会话可能又被新请求占上。挂 `ContextClosedEvent` 而不是 `@PreDestroy`，是因为 Spring 关闭
+   时先发这个事件、再走 Lifecycle 停止（Web 容器排空）、最后才销毁 bean——选最早的点，既能在 HTTP 排空
+   之前就 complete 掉 SSE emitter（排空不用干等），也确保释放锁时 Redis 相关 bean 还完全可用。
+   `abortLocalRuns` 只处理本进程的 handle，不去扫 Redis：其它副本的 run 由它们各自停机时处理，跨副本代劳
+   会把还在正常服务的 run 一起杀掉。
+2. **`AgentGracefulShutdownConfiguration`（自建）**：把框架单例纳入容器，并把
+   `agent.runtime.shutdown-timeout`（默认 15s）配成有限值，同时保留框架默认的
+   `PartialReasoningPolicy.SAVE`——被打断的调用会落 AgentState 并标记 `shutdownInterrupted`，用户重发时
+   框架的 `GracefulShutdownMiddleware` 把重复的用户输入换成"继续"语义，从断点往下走而不是从头重跑。
+3. **Spring Boot 层（配置）**：`server.shutdown: graceful` +
+   `spring.lifecycle.timeout-per-shutdown-phase: 5s`，排空在途 HTTP 请求再停 Web 容器。
+
+中止原因用 `AgentRunAbortReason` 枚举替代了原来硬编码的 `"user_stop"` 字符串：同样是 CANCELLED 终态，
+用户主动停止是正常操作，`server_shutdown` 则说明这次对话是被发布/扩缩容打断的，排障和统计口径不一样。
+
+**超时预算（默认值下的最坏情况）**：ContextClosed 中止（不等待，可忽略）→ HTTP 排空 ≤5s → bean 销毁
+（`HarnessAgent` 实现 AutoCloseable，Spring 推断 `close()` 并调用，框架顺带停掉后台任务仓库的
+heartbeat/孤儿清扫线程）→ JVM 钩子等待 ≤ 15s + 框架硬编码的 5s `INTERRUPT_GRACE_PERIOD` = 20s。合计约
+25s，留在 K8s 默认 `terminationGracePeriodSeconds=30` 之内。**调大 `shutdown-timeout` 必须同步放大
+terminationGracePeriodSeconds**，否则等于白配：进程还在等，Pod 已经被 SIGKILL。
+
+停机窗口内打进来的新 run 请求由 `AgentRunOrchestrator` 前置拦成 **HTTP 503**（`ErrorCodeException` +
+`SERVICE_UNAVAILABLE`，文案复用 `system.error` 的"系统繁忙，请稍后再试"），客户端重试即可落到别的副本。
+拦在最前面而不是等框架抛异常，是因为框架的 `AgentShuttingDownException` 发生在订阅事件流之后——那时
+HTTP 状态码早已发出，客户端只会拿到一个语义模糊的失败流，而且这一趟已经白建了 run 记录、白抢了会话锁。
+前置判断与订阅之间仍有竞态（判断通过之后才开始停机），那种情况按普通 run 失败收尾。断线重连接口
+（`streamRun`）**不拦**：那正是用户查看被打断的 run 结局的通道。
+
+**已知边界**：SSE 客户端收到的是流被 complete（与用户主动停止同构），需要自行查 run 状态才能知道是
+`server_shutdown`，没有专门推一个"服务重启中"的终态事件。真正的滚动发布/故障演练也仍未做——上述
+时序是按框架源码与 Spring 生命周期推导并用单测覆盖的，不等于已在集群里验证过。
+
+**数据保留与清理（已完成）**
+
+在此之前只有 `agent_run_event` 带 TTL，其余的运行数据都是**只写不删**：Mongo 侧的 `agent_run`、
+`agent_tool_call`、`agent_message`、`agent_session` 没有任何过期机制；Redis 侧的后台任务记录与长期记忆
+也没有 key TTL（`WorkspaceTaskRepository` 的孤儿清扫只处理僵死任务，不清历史）。阶段 11 的审计与用量能力
+恰好是写入量最大的部分——每次工具调用一行 `agent_tool_call`、每次运行一行 `agent_run`，用得越多长得越快；
+记忆则是每个用户一份 `MEMORY.md` 永久驻留。
+
+保留期统一收敛到 `agent.runtime.retention`，任一项配 `0` 表示永不过期：
+
+| 配置项 | 默认 | 语义 | 取这个值的理由 |
+| --- | --- | --- | --- |
+| `run-event` | 7d | AG-UI 事件流 | 同时决定断线重连能回放多久以前的 run，7 天足够覆盖"昨天那条对话怎么回事" |
+| `run` | 90d | run 元数据与用量统计 | 审计/用量口径按季度看足够，且必须 ≥ `run-event` |
+| `tool-call` | 90d | 工具调用审计 | 与 `run` 对齐，否则查审计会出现"有 run 没有工具调用"的空洞 |
+| `message` | 180d | 用户可见的聊天记录 | 产品侧的历史价值最高，给最长的窗口 |
+| `session` | 180d | 会话元数据 | 必须 ≥ `message`，否则消息成为列不出来的孤儿数据 |
+| `task` | 7d | 被 promote 出的后台子任务记录（Redis） | 任务本身活不过一次会话，保留期只影响事后能不能查到 |
+| `memory` | 180d | 长期记忆（Redis） | 与聊天记录同档，且按"最后一次使用"滚动 |
+
+**Mongo 侧：为什么是"写入时打戳"而不是把 TTL 索引直接建在业务时间字段上**
+
+直接 `@Indexed(expireAfter = "90d")` 挂在 `startedAt` 上更省事——不用加字段，历史文档也立刻生效。但
+Spring Data 的 `expireAfter` 只接受编译期常量，保留期就写死在代码里了，想按环境调整只能手工 `collMod` 改
+索引，配置中心失去作用。所以沿用 `agent_run_event` 已有的做法：索引统一是 `expireAfter = "0s"` 挂在
+`expiresAt` 上（到点即删），具体保留多久由写入时算好的时刻决定（`AgentRetentionPolicy`）。
+
+这个选择有两个代价，都做了处理：
+
+1. **改配置只影响之后新写入的文档**，已有文档保持写入当时算出的过期时刻，不会被追溯修正。这是可接受的：
+   保留期是长周期参数，不需要立即对历史生效。
+2. **历史上没有 `expiresAt` 字段的文档永远不会被清理**（TTL 只处理字段值是日期的文档）。由
+   `AgentRetentionBackfill` 兜底：挂在 `ApplicationReadyEvent` 上，把缺字段的文档统一补成"从现在起再放一个
+   完整保留期"。它是幂等的（查询条件就是"缺这个字段"，第一次补完之后再启动即空转），查询走的正是 TTL
+   索引（普通单字段索引会把缺失字段当 null 索引），多副本同时跑也只是重复同一个更新，不需要分布式锁。
+   之所以不按各表自己的时间字段回推真实创建时间：那需要聚合管道更新、五张表的时间字段名还各不相同
+   （`startedAt`/`calledAt`/`createdAt`/`updatedAt`），而且会让升级瞬间就删掉一批已超期的旧数据。
+   **保留期配成 0 的集合会跳过补戳**——Spring Data 写入时会略掉值为 `null` 的字段，因此"配了永不过期的新
+   文档"和"引入保留期之前的老文档"在库里长得一模一样，不跳过就会把用户要求永久保留的数据补上过期时刻。
+
+`agent_session` 的 `expiresAt` 与其它四张表不同：它在每次 run 开始时随 `touchSession` 一起往后推，语义是
+**最后活跃之后再放多久**，只要还在用就不会过期；`agent_message` 则按消息自己的创建时间算，语义是"只保留
+最近这么久的聊天记录"。默认两者都是 180 天，因此一个闲置会话的元数据与它最后一条消息大致同时消失。
+
+**Redis 侧：`LettuceStore` 的 key TTL**
+
+框架的 `BaseStore` 接口没有过期概念，所以在自建的 `LettuceStore` 里统一处理：每次写入都把 item hash 与
+命名空间索引（ZSET）一起 `PEXPIRE` 到"现在 + 保留期"，Lua 脚本里按 `ttl > 0` 判断，不设过期时传 0，
+省掉维护两套脚本。两个实例语义不同：
+
+- **后台任务**（`AgentTaskRepositoryConfiguration`）不开 `refreshTtlOnRead`——事后翻查一条旧任务不应该延长
+  它的寿命；
+- **长期记忆**（`AgentMemoryFilesystemConfiguration`）开 `refreshTtlOnRead`——`get`/`search` 也续期，于是
+  保留期按"最后一次使用"算。否则用户半年前保存、之后一直在读的偏好会被静默清掉，这是最难解释的一类问题。
+
+有一处残留的不一致是**刻意接受**的：命名空间索引整体续期，但索引成员没有各自的过期时间，因此一个仍在活跃
+写入的命名空间里会留下少量指向已过期 hash 的陈旧成员。`search` 本来就会跳过缺失的记录（并发删除也会造成
+同样的情况），成员只是几十字节的短字符串，量级是"每个有过后台任务的会话一条、每个用户的记忆文件各一条"；
+反过来若要精确清理，就得把索引改成按过期时间打分的 ZSET，从而放弃 `ZRANGEBYLEX` 分页、偏离框架
+`RedisStore` 的行为，代价明显更大。整个命名空间停止读写一个保留期之后，索引与 hash 会一起消失，不留残余。
+
+**会话删除的口径**（顺带修正）：用户删除会话时硬删消息与 run 记录，此前 `agent_tool_call` 却留了下来——
+run 都没了，这些审计行指向不存在的 run，既拼不出完整链路又占着地方。现在一并删除；真正需要长期留痕的是
+网关侧 `@LogOperate` 的操作日志，不是这张表。`agent_run_event` 不随会话删除清理，靠 7 天 TTL 到期收口。
+
+**已知边界**：Mongo 的 TTL 后台任务约每 60 秒扫一次，"到点"与"真的消失"之间有分钟级延迟，因此这套机制是
+容量控制手段，不能当作精确到秒的合规删除承诺；用户要立即删除自己的数据，走的是会话删除与记忆删除接口。
+另外保留期目前是全局配置，没有按项目/用户维度差异化的能力。
 
 **验收**
 
-- 可一键关闭写工具；
-- 可退化到单 Agent 只读模式；
-- 滚动发布不丢状态；
-- 达到明确 SLO、成本和安全门槛。
+- 可一键关闭写工具（已完成：`agent.runtime.features.read-only-mode`，见上文；仍需重启生效，非运行时热开关）；
+- 可退化到单 Agent 只读模式（部分完成：只读模式已有；"退化到单 Agent"可通过
+  `agent.runtime.topology.coordinator.enabled=false` 关闭子 Agent 达成，但两者尚未合并为一个开关，也未演练）；
+- 滚动发布不丢状态（已完成代码侧：`require-redis` 保证状态落在 Redis，优雅停机保证锁被释放、被打断的
+  调用可从断点继续，停机窗口内的新请求返回 503 供客户端重试；集群内的滚动发布演练仍未做）；
+- 存储容量可控（已完成：五张 Mongo 表与 Redis 侧任务/记忆都有可配置保留期，见上文"数据保留与清理"）；
+- 达到明确 SLO、成本和安全门槛（未做：SLO 与门槛尚未定义）。
 
 ## 14. 关键方案取舍
 

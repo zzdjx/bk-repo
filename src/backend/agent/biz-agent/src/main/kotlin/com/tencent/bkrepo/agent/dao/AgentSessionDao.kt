@@ -39,6 +39,7 @@ import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
 import org.springframework.data.mongodb.core.query.Update
 import org.springframework.stereotype.Repository
+import java.time.Instant
 import java.time.LocalDateTime
 
 /** 会话元数据访问层，对应 Mongo 集合 `agent_session`。 */
@@ -51,7 +52,7 @@ class AgentSessionDao : SimpleMongoDao<TAgentSession>() {
      * 命中 `threadId` 唯一索引冲突时，仅在同归属下返回已有记录以支持幂等重试；
      * 否则重新抛出异常，避免误返回他人会话。
      */
-    fun insertSession(threadId: String, userId: String, projectId: String): TAgentSession {
+    fun insertSession(threadId: String, userId: String, projectId: String, expiresAt: Instant?): TAgentSession {
         val now = LocalDateTime.now()
         val session = TAgentSession(
             threadId = threadId,
@@ -61,6 +62,7 @@ class AgentSessionDao : SimpleMongoDao<TAgentSession>() {
             status = AgentSessionStatus.ACTIVE,
             createdAt = now,
             updatedAt = now,
+            expiresAt = expiresAt,
         )
         return try {
             insert(session)
@@ -117,12 +119,17 @@ class AgentSessionDao : SimpleMongoDao<TAgentSession>() {
         updateFirst(query, update)
     }
 
-    /** 记录最近一次 run，并刷新列表排序用的 [TAgentSession.updatedAt]。 */
-    fun touchSession(threadId: String, lastRunId: String, updatedAt: LocalDateTime) {
+    /**
+     * 记录最近一次 run，并刷新列表排序用的 [TAgentSession.updatedAt] 与 TTL 用的
+     * [TAgentSession.expiresAt]——后者让会话的保留期变成"最后活跃之后再放多久"，
+     * 只要还在用就不会被清理，见 [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy]。
+     */
+    fun touchSession(threadId: String, lastRunId: String, updatedAt: LocalDateTime, expiresAt: Instant?) {
         val query = Query(Criteria.where(TAgentSession::threadId.name).`is`(threadId))
         val update = Update()
             .set(TAgentSession::lastRunId.name, lastRunId)
             .set(TAgentSession::updatedAt.name, updatedAt)
+            .set(TAgentSession::expiresAt.name, expiresAt)
         updateFirst(query, update)
     }
 

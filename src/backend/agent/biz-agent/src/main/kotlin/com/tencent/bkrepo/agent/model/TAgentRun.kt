@@ -31,7 +31,9 @@ import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.pojo.AgentRunTriggerType
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.CompoundIndexes
+import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
+import java.time.Instant
 import java.time.LocalDateTime
 
 /** 一次 HTTP run 请求的运行元数据，对应 Mongo 集合 `agent_run`。 */
@@ -78,4 +80,7 @@ data class TAgentRun(
     var cachedTokens: Long = 0,
     /** 本次 run 内所有模型调用耗时之和，非 run 总时长（run 总时长见 [durationMs]）。 */
     var totalModelDurationMs: Long = 0,
+    /** 见 [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy]；`null` 表示不参与 TTL 清理。 */
+    @Indexed(expireAfter = "0s", background = true)
+    var expiresAt: Instant? = null,
 )

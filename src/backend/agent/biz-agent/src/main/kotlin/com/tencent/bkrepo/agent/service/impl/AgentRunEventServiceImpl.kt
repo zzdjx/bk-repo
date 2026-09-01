@@ -11,6 +11,7 @@ package com.tencent.bkrepo.agent.service.impl
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.dao.AgentRunEventDao
 import com.tencent.bkrepo.agent.model.TAgentRunEvent
+import com.tencent.bkrepo.agent.retention.AgentRetentionPolicy
 import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
 import com.tencent.bkrepo.agent.service.AgentRunEventService
 import com.tencent.bkrepo.agent.service.run.AgentRunEventSupport
@@ -19,12 +20,12 @@ import com.tencent.bkrepo.agent.service.run.AguiSseEventWriter
 import io.agentscope.core.agui.event.AguiEvent
 import org.springframework.stereotype.Service
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
-import java.time.Instant
 import java.time.LocalDateTime
 
 @Service
 class AgentRunEventServiceImpl(
     private val properties: EffectiveAgentRuntimeProperties,
+    private val retentionPolicy: AgentRetentionPolicy,
     private val runEventDao: AgentRunEventDao,
     private val sseEventWriter: AguiSseEventWriter,
     private val replaySinkRegistry: AgentRunReplaySinkRegistry,
@@ -47,7 +48,7 @@ class AgentRunEventServiceImpl(
             eventData = eventJson,
             terminal = terminal,
             createdAt = now,
-            expiresAt = Instant.now().plus(properties.runEventTtl),
+            expiresAt = retentionPolicy.runEventExpiry(),
         )
         runEventDao.insertIfAbsent(record)
         replaySinkRegistry.publish(

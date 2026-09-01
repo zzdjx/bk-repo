@@ -30,7 +30,7 @@ class ActiveRunManager(
         val threadId: String,
         val runId: String,
         val runtimeContext: RuntimeContext,
-        val abort: () -> Unit,
+        val abort: (AgentRunAbortReason) -> Unit,
     )
 
     private val localHandles = ConcurrentHashMap<String, LocalHandle>()
@@ -81,7 +81,7 @@ class ActiveRunManager(
         scope: ActiveRunScope,
         runId: String,
         runtimeContext: RuntimeContext,
-        abort: () -> Unit,
+        abort: (AgentRunAbortReason) -> Unit,
     ) {
         localHandles[scopeKey(scope)] = LocalHandle(
             userId = scope.userId,
@@ -91,8 +91,33 @@ class ActiveRunManager(
             abort = abort,
         )
         if (stateStore.isStopRequested(runId) || pendingStopRunIds[scopeKey(scope)] == runId) {
-            abort()
+            abort(AgentRunAbortReason.USER_STOP)
         }
+    }
+
+    /**
+     * 中止本副本所有在跑的 run，返回实际中止的条数；供停机流程调用（见
+     * [com.tencent.bkrepo.agent.runtime.AgentRunShutdownHandler]）。
+     *
+     * 只处理本进程的 [localHandles]，不去扫 Redis：其它副本的 run 由它们各自停机时处理，跨副本代劳
+     * 会把还在正常服务的 run 也一起杀掉。每个 handle 的 abort 回调走的是与用户停止完全相同的收尾路径
+     * （中断 Agent、落 CANCELLED 终态、关事件流、释放会话锁、complete SSE），所以这里不需要重复清理。
+     */
+    fun abortLocalRuns(reason: AgentRunAbortReason): Int {
+        var aborted = 0
+        localHandles.values.toList().forEach { handle ->
+            try {
+                handle.abort(reason)
+                aborted++
+            } catch (exception: Exception) {
+                logger.warn(
+                    "failed to abort run[${handle.runId}] for user[${handle.userId}] " +
+                        "thread[${handle.threadId}] on $reason",
+                    exception,
+                )
+            }
+        }
+        return aborted
     }
 
     fun removeHandle(scope: ActiveRunScope) {
@@ -124,7 +149,7 @@ class ActiveRunManager(
     private fun abortLocalHandle(scope: ActiveRunScope, runId: String) {
         localHandles[scopeKey(scope)]
             ?.takeIf { it.runId == runId }
-            ?.abort()
+            ?.abort?.invoke(AgentRunAbortReason.USER_STOP)
     }
 
     private fun scopeKey(scope: ActiveRunScope): String = "${scope.userId}:${scope.threadId}"

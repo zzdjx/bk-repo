@@ -44,6 +44,7 @@ import com.tencent.bkrepo.agent.config.properties.AgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.AgentLlmPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryPropertiesResolver
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
 import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
@@ -111,14 +112,16 @@ class HarnessAgentSmokeTest {
             maxThreadIdLength = 128,
             sessionTtl = java.time.Duration.ofDays(30),
             activeRunTtl = java.time.Duration.ofMinutes(11),
-            runEventTtl = java.time.Duration.ofDays(7),
             reconnectPollInterval = java.time.Duration.ofMillis(500),
             reconnectTimeout = java.time.Duration.ofMinutes(10),
+            shutdownTimeout = java.time.Duration.ofSeconds(15),
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
             taskStoreKeyPrefix = "bkrepo:agent:task-store:",
             memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
             frontendToolsEnabled = true,
+            readOnlyMode = false,
+            retention = EffectiveAgentRetention.defaults(),
             topology = EffectiveAgentTopology.defaults(),
         )
         val llmProperties = AgentLlmPropertiesResolver.resolve(

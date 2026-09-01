@@ -28,12 +28,22 @@ data class AgentRuntimeProperties(
     var maxThreadIdLength: Int = DEFAULT_MAX_THREAD_ID_LENGTH,
     var sessionTtl: Duration = DEFAULT_SESSION_TTL,
     var activeRunTtl: Duration = DEFAULT_ACTIVE_RUN_TTL,
-    var runEventTtl: Duration = DEFAULT_RUN_EVENT_TTL,
     var reconnectPollInterval: Duration = DEFAULT_RECONNECT_POLL_INTERVAL,
     var reconnectTimeout: Duration = DEFAULT_RECONNECT_TIMEOUT,
+    /**
+     * 停机时等待在跑的 Agent 调用收尾的上限，透传给框架
+     * [io.agentscope.core.shutdown.GracefulShutdownConfig.shutdownTimeout]。
+     *
+     * 必须是有限值：框架默认 null 表示"无限等待"，此时 JVM 停机钩子会一直等到所有在跑调用结束，
+     * 而且 `GracefulShutdownManager` 的强制中断只在配了有限超时时才生效——两者叠加会让 SIGTERM
+     * 之后进程迟迟不退，最后被 SIGKILL 硬杀。取值要留在 K8s terminationGracePeriodSeconds 之内，
+     * 详见 [com.tencent.bkrepo.agent.config.AgentGracefulShutdownConfiguration] 里的超时预算说明。
+     */
+    var shutdownTimeout: Duration = DEFAULT_SHUTDOWN_TIMEOUT,
     var state: State = State(),
     var task: Task = Task(),
     var memory: Memory = Memory(),
+    var retention: Retention = Retention(),
     var features: Features = Features(),
     var topology: Topology = Topology(),
 ) {
@@ -77,8 +87,57 @@ data class AgentRuntimeProperties(
         }
     }
 
+    /**
+     * 数据保留期（`agent.runtime.retention`）：Agent 自己产生的运行数据在多久之后自动清理。
+     *
+     * 每一项都可以配成 `0`（或负值）表示"永不过期"，用于个别环境需要长期留存审计数据的场景；
+     * 默认值都是有限值，因为这些集合/键都是只写不删的——不设上限就会单调增长。
+     *
+     * ## Mongo 侧（靠 TTL 索引，由 Mongo 自己删）
+     *
+     * 四张表的过期时刻在写入时算好落到 `expiresAt` 字段上，配置改了只影响之后新写入的文档，
+     * 已有文档保持写入当时算出的过期时刻，不会被追溯修正。
+     *
+     * 各项之间不是独立的，调整时注意这几条约束：
+     * - [runEvent] 决定断线重连能回放多久以前的 run，必须小于等于 [run]：run 元数据都没了，
+     *   只剩事件流没有任何意义。
+     * - [session] 必须大于等于 [message]：会话元数据行先过期的话，剩下的消息就成了列不出来的孤儿数据
+     *   （消息只能按 threadId 从会话入口查）。[session] 的过期时刻会在每次 run 开始时随
+     *   `touchSession` 一起往后推，因此语义是"最后活跃之后再放多久"，而不是"创建之后多久"；
+     *   [message] 则按消息自己的创建时间算，语义是"只保留最近这么久的聊天记录"。
+     * - [run] 与 [toolCall] 是同一件事的两面（一次运行 + 这次运行里的工具调用审计），
+     *   建议保持一致，否则查审计时会出现"有 run 没有工具调用记录"的空洞。
+     *
+     * ## Redis 侧（靠 key TTL，由 Redis 自己删）
+     *
+     * - [task] 是 `agent_spawn` 超时后被 promote 出的后台任务记录，语义是"最后一次写入之后再放多久"。
+     *   任务本身活不过一次会话，这里的保留期只影响"事后还能不能查到这条任务记录"。
+     * - [memory] 是长期记忆，语义是"最后一次使用之后再放多久"——读（`memory_search`/`memory_get`/
+     *   用户直连查看）和写（`memory_save`/`memory_delete`）都会把过期时刻往后推。之所以按"最后使用"
+     *   而不是"最后写入"，是因为用户半年前保存、之后一直在用的偏好不应该被静默清掉。
+     */
+    data class Retention(
+        var runEvent: Duration = DEFAULT_RUN_EVENT_RETENTION,
+        var run: Duration = DEFAULT_RUN_RETENTION,
+        var toolCall: Duration = DEFAULT_TOOL_CALL_RETENTION,
+        var message: Duration = DEFAULT_MESSAGE_RETENTION,
+        var session: Duration = DEFAULT_SESSION_RETENTION,
+        var task: Duration = DEFAULT_TASK_RETENTION,
+        var memory: Duration = DEFAULT_MEMORY_RETENTION,
+    )
+
     data class Features(
         var frontendToolsEnabled: Boolean = DEFAULT_FRONTEND_TOOLS_ENABLED,
+        /**
+         * 只读模式（生产应急开关）：开启后 Agent 的一切写操作能力都不可用——客户端本地写工具
+         * （`set_download_path`/`delete_download_tasks` 等）不再注册给模型，长期记忆的
+         * `memory_save`/`memory_delete` 由 ASK 收紧为 DENY。
+         *
+         * 边界：只约束"模型能做什么"，不约束用户自己发起的请求。用户直连的记忆管理接口
+         * （[com.tencent.bkrepo.agent.api.user.UserAgentMemoryResource]）与会话删除接口仍然可用——
+         * 用户对自己的数据始终有完全控制权，这个开关防的是 Agent 误操作，不是冻结整个服务。
+         */
+        var readOnlyMode: Boolean = DEFAULT_READ_ONLY_MODE,
     )
 
     data class Topology(
@@ -114,10 +173,18 @@ data class AgentRuntimeProperties(
         const val DEFAULT_MAX_THREAD_ID_LENGTH = 128
         val DEFAULT_SESSION_TTL: Duration = Duration.ofDays(30)
         val DEFAULT_ACTIVE_RUN_TTL: Duration = Duration.ofMinutes(11)
-        val DEFAULT_RUN_EVENT_TTL: Duration = Duration.ofDays(7)
+        val DEFAULT_RUN_EVENT_RETENTION: Duration = Duration.ofDays(7)
+        val DEFAULT_RUN_RETENTION: Duration = Duration.ofDays(90)
+        val DEFAULT_TOOL_CALL_RETENTION: Duration = Duration.ofDays(90)
+        val DEFAULT_MESSAGE_RETENTION: Duration = Duration.ofDays(180)
+        val DEFAULT_SESSION_RETENTION: Duration = Duration.ofDays(180)
+        val DEFAULT_TASK_RETENTION: Duration = Duration.ofDays(7)
+        val DEFAULT_MEMORY_RETENTION: Duration = Duration.ofDays(180)
         val DEFAULT_RECONNECT_POLL_INTERVAL: Duration = Duration.ofMillis(500)
         val DEFAULT_RECONNECT_TIMEOUT: Duration = Duration.ofMinutes(10)
+        val DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration.ofSeconds(15)
         const val DEFAULT_FRONTEND_TOOLS_ENABLED = true
+        const val DEFAULT_READ_ONLY_MODE = false
         const val DEFAULT_REQUIRE_REDIS = false
         const val DEFAULT_MAX_DELEGATIONS = 8
         const val DEFAULT_MAX_PARALLEL_DELEGATIONS = 1
@@ -180,6 +247,31 @@ data class EffectiveAgentTopology(
     }
 }
 
+/** 见 [AgentRuntimeProperties.Retention]。 */
+data class EffectiveAgentRetention(
+    val runEvent: Duration,
+    val run: Duration,
+    val toolCall: Duration,
+    val message: Duration,
+    val session: Duration,
+    val task: Duration,
+    val memory: Duration,
+) {
+    companion object {
+        fun from(retention: AgentRuntimeProperties.Retention): EffectiveAgentRetention = EffectiveAgentRetention(
+            runEvent = retention.runEvent,
+            run = retention.run,
+            toolCall = retention.toolCall,
+            message = retention.message,
+            session = retention.session,
+            task = retention.task,
+            memory = retention.memory,
+        )
+
+        fun defaults(): EffectiveAgentRetention = from(AgentRuntimeProperties.Retention())
+    }
+}
+
 data class EffectiveAgentRuntimeProperties(
     val name: String,
     val sysPrompt: String,
@@ -190,14 +282,16 @@ data class EffectiveAgentRuntimeProperties(
     val maxThreadIdLength: Int,
     val sessionTtl: Duration,
     val activeRunTtl: Duration,
-    val runEventTtl: Duration,
     val reconnectPollInterval: Duration,
     val reconnectTimeout: Duration,
+    val shutdownTimeout: Duration,
     val stateKeyPrefix: String,
     val requireRedis: Boolean,
     val taskStoreKeyPrefix: String,
     val memoryStoreKeyPrefix: String,
     val frontendToolsEnabled: Boolean,
+    val readOnlyMode: Boolean,
+    val retention: EffectiveAgentRetention,
     val topology: EffectiveAgentTopology,
 ) {
     companion object {
@@ -218,14 +312,16 @@ object AgentRuntimePropertiesResolver {
             maxThreadIdLength = runtime.maxThreadIdLength,
             sessionTtl = runtime.sessionTtl,
             activeRunTtl = runtime.activeRunTtl,
-            runEventTtl = runtime.runEventTtl,
             reconnectPollInterval = runtime.reconnectPollInterval,
             reconnectTimeout = runtime.reconnectTimeout,
+            shutdownTimeout = runtime.shutdownTimeout,
             stateKeyPrefix = runtime.state.keyPrefix,
             requireRedis = runtime.state.requireRedis,
             taskStoreKeyPrefix = runtime.task.keyPrefix,
             memoryStoreKeyPrefix = runtime.memory.keyPrefix,
             frontendToolsEnabled = runtime.features.frontendToolsEnabled,
+            readOnlyMode = runtime.features.readOnlyMode,
+            retention = EffectiveAgentRetention.from(runtime.retention),
             topology = EffectiveAgentTopology.from(runtime.topology),
         )
 }

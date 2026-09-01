@@ -31,6 +31,7 @@ import com.tencent.bkrepo.agent.dao.AgentMessageDao
 import com.tencent.bkrepo.agent.dao.AgentSessionDao
 import com.tencent.bkrepo.agent.model.TAgentMessage
 import com.tencent.bkrepo.agent.pojo.AgentMessageRole
+import com.tencent.bkrepo.agent.retention.AgentRetentionPolicy
 import com.tencent.bkrepo.agent.service.AgentMessageArchiveService
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -45,6 +46,7 @@ import java.time.LocalDateTime
 class AgentMessageArchiveServiceImpl(
     private val agentMessageDao: AgentMessageDao,
     private val agentSessionDao: AgentSessionDao,
+    private val retentionPolicy: AgentRetentionPolicy,
 ) : AgentMessageArchiveService {
 
     override fun archiveUserMessage(
@@ -113,6 +115,7 @@ class AgentMessageArchiveServiceImpl(
             structuredContent = structuredContent,
             agentId = agentId,
             createdAt = LocalDateTime.now(),
+            expiresAt = retentionPolicy.messageExpiry(),
         )
         return insertWithRetry(message)
     }

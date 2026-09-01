@@ -8,8 +8,10 @@
 
 package com.tencent.bkrepo.agent.permission
 
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
+import com.tencent.bkrepo.agent.tool.local.LocalToolDefinitions
 import io.agentscope.core.permission.PermissionBehavior
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -78,7 +80,65 @@ class AgentPermissionRulesConfigurationTest {
         )
     }
 
-    private fun defaultRuntimeProperties(): EffectiveAgentRuntimeProperties =
+    @Test
+    fun `只读模式下客户端写工具由ASK收紧为DENY只读工具不受影响`() {
+        val context = configuration.agentPermissionContext(defaultRuntimeProperties(readOnly = true))
+
+        val writeTools = LocalToolDefinitions.allTools().filter {
+            it.riskLevel == ToolRiskLevel.WRITE_REVERSIBLE || it.riskLevel == ToolRiskLevel.WRITE_DESTRUCTIVE
+        }
+        assertTrue(writeTools.isNotEmpty(), "fixture broken: no write tool in catalog")
+        writeTools.forEach { definition ->
+            val denyRules = context.denyRules[definition.name].orEmpty()
+            assertTrue(denyRules.isNotEmpty(), "${definition.name} should have DENY rule in read-only mode")
+            assertEquals(PermissionBehavior.DENY, denyRules.first().behavior)
+            assertTrue(
+                context.askRules[definition.name].orEmpty().isEmpty(),
+                "${definition.name} should not fall back to ASK in read-only mode",
+            )
+        }
+
+        val readTools = LocalToolDefinitions.allTools().filter {
+            it.riskLevel == ToolRiskLevel.READ_SAFE || it.riskLevel == ToolRiskLevel.READ_SENSITIVE
+        }
+        readTools.forEach { definition ->
+            assertEquals(
+                PermissionBehavior.ALLOW,
+                context.allowRules[definition.name].orEmpty().firstOrNull()?.behavior,
+                "${definition.name} should stay ALLOW in read-only mode",
+            )
+        }
+    }
+
+    @Test
+    fun `只读模式下记忆写入与删除都是DENY`() {
+        val context = configuration.agentPermissionContext(defaultRuntimeProperties(readOnly = true))
+
+        AgentPermissionRulesConfiguration.MEMORY_WRITE_TOOLS.forEach { toolName ->
+            val denyRules = context.denyRules[toolName].orEmpty()
+            assertTrue(denyRules.isNotEmpty(), "$toolName should have DENY rule in read-only mode")
+            assertEquals(PermissionBehavior.DENY, denyRules.first().behavior)
+            assertTrue(
+                context.askRules[toolName].orEmpty().isEmpty(),
+                "$toolName should not be confirmable in read-only mode",
+            )
+        }
+    }
+
+    @Test
+    fun `只读模式不影响委派编排工具`() {
+        val context = configuration.agentPermissionContext(defaultRuntimeProperties(readOnly = true))
+
+        AgentPermissionRulesConfiguration.HARNESS_ORCHESTRATION_TOOLS.forEach { toolName ->
+            assertEquals(
+                PermissionBehavior.ALLOW,
+                context.allowRules[toolName].orEmpty().firstOrNull()?.behavior,
+                "$toolName should stay ALLOW in read-only mode",
+            )
+        }
+    }
+
+    private fun defaultRuntimeProperties(readOnly: Boolean = false): EffectiveAgentRuntimeProperties =
         EffectiveAgentRuntimeProperties(
             name = "bkrepo-assistant",
             sysPrompt = "test",
@@ -89,14 +149,16 @@ class AgentPermissionRulesConfigurationTest {
             maxThreadIdLength = 128,
             sessionTtl = java.time.Duration.ofDays(30),
             activeRunTtl = java.time.Duration.ofMinutes(11),
-            runEventTtl = java.time.Duration.ofDays(7),
             reconnectPollInterval = java.time.Duration.ofMillis(500),
             reconnectTimeout = java.time.Duration.ofMinutes(10),
+            shutdownTimeout = java.time.Duration.ofSeconds(15),
             stateKeyPrefix = "bkrepo:agent:state:",
             requireRedis = false,
             taskStoreKeyPrefix = "bkrepo:agent:task-store:",
             memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
             frontendToolsEnabled = true,
+            readOnlyMode = readOnly,
+            retention = EffectiveAgentRetention.defaults(),
             topology = EffectiveAgentTopology.defaults(),
         )
 }

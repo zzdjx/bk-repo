@@ -31,6 +31,7 @@ import com.tencent.bkrepo.agent.dao.AgentToolCallDao
 import com.tencent.bkrepo.agent.model.TAgentToolCall
 import com.tencent.bkrepo.agent.pojo.AgentToolCallDecision
 import com.tencent.bkrepo.agent.pojo.AgentToolResultState
+import com.tencent.bkrepo.agent.retention.AgentRetentionPolicy
 import com.tencent.bkrepo.agent.service.AgentToolCallRecordService
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -39,6 +40,7 @@ import java.time.LocalDateTime
 @Service
 class AgentToolCallRecordServiceImpl(
     private val agentToolCallDao: AgentToolCallDao,
+    private val retentionPolicy: AgentRetentionPolicy,
 ) : AgentToolCallRecordService {
 
     override fun recordCalled(
@@ -63,6 +65,7 @@ class AgentToolCallRecordServiceImpl(
                     argsDigest = argsDigest,
                     decision = initialDecision,
                     calledAt = LocalDateTime.now(),
+                    expiresAt = retentionPolicy.toolCallExpiry(),
                 ),
             )
         } catch (ex: Exception) {

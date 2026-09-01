@@ -43,4 +43,17 @@ object AgentSystemPrompts {
         - 不要编造 projectId、repoName、packageKey、version、path、taskId；这些必须来自子 Agent 或工具返回值。
         - 工具与子 Agent 只提供客观事实，根因判断与最终答复由你完成。
         """.trimIndent()
+
+    /**
+     * 只读模式（`agent.runtime.features.read-only-mode=true`）下追加的提示词片段。
+     *
+     * 写工具此时已经不在 toolkit 里，模型物理上调不到；补这段话是为了让**回答**自洽：否则模型只会
+     * 发现"没有对应工具"，可能含糊其辞或反复尝试别的工具，而不是干脆告诉用户当前不支持写操作。
+     */
+    val READ_ONLY_MODE = """
+        当前运行在只读模式：
+        - 你只能查询和诊断，所有写操作（修改下载路径、暂停/删除任务、清理磁盘、写入或删除长期记忆等）都已停用。
+        - 用户请求写操作时，直接说明当前处于只读模式、该操作暂不可用，并给出可替代的查询/排查建议；
+          不要尝试用别的工具绕开，也不要声称已执行或稍后执行。
+        """.trimIndent()
 }

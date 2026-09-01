@@ -81,7 +81,8 @@ class AgentTaskRepositoryConfiguration {
             )
             return null
         }
-        val store = LettuceStore(client, properties.taskStoreKeyPrefix)
+        // 后台任务记录只写不删，靠 key TTL 收口；不开 refreshTtlOnRead——事后翻查一条旧任务不应该延长它的寿命。
+        val store = LettuceStore(client, properties.taskStoreKeyPrefix, ttl = properties.retention.task)
         // 固定命名空间（不随 RuntimeContext 变化）：任务记录本身已经按
         // `agents/<parentAgentId>/tasks/<sessionId>.json` 分文件，不需要 store 层再按 user 隔离。
         val filesystem = RemoteFilesystem(store, listOf("agents", properties.name, "tasks"))

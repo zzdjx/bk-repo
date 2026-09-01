@@ -138,11 +138,19 @@ class AgentHarnessConfigurer(
      * `client` 子 Agent 的系统提示词（[ClientAgentPrompt.DEFAULT]，排查方式/能力边界等域内行为规则）
      * 需要拼接进协调者自己的系统提示词——仅在 `frontendToolsEnabled` 时拼接，与历史上只有开启该
      * 开关时才会材料化 `client` 子 Agent 的行为保持一致。
+     *
+     * 只读模式下再追加 [AgentSystemPrompts.READ_ONLY_MODE]，且必须放在最后：[ClientAgentPrompt.DEFAULT]
+     * 里仍描述着 `set_download_path` 等写工具的用法，靠后面这段兜底纠偏（工具本身已不注册，见
+     * [com.tencent.bkrepo.agent.tool.frontend.FrontendToolRegistrar]）。
      */
     private fun effectiveSysPrompt(properties: EffectiveAgentRuntimeProperties): String {
-        if (!properties.frontendToolsEnabled) {
-            return properties.sysPrompt
+        val parts = mutableListOf(properties.sysPrompt)
+        if (properties.frontendToolsEnabled) {
+            parts += ClientAgentPrompt.DEFAULT
         }
-        return properties.sysPrompt + "\n\n" + ClientAgentPrompt.DEFAULT
+        if (properties.readOnlyMode) {
+            parts += AgentSystemPrompts.READ_ONLY_MODE
+        }
+        return parts.joinToString("\n\n")
     }
 }

@@ -30,7 +30,9 @@ package com.tencent.bkrepo.agent.model
 import com.tencent.bkrepo.agent.pojo.AgentSessionStatus
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.CompoundIndexes
+import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
+import java.time.Instant
 import java.time.LocalDateTime
 
 /** 会话元数据，对应 Mongo 集合 `agent_session`。 */
@@ -59,4 +61,11 @@ data class TAgentSession(
     var updatedAt: LocalDateTime,
     var lastRunId: String? = null,
     var promptVersion: String? = null,
+    /**
+     * 见 [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy]；`null` 表示不参与 TTL 清理。
+     *
+     * 与其它三张表不同，这个字段会在每次 run 开始时随 [updatedAt] 一起往后推，语义是"最后活跃之后再放多久"。
+     */
+    @Indexed(expireAfter = "0s", background = true)
+    var expiresAt: Instant? = null,
 )

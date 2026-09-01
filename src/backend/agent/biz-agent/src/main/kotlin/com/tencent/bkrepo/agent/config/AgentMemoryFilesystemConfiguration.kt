@@ -106,7 +106,14 @@ class AgentMemoryFilesystemConfiguration {
             )
             return null
         }
-        return LettuceStore(client, properties.memoryStoreKeyPrefix)
+        // refreshTtlOnRead=true：记忆的保留期按"最后一次使用"算，读（memory_search/memory_get、用户直连
+        // 查看）和写（memory_save/memory_delete）都会续期，长期在用的偏好不会被静默清掉。
+        return LettuceStore(
+            client,
+            properties.memoryStoreKeyPrefix,
+            ttl = properties.retention.memory,
+            refreshTtlOnRead = true,
+        )
     }
 
     @Bean
