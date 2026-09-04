@@ -90,6 +90,56 @@ class DomainToolGateway(
             ?: throw PermissionException("Missing authenticated project in RuntimeContext")
     }
 
+    /**
+     * 只解释、不拦截：与 [requireResourcePermission] 相反，永远返回判定结果而不是在 DENY 时抛异常。
+     *
+     * 只解释"当前认证用户"自己的权限（[RuntimeContext.userId]，不接受工具入参覆盖），因为这本身
+     * 就是 Governance Agent 汇报给用户看的答案，没有越权查询他人权限的场景。
+     */
+    fun explainResourcePermission(
+        runtimeContext: RuntimeContext,
+        resourceType: ResourceType,
+        action: PermissionAction,
+        repoName: String? = null,
+        path: String? = null,
+    ): PermissionExplanation {
+        val userId = currentUserId(runtimeContext)
+        val projectId = currentProjectId(runtimeContext)
+        val allowed = if (!httpAuthProperties.enabled) {
+            true
+        } else {
+            val request = CheckPermissionRequest(
+                uid = userId,
+                resourceType = resourceType.toString(),
+                action = action.toString(),
+                projectId = projectId,
+                repoName = repoName,
+                path = path,
+            )
+            permissionClient.checkPermission(request).data == true
+        }
+        return PermissionExplanation(
+            allowed = allowed,
+            userId = userId,
+            projectId = projectId,
+            resourceType = resourceType,
+            action = action,
+            repoName = repoName,
+            path = path,
+        )
+    }
+
+    /** [explainResourcePermission] 的判定结果，供治理工具整理成结构化摘要返回给模型。 */
+    data class PermissionExplanation(
+        val allowed: Boolean,
+        val userId: String,
+        val projectId: String,
+        val resourceType: ResourceType,
+        val action: PermissionAction,
+        val repoName: String?,
+        val path: String?,
+    )
+
     companion object {
         private val logger = LoggerFactory.getLogger(DomainToolGateway::class.java)
     }

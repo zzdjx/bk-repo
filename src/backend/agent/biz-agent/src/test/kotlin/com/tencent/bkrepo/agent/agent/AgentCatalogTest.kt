@@ -9,6 +9,7 @@
 package com.tencent.bkrepo.agent.agent
 
 import com.tencent.bkrepo.agent.agent.discovery.ArtifactDiscoveryAgentDefinition
+import com.tencent.bkrepo.agent.agent.governance.GovernanceAgentDefinition
 import com.tencent.bkrepo.agent.agent.transfer.TransferDiagnosticsAgentDefinition
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
@@ -27,18 +28,21 @@ class AgentCatalogTest {
 
     private val discovery = ArtifactDiscoveryAgentDefinition()
     private val transfer = TransferDiagnosticsAgentDefinition()
+    private val governance = GovernanceAgentDefinition()
     private val registeredDomainTools = setOf(
         DomainToolNames.LIST_REPOSITORIES,
         DomainToolNames.GET_REPOSITORY_DETAIL,
         DomainToolNames.GET_TRANSFER_TASK_STATUS,
         DomainToolNames.GET_TRANSFER_ERROR_DETAIL,
+        DomainToolNames.EXPLAIN_REPOSITORY_PERMISSION,
+        DomainToolNames.GET_REPOSITORY_GOVERNANCE_INFO,
     )
     private val registeredFrontendTools = LocalToolDefinitions.allTools().map { it.name }.toSet()
 
     @Test
-    fun `默认拓扑应启用 discovery 并禁用 transfer-diagnostics`() {
+    fun `默认拓扑应启用 discovery 并禁用 transfer-diagnostics 与 governance`() {
         val catalog = catalog(
-            definitions = listOf(discovery, transfer),
+            definitions = listOf(discovery, transfer, governance),
             topology = EffectiveAgentTopology.defaults(),
         )
 
@@ -116,6 +120,27 @@ class AgentCatalogTest {
         val enabledIds = catalog.enabledDefinitions().map { it.agentId }
         assertTrue(enabledIds.contains(AgentIds.DISCOVERY))
         assertTrue(enabledIds.contains(AgentIds.TRANSFER_DIAGNOSTICS))
+    }
+
+    @Test
+    fun `启用 governance 时应出现在拓扑中且工具不越界`() {
+        val topology = EffectiveAgentTopology.defaults().copy(
+            agents = EffectiveAgentTopology.defaults().agents.copy(
+                governance = EffectiveAgentTopology.AgentBinding(
+                    enabled = true,
+                    modelProfile = "default",
+                    maxSteps = 8,
+                ),
+            ),
+        )
+        val catalog = catalog(
+            definitions = listOf(discovery, transfer, governance),
+            topology = topology,
+        )
+        val enabledIds = catalog.enabledDefinitions().map { it.agentId }
+        assertTrue(enabledIds.contains(AgentIds.DISCOVERY))
+        assertTrue(enabledIds.contains(AgentIds.GOVERNANCE))
+        assertTrue(governance.allowedToolNames.all { it in registeredDomainTools })
     }
 
     private fun catalog(

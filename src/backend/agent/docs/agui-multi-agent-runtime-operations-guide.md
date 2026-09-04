@@ -18,7 +18,8 @@ AgentChatService
 Coordinator（小制 / bkrepo-assistant）
     ├─ client           — frontend SchemaOnlyTools（委派时可用）
     ├─ discovery        — 制品检索
-    └─ transfer-diagnostics — 传输诊断（默认关闭）
+    ├─ transfer-diagnostics — 传输诊断（默认关闭）
+    └─ governance       — 权限判定解释 / 仓库治理配置查询（默认关闭）
 
 事实源
     MongoDB  — agent_session / agent_message / agent_run / agent_run_event
@@ -134,6 +135,9 @@ agent:
         transfer-diagnostics:
           enabled: false
           max-steps: 10
+        governance:
+          enabled: false
+          max-steps: 8
 ```
 
 ### 3.1 配置中心迁移清单
@@ -266,8 +270,10 @@ agent:
 | Client | `client` | 启用 | frontend SchemaOnlyTools |
 | Discovery | `discovery` | 启用 | 制品检索 |
 | Transfer Diagnostics | `transfer-diagnostics` | **关闭** | 传输任务诊断 |
+| Governance | `governance` | **关闭** | 权限判定解释（`explain_repository_permission`）、仓库治理配置查询（`get_repository_governance_info`，配额/保留策略占位待接入） |
 
-启用 `transfer-diagnostics` 前请完成 §11.4 评估集与权限验收。
+启用 `transfer-diagnostics` 前请完成 §11.4 评估集与权限验收。启用 `governance` 前同样建议先跑一轮真实
+IAM 判定结果的抽样核对，避免 `explain_repository_permission` 的解释与实际生效权限出现偏差。
 
 ---
 

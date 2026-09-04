@@ -179,6 +179,7 @@ data class AgentRuntimeProperties(
             var client: AgentBinding = AgentBinding(enabled = true, maxSteps = 10),
             var discovery: AgentBinding = AgentBinding(enabled = true),
             var transferDiagnostics: AgentBinding = AgentBinding(enabled = false, maxSteps = 10),
+            var governance: AgentBinding = AgentBinding(enabled = false, maxSteps = 8),
         )
 
         data class AgentBinding(
@@ -238,6 +239,7 @@ data class EffectiveAgentTopology(
         val client: AgentBinding,
         val discovery: AgentBinding,
         val transferDiagnostics: AgentBinding,
+        val governance: AgentBinding,
     )
 
     companion object {
@@ -263,6 +265,11 @@ data class EffectiveAgentTopology(
                     enabled = topology.agents.transferDiagnostics.enabled,
                     modelProfile = topology.agents.transferDiagnostics.modelProfile,
                     maxSteps = topology.agents.transferDiagnostics.maxSteps,
+                ),
+                governance = AgentBinding(
+                    enabled = topology.agents.governance.enabled,
+                    modelProfile = topology.agents.governance.modelProfile,
+                    maxSteps = topology.agents.governance.maxSteps,
                 ),
             ),
         )

@@ -68,6 +68,7 @@ class AgentCatalog(
         when (definition.agentId) {
             AgentIds.DISCOVERY -> runtimeProperties.topology.agents.discovery
             AgentIds.TRANSFER_DIAGNOSTICS -> runtimeProperties.topology.agents.transferDiagnostics
+            AgentIds.GOVERNANCE -> runtimeProperties.topology.agents.governance
             else -> error("Unknown agent id: ${definition.agentId}")
         }
 

@@ -13,4 +13,6 @@ object DomainToolNames {
     const val GET_REPOSITORY_DETAIL = "get_repository_detail"
     const val GET_TRANSFER_TASK_STATUS = "get_transfer_task_status"
     const val GET_TRANSFER_ERROR_DETAIL = "get_transfer_error_detail"
+    const val EXPLAIN_REPOSITORY_PERMISSION = "explain_repository_permission"
+    const val GET_REPOSITORY_GOVERNANCE_INFO = "get_repository_governance_info"
 }

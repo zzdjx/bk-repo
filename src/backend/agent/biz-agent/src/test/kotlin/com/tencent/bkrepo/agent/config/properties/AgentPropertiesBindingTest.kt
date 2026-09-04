@@ -314,4 +314,22 @@ class AgentPropertiesBindingTest {
 
         assertFalse(runtime.topology.coordinator.taskListEnabled)
     }
+
+    @Test
+    fun `governance子Agent默认禁用且可通过配置开启`() {
+        val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
+        assertFalse(defaults.topology.agents.governance.enabled, "governance 默认必须关闭，避免未评估就上线新 Agent")
+
+        val enabled = AgentRuntimePropertiesResolver.resolve(
+            AgentRuntimeProperties().apply {
+                topology = AgentRuntimeProperties.Topology(
+                    agents = AgentRuntimeProperties.Topology.Agents(
+                        governance = AgentRuntimeProperties.Topology.AgentBinding(enabled = true, maxSteps = 6),
+                    ),
+                )
+            },
+        )
+        assertTrue(enabled.topology.agents.governance.enabled)
+        assertEquals(6, enabled.topology.agents.governance.maxSteps)
+    }
 }
