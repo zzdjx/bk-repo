@@ -31,11 +31,13 @@ import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.util.Preconditions
+import com.tencent.bkrepo.common.api.util.checkurl.SecUrlValidator
 import com.tencent.bkrepo.common.api.util.readJsonString
 import com.tencent.bkrepo.common.artifact.event.base.ArtifactEvent
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import com.tencent.bkrepo.common.security.permission.PrincipalType
 import com.tencent.bkrepo.common.security.util.SecurityUtils
+import com.tencent.bkrepo.webhook.config.WebHookProperties
 import com.tencent.bkrepo.webhook.constant.AssociationType
 import com.tencent.bkrepo.webhook.constant.WebHookRequestStatus
 import com.tencent.bkrepo.webhook.dao.WebHookDao
@@ -63,15 +65,17 @@ class WebHookServiceImpl(
     private val webHookLogDao: WebHookLogDao,
     private val webHookExecutor: WebHookExecutor,
     private val permissionManager: PermissionManager,
-    private val eventPayloadFactory: EventPayloadFactory
+    private val eventPayloadFactory: EventPayloadFactory,
+    private val webHookProperties: WebHookProperties
 ) : WebHookService {
 
     override fun createWebHook(userId: String, request: CreateWebHookRequest): WebHook {
         logger.info("create webhook, userId: $userId, request: $request")
         with(request) {
             checkPermission(userId, associationType, associationId)
+            val validatedUrl = SecUrlValidator.validateOrThrow(url, webHookProperties.callbackUrl, "url")
             val webHook = TWebHook(
-                url = url,
+                url = validatedUrl,
                 headers = headers,
                 triggers = triggers,
                 associationType = associationType,
@@ -91,7 +95,8 @@ class WebHookServiceImpl(
         logger.info("update webhook, userId: $userId, request: $request")
         val webHook = findWebHookById(request.id)
         checkPermission(userId, webHook.associationType, webHook.associationId)
-        webHook.url = request.url ?: webHook.url
+        webHook.url = request.url?.let { SecUrlValidator.validateOrThrow(it, webHookProperties.callbackUrl, "url") }
+            ?: webHook.url
         webHook.triggers = request.triggers ?: webHook.triggers
         webHook.headers = request.headers.restoreUnchangedHeaderValues(webHook.headers)
         webHook.resourceKeyPattern = request.resourceKeyPattern ?: webHook.resourceKeyPattern

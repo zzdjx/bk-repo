@@ -157,7 +157,7 @@ class LogServiceTest @Autowired constructor(
     private fun createProjectWebHook() = webHookService.createWebHook(
         UT_USER,
         CreateWebHookRequest(
-            url = "https://localhost",
+            url = "https://webhook.example.com",
             headers = mapOf("key" to "value"),
             triggers = listOf(EventType.NODE_CREATED),
             associationType = AssociationType.PROJECT,

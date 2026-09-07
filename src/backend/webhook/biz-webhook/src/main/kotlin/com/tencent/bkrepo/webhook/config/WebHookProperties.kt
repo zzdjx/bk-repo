@@ -27,7 +27,9 @@
 
 package com.tencent.bkrepo.webhook.config
 
+import com.tencent.bkrepo.common.api.util.checkurl.UrlCheckProperties
 import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.boot.context.properties.NestedConfigurationProperty
 
 /**
  * WebHook配置项
@@ -41,4 +43,9 @@ data class WebHookProperties(
      * 是否允许依赖源仓库的节点事件触发webhook
      */
     var triggeredByNodeEventOfPackageSupportedRepo: Boolean = true,
+    /**
+     * WebHook回调地址校验（SecAPI CheckUrl），防止SSRF
+     */
+    @NestedConfigurationProperty
+    var callbackUrl: UrlCheckProperties = UrlCheckProperties(),
 )
