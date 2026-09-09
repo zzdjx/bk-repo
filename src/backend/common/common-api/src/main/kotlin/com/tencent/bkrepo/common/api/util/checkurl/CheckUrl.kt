@@ -40,6 +40,9 @@ object CheckUrl {
         if (urlParsed.protocol !in config.schemes) {
             throw MalformedURLException("Scheme is not valid.")
         }
+        if (config.blockPrivateIp && PrivateAddressMatcher.isForbiddenLiteral(urlParsed.host)) {
+            throw MalformedURLException("Host is a private/loopback/link-local IP.")
+        }
         if (config.rules.isEmpty()) return
         val validator = modeMatchMethodMap[config.mode]
             ?: throw IllegalArgumentException("Mode is not valid.")

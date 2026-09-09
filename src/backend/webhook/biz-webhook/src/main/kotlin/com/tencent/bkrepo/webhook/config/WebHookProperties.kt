@@ -44,8 +44,8 @@ data class WebHookProperties(
      */
     var triggeredByNodeEventOfPackageSupportedRepo: Boolean = true,
     /**
-     * WebHook回调地址校验（SecAPI CheckUrl），防止SSRF
+     * WebHook回调地址校验（SecAPI CheckUrl），防止SSRF；默认拦截字面量回环/内网/链路本地IP
      */
     @NestedConfigurationProperty
-    var callbackUrl: UrlCheckProperties = UrlCheckProperties(),
+    var callbackUrl: UrlCheckProperties = UrlCheckProperties(blockPrivateIp = true),
 )

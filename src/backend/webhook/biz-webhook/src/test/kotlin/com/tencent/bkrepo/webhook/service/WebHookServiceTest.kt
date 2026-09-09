@@ -135,13 +135,13 @@ class WebHookServiceTest @Autowired constructor(
             UT_USER,
             UpdateWebHookRequest(
                 id = created.id,
-                url = "https://127.0.0.1",
+                url = "https://webhook2.example.com",
                 headers = created.headers
             )
         )
 
         val stored = webHookDao.findById(created.id)
-        Assertions.assertEquals("https://127.0.0.1", stored?.url)
+        Assertions.assertEquals("https://webhook2.example.com", stored?.url)
         Assertions.assertEquals(UT_SHORT_HEADER_VALUE, stored?.headers?.get("authorization"))
         Assertions.assertEquals(UT_LONG_HEADER_VALUE, stored?.headers?.get("x-token"))
     }
@@ -178,9 +178,9 @@ class WebHookServiceTest @Autowired constructor(
             associationId = UT_PROJECT_ID
         )
         var webhook = webHookService.createWebHook(UT_USER, createWebHookRequest)
-        val updateWebHookRequest = UpdateWebHookRequest(webhook.id, "https://127.0.0.1")
+        val updateWebHookRequest = UpdateWebHookRequest(webhook.id, "https://webhook2.example.com")
         webhook = webHookService.updateWebHook(UT_USER, updateWebHookRequest)
-        Assertions.assertEquals(webhook.url, "https://127.0.0.1")
+        Assertions.assertEquals(webhook.url, "https://webhook2.example.com")
     }
 
     @Test
