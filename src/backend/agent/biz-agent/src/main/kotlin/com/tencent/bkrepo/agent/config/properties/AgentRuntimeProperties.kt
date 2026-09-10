@@ -125,7 +125,34 @@ data class AgentRuntimeProperties(
         var session: Duration = DEFAULT_SESSION_RETENTION,
         var task: Duration = DEFAULT_TASK_RETENTION,
         var memory: Duration = DEFAULT_MEMORY_RETENTION,
-    )
+        var overrides: List<Override> = emptyList(),
+    ) {
+        /**
+         * 按项目/用户维度覆盖保留期（`agent.runtime.retention.overrides`），用于个别项目需要更长审计留存、
+         * 或个别内部测试项目/用户需要更短保留期的场景。
+         *
+         * 只覆盖 [runEvent]/[run]/[toolCall]/[message]/[session] 这五项——它们都是"写入记录时按 `Instant`
+         * 现算现打 `expiresAt` 戳"（见 [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy]），天然支持
+         * 按每条记录单独决定过期时刻。[task]/[memory] 是在 Redis key 级别、Bean 构造时一次性配置 TTL（见
+         * `AgentTaskRepositoryConfiguration`/`AgentMemoryFilesystemConfiguration`），要做到差异化需要把
+         * "构造 store 时固定 TTL"改成"每次写入时动态传入"，改造面完全不同，不在这次范围内。
+         *
+         * 匹配规则：[projectIds]/[userIds] 是 OR 关系（与 [Gray] 一致）；[overrides] 列表里第一个命中的
+         * 生效，不做多个 override 合并；命中的 override 里某一项留空（`null`）表示这一项不覆盖，沿用全局
+         * 默认值，而不是"覆盖成永不过期"。
+         */
+        data class Override(
+            /** 仅用于 YAML 里标注这条 override 是给谁配的，不参与匹配逻辑。 */
+            var name: String = "",
+            var projectIds: Set<String> = emptySet(),
+            var userIds: Set<String> = emptySet(),
+            var runEvent: Duration? = null,
+            var run: Duration? = null,
+            var toolCall: Duration? = null,
+            var message: Duration? = null,
+            var session: Duration? = null,
+        )
+    }
 
     data class Features(
         var frontendToolsEnabled: Boolean = DEFAULT_FRONTEND_TOOLS_ENABLED,
@@ -287,7 +314,39 @@ data class EffectiveAgentRetention(
     val session: Duration,
     val task: Duration,
     val memory: Duration,
+    val overrides: List<Override>,
 ) {
+    /** 见 [AgentRuntimeProperties.Retention.Override]。 */
+    data class Override(
+        val projectIds: Set<String>,
+        val userIds: Set<String>,
+        val runEvent: Duration?,
+        val run: Duration?,
+        val toolCall: Duration?,
+        val message: Duration?,
+        val session: Duration?,
+    )
+
+    /** [projectId]/[userId] 命中 [overrides] 中任一名单即算命中，取第一个命中项；否则返回 null 落回全局默认值。 */
+    private fun matchOverride(projectId: String?, userId: String?): Override? = overrides.firstOrNull {
+        (projectId != null && projectId in it.projectIds) || (userId != null && userId in it.userIds)
+    }
+
+    fun runEventFor(projectId: String? = null, userId: String? = null): Duration =
+        matchOverride(projectId, userId)?.runEvent ?: runEvent
+
+    fun runFor(projectId: String? = null, userId: String? = null): Duration =
+        matchOverride(projectId, userId)?.run ?: run
+
+    fun toolCallFor(projectId: String? = null, userId: String? = null): Duration =
+        matchOverride(projectId, userId)?.toolCall ?: toolCall
+
+    fun messageFor(projectId: String? = null, userId: String? = null): Duration =
+        matchOverride(projectId, userId)?.message ?: message
+
+    fun sessionFor(projectId: String? = null, userId: String? = null): Duration =
+        matchOverride(projectId, userId)?.session ?: session
+
     companion object {
         fun from(retention: AgentRuntimeProperties.Retention): EffectiveAgentRetention = EffectiveAgentRetention(
             runEvent = retention.runEvent,
@@ -297,6 +356,17 @@ data class EffectiveAgentRetention(
             session = retention.session,
             task = retention.task,
             memory = retention.memory,
+            overrides = retention.overrides.map {
+                Override(
+                    projectIds = it.projectIds,
+                    userIds = it.userIds,
+                    runEvent = it.runEvent,
+                    run = it.run,
+                    toolCall = it.toolCall,
+                    message = it.message,
+                    session = it.session,
+                )
+            },
         )
 
         fun defaults(): EffectiveAgentRetention = from(AgentRuntimeProperties.Retention())

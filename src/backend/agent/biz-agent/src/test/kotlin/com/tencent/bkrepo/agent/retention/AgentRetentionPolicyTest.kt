@@ -69,6 +69,102 @@ class AgentRetentionPolicyTest {
         assertNotNull(policy.runExpiry())
     }
 
+    @Test
+    fun `projectId命中override时应按override保留期计算过期时刻`() {
+        val policy = policyOf(
+            EffectiveAgentRetention.defaults().copy(
+                run = Duration.ofDays(90),
+                overrides = listOf(
+                    EffectiveAgentRetention.Override(
+                        projectIds = setOf("compliance-project"),
+                        userIds = emptySet(),
+                        runEvent = null,
+                        run = Duration.ofDays(365),
+                        toolCall = null,
+                        message = null,
+                        session = null,
+                    ),
+                ),
+            ),
+        )
+        val before = Instant.now()
+
+        assertWithin(policy.runExpiry("compliance-project", "any-user"), before, Duration.ofDays(365))
+    }
+
+    @Test
+    fun `projectId不命中override时应落回全局默认保留期`() {
+        val policy = policyOf(
+            EffectiveAgentRetention.defaults().copy(
+                run = Duration.ofDays(90),
+                overrides = listOf(
+                    EffectiveAgentRetention.Override(
+                        projectIds = setOf("compliance-project"),
+                        userIds = emptySet(),
+                        runEvent = null,
+                        run = Duration.ofDays(365),
+                        toolCall = null,
+                        message = null,
+                        session = null,
+                    ),
+                ),
+            ),
+        )
+        val before = Instant.now()
+
+        assertWithin(policy.runExpiry("other-project", "other-user"), before, Duration.ofDays(90))
+    }
+
+    @Test
+    fun `override命中但某一项未覆盖时该项应落回全局默认值`() {
+        val policy = policyOf(
+            EffectiveAgentRetention.defaults().copy(
+                message = Duration.ofDays(180),
+                overrides = listOf(
+                    EffectiveAgentRetention.Override(
+                        projectIds = emptySet(),
+                        userIds = setOf("internal-tester-1"),
+                        runEvent = null,
+                        run = null,
+                        toolCall = null,
+                        message = Duration.ofDays(7),
+                        session = null,
+                    ),
+                ),
+            ),
+        )
+        val before = Instant.now()
+
+        assertWithin(policy.messageExpiry(null, "internal-tester-1"), before, Duration.ofDays(7))
+        assertWithin(
+            policy.sessionExpiry(null, "internal-tester-1"),
+            before,
+            EffectiveAgentRetention.defaults().session,
+        )
+    }
+
+    @Test
+    fun `不传projectId和userId时应等价于全局默认保留期`() {
+        val policy = policyOf(
+            EffectiveAgentRetention.defaults().copy(
+                overrides = listOf(
+                    EffectiveAgentRetention.Override(
+                        projectIds = setOf("compliance-project"),
+                        userIds = emptySet(),
+                        runEvent = null,
+                        run = Duration.ofDays(365),
+                        toolCall = null,
+                        message = null,
+                        session = null,
+                    ),
+                ),
+            ),
+        )
+        val before = Instant.now()
+
+        assertWithin(policy.runExpiry(), before, EffectiveAgentRetention.defaults().run)
+    }
+
     private fun policyOf(retention: EffectiveAgentRetention) =
         AgentRetentionPolicy(EffectiveAgentRuntimeProperties.defaults().copy(retention = retention))
 

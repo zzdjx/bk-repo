@@ -59,7 +59,13 @@ class AguiMessageArchiveHandler(
         )
     }
 
-    fun archiveIncomingUserMessages(input: RunAgentInput, threadId: String, runId: String) {
+    fun archiveIncomingUserMessages(
+        input: RunAgentInput,
+        threadId: String,
+        runId: String,
+        userId: String? = null,
+        projectId: String? = null,
+    ) {
         if (!input.hasMessages()) return
         for (message in input.messages) {
             if (!message.isUserMessage()) continue
@@ -70,11 +76,20 @@ class AguiMessageArchiveHandler(
                 messageId = message.id,
                 textContent = text,
                 structuredContent = toStructuredMap(message.content),
+                userId = userId,
+                projectId = projectId,
             )
         }
     }
 
-    fun onEvent(event: AguiEvent, threadId: String, runId: String, state: State) {
+    fun onEvent(
+        event: AguiEvent,
+        threadId: String,
+        runId: String,
+        state: State,
+        userId: String? = null,
+        projectId: String? = null,
+    ) {
         when (event) {
             is AguiEvent.TextMessageStart -> {
                 state.currentAssistant = State.AssistantBuffer(event.messageId())
@@ -83,14 +98,14 @@ class AguiMessageArchiveHandler(
                 state.currentAssistant?.text?.append(event.delta())
             }
             is AguiEvent.TextMessageEnd -> {
-                finalizeAssistant(threadId, runId, state)
+                finalizeAssistant(threadId, runId, state, userId, projectId)
             }
             is AguiEvent.RunFinished -> {
                 if (event.outcome() is AguiEvent.RunFinishedInterruptOutcome) {
                     state.skipAssistantArchive = true
                     state.currentAssistant = null
                 } else {
-                    finalizeAssistant(threadId, runId, state)
+                    finalizeAssistant(threadId, runId, state, userId, projectId)
                 }
             }
             is AguiEvent.RunError -> {
@@ -102,12 +117,24 @@ class AguiMessageArchiveHandler(
     }
 
     /** SSE 断开且已请求强制归档时，尽力保存已流出的 assistant 文本。 */
-    fun forceFinalizeAssistant(threadId: String, runId: String, state: State) {
+    fun forceFinalizeAssistant(
+        threadId: String,
+        runId: String,
+        state: State,
+        userId: String? = null,
+        projectId: String? = null,
+    ) {
         if (state.skipAssistantArchive) return
-        finalizeAssistant(threadId, runId, state)
+        finalizeAssistant(threadId, runId, state, userId, projectId)
     }
 
-    private fun finalizeAssistant(threadId: String, runId: String, state: State) {
+    private fun finalizeAssistant(
+        threadId: String,
+        runId: String,
+        state: State,
+        userId: String? = null,
+        projectId: String? = null,
+    ) {
         if (state.skipAssistantArchive) return
         val buffer = state.currentAssistant ?: return
         state.currentAssistant = null
@@ -120,6 +147,8 @@ class AguiMessageArchiveHandler(
             textContent = text,
             agentId = agentProperties.name,
             structuredContent = mapOf("type" to "text", "text" to text),
+            userId = userId,
+            projectId = projectId,
         )
     }
 

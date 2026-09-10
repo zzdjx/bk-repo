@@ -77,7 +77,7 @@ class AgentRunRecordServiceImpl(
                     entryAgentId = entryAgentId,
                     triggerType = triggerType,
                     startedAt = startedAt,
-                    expiresAt = retentionPolicy.runExpiry(),
+                    expiresAt = retentionPolicy.runExpiry(projectId, userId),
                 ),
             )
         } catch (ex: Exception) {

@@ -37,13 +37,22 @@ class AgentRetentionPolicy(
     private val properties: EffectiveAgentRuntimeProperties,
 ) {
 
-    fun runEventExpiry(): Instant? = expiryOf(properties.retention.runEvent)
+    /**
+     * [projectId]/[userId] 用于按 `agent.runtime.retention.overrides` 做维度化覆盖，见
+     * [com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention]。调用方拿不到其中某一维时传
+     * `null` 即可——不会报错，只是少一个可能命中的匹配条件，最终落回全局默认保留期。
+     */
+    fun runEventExpiry(projectId: String? = null, userId: String? = null): Instant? =
+        expiryOf(properties.retention.runEventFor(projectId, userId))
 
-    fun runExpiry(): Instant? = expiryOf(properties.retention.run)
+    fun runExpiry(projectId: String? = null, userId: String? = null): Instant? =
+        expiryOf(properties.retention.runFor(projectId, userId))
 
-    fun toolCallExpiry(): Instant? = expiryOf(properties.retention.toolCall)
+    fun toolCallExpiry(projectId: String? = null, userId: String? = null): Instant? =
+        expiryOf(properties.retention.toolCallFor(projectId, userId))
 
-    fun messageExpiry(): Instant? = expiryOf(properties.retention.message)
+    fun messageExpiry(projectId: String? = null, userId: String? = null): Instant? =
+        expiryOf(properties.retention.messageFor(projectId, userId))
 
     /**
      * 会话元数据行的过期时刻。
@@ -51,7 +60,8 @@ class AgentRetentionPolicy(
      * 每次 run 开始都会重算一次并覆盖旧值（见 `AgentSessionDao.touchSession`），所以语义是
      * "最后活跃之后再放多久"——只要用户还在用这个会话，它就不会过期。
      */
-    fun sessionExpiry(): Instant? = expiryOf(properties.retention.session)
+    fun sessionExpiry(projectId: String? = null, userId: String? = null): Instant? =
+        expiryOf(properties.retention.sessionFor(projectId, userId))
 
     private fun expiryOf(retention: Duration): Instant? {
         if (retention.isZero || retention.isNegative) {

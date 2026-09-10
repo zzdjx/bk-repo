@@ -57,6 +57,20 @@ agent:
     #   session: 180d     # 会话元数据，按最后活跃时间滚动续期
     #   task: 7d          # 被 promote 出的后台子任务记录（Redis）
     #   memory: 180d      # 长期记忆（Redis），按最后一次使用滚动续期
+    #   # 按项目/用户维度覆盖上面的全局默认值，只对 run-event/run/tool-call/message/session 生效
+    #   # （task/memory 是 Redis key 级 TTL，见 AgentTaskRepositoryConfiguration/
+    #   # AgentMemoryFilesystemConfiguration，本次未做维度化）。project-ids/user-ids 是 OR 关系，
+    #   # 列表内第一个命中的 override 生效；某一项留空则沿用上面的全局默认值。
+    #   overrides:
+    #     - name: "audit-project-long-retention"   # 仅用于标注用途，不参与匹配
+    #       project-ids: [ "compliance-project" ]
+    #       run: 365d
+    #       tool-call: 365d
+    #       message: 365d
+    #     - name: "internal-tester-short-retention"
+    #       user-ids: [ "internal-tester-1" ]
+    #       message: 7d
+    #       session: 7d
     features:
       frontend-tools-enabled: true
       # 生产应急阀：置为 true 后 Agent 的写能力整体停用（客户端写工具不再注册给模型，

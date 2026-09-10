@@ -64,7 +64,14 @@ class AgentRunEventPipeline(
             terminalStatus = scope.terminalStatus.get(),
             interruptState = scope.interruptState,
         )
-        messageArchiveHandler.onEvent(outbound, scope.threadId, scope.runId, scope.archiveState)
+        messageArchiveHandler.onEvent(
+            outbound,
+            scope.threadId,
+            scope.runId,
+            scope.archiveState,
+            scope.userId,
+            scope.projectId,
+        )
         runEventService.append(scope, outbound)
         sendToPrimaryClient(scope, outbound)
     }
@@ -80,7 +87,13 @@ class AgentRunEventPipeline(
 
     private fun handleCancelIfRequested(scope: AgentRunScope): Boolean {
         if (!activeRunManager.isStopRequested(scope.runId)) return false
-        messageArchiveHandler.forceFinalizeAssistant(scope.threadId, scope.runId, scope.archiveState)
+        messageArchiveHandler.forceFinalizeAssistant(
+            scope.threadId,
+            scope.runId,
+            scope.archiveState,
+            scope.userId,
+            scope.projectId,
+        )
         lifecycleManager.finish(
             scope,
             AgentRunLifecycleManager.FinishOptions(

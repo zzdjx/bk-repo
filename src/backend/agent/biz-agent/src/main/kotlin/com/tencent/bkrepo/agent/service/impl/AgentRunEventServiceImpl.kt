@@ -48,7 +48,7 @@ class AgentRunEventServiceImpl(
             eventData = eventJson,
             terminal = terminal,
             createdAt = now,
-            expiresAt = retentionPolicy.runEventExpiry(),
+            expiresAt = retentionPolicy.runEventExpiry(scope.projectId, scope.userId),
         )
         runEventDao.insertIfAbsent(record)
         replaySinkRegistry.publish(

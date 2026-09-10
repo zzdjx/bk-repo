@@ -65,7 +65,7 @@ class AgentToolCallRecordServiceImpl(
                     argsDigest = argsDigest,
                     decision = initialDecision,
                     calledAt = LocalDateTime.now(),
-                    expiresAt = retentionPolicy.toolCallExpiry(),
+                    expiresAt = retentionPolicy.toolCallExpiry(projectId, userId),
                 ),
             )
         } catch (ex: Exception) {

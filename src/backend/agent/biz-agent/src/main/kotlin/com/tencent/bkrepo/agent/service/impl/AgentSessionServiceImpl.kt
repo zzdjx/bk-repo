@@ -106,7 +106,12 @@ class AgentSessionServiceImpl(
 
     override fun assertActiveSession(userId: String, projectId: String, threadId: String) {
         val session = agentSessionDao.findByThreadId(threadId)
-            ?: agentSessionDao.insertSession(threadId, userId, projectId, retentionPolicy.sessionExpiry())
+            ?: agentSessionDao.insertSession(
+                threadId,
+                userId,
+                projectId,
+                retentionPolicy.sessionExpiry(projectId, userId),
+            )
         if (session.status != AgentSessionStatus.ACTIVE) {
             throw NotFoundException(CommonMessageCode.RESOURCE_NOT_FOUND, "Thread[$threadId]")
         }
@@ -116,8 +121,13 @@ class AgentSessionServiceImpl(
         agentSessionStore.bindSession(userId, projectId, threadId)
     }
 
-    override fun touchSession(threadId: String, runId: String) {
-        agentSessionDao.touchSession(threadId, runId, LocalDateTime.now(), retentionPolicy.sessionExpiry())
+    override fun touchSession(threadId: String, runId: String, userId: String?, projectId: String?) {
+        agentSessionDao.touchSession(
+            threadId,
+            runId,
+            LocalDateTime.now(),
+            retentionPolicy.sessionExpiry(projectId, userId),
+        )
     }
 
     private fun insertSessionRecord(
@@ -125,7 +135,12 @@ class AgentSessionServiceImpl(
         userId: String,
         projectId: String,
     ): AgentSessionCreateResult {
-        val session = agentSessionDao.insertSession(threadId, userId, projectId, retentionPolicy.sessionExpiry())
+        val session = agentSessionDao.insertSession(
+            threadId,
+            userId,
+            projectId,
+            retentionPolicy.sessionExpiry(projectId, userId),
+        )
         if (session.status != AgentSessionStatus.ACTIVE) {
             throw NotFoundException(CommonMessageCode.RESOURCE_NOT_FOUND, "Thread[$threadId]")
         }

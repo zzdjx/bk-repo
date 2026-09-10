@@ -229,6 +229,55 @@ class AgentPropertiesBindingTest {
     }
 
     @Test
+    fun `保留期覆盖默认为空且不影响全局默认值`() {
+        val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties()).retention
+
+        assertTrue(defaults.overrides.isEmpty())
+        assertEquals(AgentRuntimeProperties.DEFAULT_RUN_RETENTION, defaults.runFor("any-project", "any-user"))
+    }
+
+    @Test
+    fun `保留期覆盖应按项目或用户命中且未覆盖字段落回全局默认值`() {
+        val retention = AgentRuntimePropertiesResolver.resolve(
+            AgentRuntimeProperties().apply {
+                retention = AgentRuntimeProperties.Retention(
+                    overrides = listOf(
+                        AgentRuntimeProperties.Retention.Override(
+                            name = "audit-project-long-retention",
+                            projectIds = setOf("compliance-project"),
+                            run = java.time.Duration.ofDays(365),
+                            toolCall = java.time.Duration.ofDays(365),
+                        ),
+                        AgentRuntimeProperties.Retention.Override(
+                            name = "internal-tester-short-retention",
+                            userIds = setOf("internal-tester-1"),
+                            message = java.time.Duration.ofDays(7),
+                        ),
+                    ),
+                )
+            },
+        ).retention
+
+        // 项目命中：run/toolCall 按 override 生效，未覆盖的 message 落回全局默认值
+        assertEquals(java.time.Duration.ofDays(365), retention.runFor("compliance-project", "any-user"))
+        assertEquals(java.time.Duration.ofDays(365), retention.toolCallFor("compliance-project", null))
+        assertEquals(
+            AgentRuntimeProperties.DEFAULT_MESSAGE_RETENTION,
+            retention.messageFor("compliance-project", null),
+        )
+
+        // 用户命中：message 按 override 生效，未覆盖的 run 落回全局默认值
+        assertEquals(java.time.Duration.ofDays(7), retention.messageFor(null, "internal-tester-1"))
+        assertEquals(
+            AgentRuntimeProperties.DEFAULT_RUN_RETENTION,
+            retention.runFor(null, "internal-tester-1"),
+        )
+
+        // 两者都不命中：全部落回全局默认值
+        assertEquals(AgentRuntimeProperties.DEFAULT_RUN_RETENTION, retention.runFor("other-project", "other-user"))
+    }
+
+    @Test
     fun `熔断默认应开启且并发限制默认不限制`() {
         val defaults = AgentLlmPropertiesResolver.resolve(AgentLlmProperties())
 

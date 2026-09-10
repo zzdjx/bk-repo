@@ -209,7 +209,7 @@ class AgentRunOrchestrator(
             entryAgentId = properties.name,
             triggerType = triggerType,
         )
-        agentSessionService.touchSession(prepared.threadId, prepared.runId)
+        agentSessionService.touchSession(prepared.threadId, prepared.runId, userId, projectId)
         agentSessionStore.touchSessionOwner(userId, projectId, prepared.threadId)
         activeRunManager.bindActiveRun(runScope, prepared.runId)
         replaySinkRegistry.open(prepared.runId)
@@ -220,7 +220,13 @@ class AgentRunOrchestrator(
         chatContext: AgentChatContext,
     ): AgentRunScope {
         val archiveState = AguiMessageArchiveHandler.State()
-        messageArchiveHandler.archiveIncomingUserMessages(prepared.input, prepared.threadId, prepared.runId)
+        messageArchiveHandler.archiveIncomingUserMessages(
+            prepared.input,
+            prepared.threadId,
+            prepared.runId,
+            chatContext.userId,
+            chatContext.projectId,
+        )
         val interruptState = AguiInterruptTracker.State()
         var ctx = chatContext.toRuntimeContext()
         if (prepared.permissionConfirmResults.isNotEmpty()) {

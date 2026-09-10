@@ -34,16 +34,23 @@ package com.tencent.bkrepo.agent.service
  */
 interface AgentMessageArchiveService {
 
-    /** 归档用户消息；[messageId] 来自客户端 [RunAgentInput.messages] 的 canonical id。 */
+    /**
+     * 归档用户消息；[messageId] 来自客户端 [RunAgentInput.messages] 的 canonical id。
+     *
+     * [userId]/[projectId] 可选：传入时用于按 `agent.runtime.retention.overrides` 匹配消息保留期覆盖，
+     * 不传（`null`）时落回全局默认保留期。
+     */
     fun archiveUserMessage(
         threadId: String,
         runId: String,
         messageId: String,
         textContent: String,
         structuredContent: Map<String, Any>? = null,
+        userId: String? = null,
+        projectId: String? = null,
     )
 
-    /** 归档 assistant 消息；[messageId] 来自 AG-UI TEXT_MESSAGE_START。 */
+    /** 归档 assistant 消息；[messageId] 来自 AG-UI TEXT_MESSAGE_START。语义同 [archiveUserMessage]。 */
     fun archiveAssistantMessage(
         threadId: String,
         runId: String,
@@ -51,5 +58,7 @@ interface AgentMessageArchiveService {
         textContent: String,
         agentId: String? = null,
         structuredContent: Map<String, Any>? = null,
+        userId: String? = null,
+        projectId: String? = null,
     )
 }

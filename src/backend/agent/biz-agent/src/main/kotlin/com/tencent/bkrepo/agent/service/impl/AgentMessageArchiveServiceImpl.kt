@@ -55,6 +55,8 @@ class AgentMessageArchiveServiceImpl(
         messageId: String,
         textContent: String,
         structuredContent: Map<String, Any>?,
+        userId: String?,
+        projectId: String?,
     ) {
         if (textContent.isBlank()) return
         val inserted = archiveMessage(
@@ -64,6 +66,8 @@ class AgentMessageArchiveServiceImpl(
             role = AgentMessageRole.USER,
             textContent = textContent,
             structuredContent = structuredContent,
+            userId = userId,
+            projectId = projectId,
         )
         if (!inserted) return
         try {
@@ -84,6 +88,8 @@ class AgentMessageArchiveServiceImpl(
         textContent: String,
         agentId: String?,
         structuredContent: Map<String, Any>?,
+        userId: String?,
+        projectId: String?,
     ) {
         archiveMessage(
             threadId = threadId,
@@ -93,6 +99,8 @@ class AgentMessageArchiveServiceImpl(
             textContent = textContent,
             agentId = agentId,
             structuredContent = structuredContent,
+            userId = userId,
+            projectId = projectId,
         )
     }
 
@@ -104,6 +112,8 @@ class AgentMessageArchiveServiceImpl(
         textContent: String,
         agentId: String? = null,
         structuredContent: Map<String, Any>? = null,
+        userId: String? = null,
+        projectId: String? = null,
     ): Boolean {
         if (textContent.isBlank()) return false
         val message = TAgentMessage(
@@ -115,7 +125,7 @@ class AgentMessageArchiveServiceImpl(
             structuredContent = structuredContent,
             agentId = agentId,
             createdAt = LocalDateTime.now(),
-            expiresAt = retentionPolicy.messageExpiry(),
+            expiresAt = retentionPolicy.messageExpiry(projectId, userId),
         )
         return insertWithRetry(message)
     }

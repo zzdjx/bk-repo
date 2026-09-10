@@ -48,6 +48,11 @@ interface AgentSessionService {
      */
     fun assertActiveSession(userId: String, projectId: String, threadId: String)
 
-    /** 记录最近一次 runId，并刷新会话 updatedAt（run 链路内部调用）。 */
-    fun touchSession(threadId: String, runId: String)
+    /**
+     * 记录最近一次 runId，并刷新会话 updatedAt（run 链路内部调用）。
+     *
+     * [userId]/[projectId] 可选：传入时用于按 `agent.runtime.retention.overrides` 匹配会话保留期覆盖，
+     * 不传（`null`）时落回全局默认保留期，不影响 touchSession 的核心行为。
+     */
+    fun touchSession(threadId: String, runId: String, userId: String? = null, projectId: String? = null)
 }
