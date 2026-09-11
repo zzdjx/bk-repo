@@ -6,6 +6,7 @@ import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.preview.constant.PreviewMessageCode
 import com.tencent.bkrepo.preview.pojo.share.ArtifactShareInfo
 import com.tencent.bkrepo.preview.pojo.share.ArtifactShareOpenInfo
+import com.tencent.bkrepo.preview.service.share.ArtifactShareNativePdfPreview
 import com.tencent.bkrepo.preview.service.share.ArtifactShareService
 import io.mockk.every
 import io.mockk.mockk
@@ -23,11 +24,12 @@ import org.springframework.mock.web.MockHttpServletResponse
 class ArtifactShareControllerTest {
 
     private val artifactShareService = mockk<ArtifactShareService>()
+    private val nativePdfPreview = mockk<ArtifactShareNativePdfPreview>(relaxed = true)
     private lateinit var controller: ArtifactShareController
 
     @BeforeEach
     fun setUp() {
-        controller = ArtifactShareController(artifactShareService)
+        controller = ArtifactShareController(artifactShareService, nativePdfPreview)
     }
 
     @Test

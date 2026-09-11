@@ -165,7 +165,9 @@
                     } else if (this.fileKind === 'jsx') {
                         this.jsxSrcdoc = buildJsxSandboxSrcdoc(this.normalizedSource)
                     } else if (this.fileKind === 'html') {
-                        this.htmlSrcdoc = buildHtmlSandboxSrcdoc(this.normalizedSource)
+                        this.htmlSrcdoc = buildHtmlSandboxSrcdoc(this.normalizedSource, {
+                            resolveAssetUrl: this.resolveAssetUrl
+                        })
                     }
                 } catch (error) {
                     this.previewError = error && error.message ? error.message : String(error)

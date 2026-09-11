@@ -89,4 +89,16 @@ class DrivePreviewDownloadServiceTest {
         }
         assertEquals(PreviewMessageCode.PREVIEW_FILE_NOT_FOUND, exception.messageCode)
     }
+
+    @Test
+    fun `getFileSize returns drive block size`() {
+        every { driveFileReadService.getFileBlockInfo("p", "r", "/a.mp4") } returns DriveFileBlockInfo(
+            fullPath = "/a.mp4",
+            fileName = "a.mp4",
+            size = 524L * 1024 * 1024,
+            blocks = emptyList(),
+        )
+
+        assertEquals(524L * 1024 * 1024, service.getFileSize("p", "r", "/a.mp4"))
+    }
 }

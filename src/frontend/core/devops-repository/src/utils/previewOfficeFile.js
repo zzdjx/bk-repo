@@ -18,15 +18,19 @@ export const PREVIEW_TOKEN_STORAGE_KEY = 'previewToken'
  *   2) 登录态降权：已登录用户的请求被误打 Temporary 头，反而走 token 校验链路；
  *   3) 与后端 TemporaryTokenAuthHandler 的严格路径校验冲突，正常文件 403/404。
  */
-export function capturePreviewTokenFromUrl () {
+export function capturePreviewTokenFromUrl (explicitToken) {
     try {
-        const search = window.location.search || ''
-        const params = new URLSearchParams(search)
-        const token = params.get('token')
-        if (token && token.length > 0) {
+        const hash = window.location.hash || ''
+        const hashQuery = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : ''
+        const token = String(
+            explicitToken ||
+            new URLSearchParams(window.location.search || '').get('token') ||
+            new URLSearchParams(hashQuery).get('token') ||
+            ''
+        )
+        if (token) {
             window.sessionStorage.setItem(PREVIEW_TOKEN_STORAGE_KEY, token)
         } else {
-            // URL 未带 token：清空残留，确保本次预览走登录态而非旧 token
             window.sessionStorage.removeItem(PREVIEW_TOKEN_STORAGE_KEY)
         }
     } catch (e) {
@@ -126,11 +130,12 @@ export function getPreviewRemoteOfficeFileInfo (extraParam) {
     })
 }
 
-export function customizePreviewLocalOfficeFile (projectId, repoName, fullPath) {
+export function customizePreviewLocalOfficeFile (projectId, repoName, fullPath, extraQuery = {}) {
     const url = projectId + '/' + repoName + fullPath
     return previewAxios({
         url: BASE_URL + 'web/preview/api/file/onlinePreview/' + url,
         method: 'get',
+        params: extraQuery,
         // 注意，此处需要设置下载的文件的返回类型为二进制，即 blob
         responseType: 'blob',
         withCredentials: true,
@@ -139,12 +144,13 @@ export function customizePreviewLocalOfficeFile (projectId, repoName, fullPath) 
     })
 }
 
-export function customizePreviewRemoteOfficeFile (extraParam) {
+export function customizePreviewRemoteOfficeFile (extraParam, extraQuery = {}) {
     return previewAxios({
         url: BASE_URL + 'web/preview/api/file/onlinePreview/',
         method: 'get',
         params: {
-            extraParam: extraParam
+            extraParam: extraParam,
+            ...extraQuery
         },
         // 注意，此处需要设置下载的文件的返回类型为二进制，即 blob
         responseType: 'blob',
@@ -154,7 +160,42 @@ export function customizePreviewRemoteOfficeFile (extraParam) {
     })
 }
 
+export function encodePreviewPath (fullPath) {
+    return String(fullPath || '').split('/').map(segment => encodeURIComponent(segment)).join('/')
+}
+
 export function buildLocalOnlinePreviewUrl (projectId, repoName, fullPath) {
-    const url = projectId + '/' + repoName + fullPath
-    return appendPreviewTokenToUrl(BASE_URL + 'web/preview/api/file/onlinePreview/' + url)
+    const path = encodeURIComponent(projectId) + '/' + encodeURIComponent(repoName) + encodePreviewPath(
+        fullPath.startsWith('/') ? fullPath : '/' + fullPath
+    )
+    return appendPreviewTokenToUrl(BASE_URL + 'web/preview/api/file/onlinePreview/' + path)
+}
+
+export function buildRemoteOnlinePreviewUrl (extraParam) {
+    const url = BASE_URL + 'web/preview/api/file/onlinePreview/?extraParam=' + encodeURIComponent(extraParam)
+    return appendPreviewTokenToUrl(url)
+}
+
+/**
+ * 探测 onlinePreview 是否可访问（含 token / 登录态）。206 表示 Range 命中。
+ */
+export function probeOnlinePreviewUrl (url) {
+    return fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Range: 'bytes=0-0' }
+    }).then(res => {
+        if (!res.ok && res.status !== 206) {
+            throw new Error(`preview probe failed: ${res.status}`)
+        }
+        return url
+    })
+}
+
+/**
+ * 在当前浏览上下文打开 onlinePreview URL。
+ * 不要用 blob URL：Chrome 阅读器会把 blob UUID 显示成文件名，且「演示」依赖顶层文档。
+ */
+export function openPreviewUrlInCurrentFrame (url) {
+    window.location.replace(url)
 }

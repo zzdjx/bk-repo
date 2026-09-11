@@ -17,6 +17,8 @@ class ArtifactSharePreviewPageTest {
         assertTrue(html.contains("src=\"https://example.com/ui/p/filePreview?token=ab&amp;x=1\""))
         assertTrue(html.contains("<title>BKCI介绍</title>"))
         assertTrue(html.contains("<iframe"))
+        assertTrue(html.contains("allow=\"autoplay; fullscreen; encrypted-media; picture-in-picture\""))
+        assertFalse(html.contains("allowfullscreen"))
     }
 
     @Test

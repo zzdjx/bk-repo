@@ -17,6 +17,7 @@ import com.tencent.bkrepo.preview.pojo.share.ArtifactShareSummary
 import com.tencent.bkrepo.preview.pojo.share.ArtifactShareRenameRequest
 import com.tencent.bkrepo.preview.pojo.share.ArtifactShareUpsertRequest
 import com.tencent.bkrepo.preview.service.share.ArtifactShareErrorPage
+import com.tencent.bkrepo.preview.service.share.ArtifactShareNativePdfPreview
 import com.tencent.bkrepo.preview.service.share.ArtifactSharePreviewPage
 import com.tencent.bkrepo.preview.service.share.ArtifactShareService
 import io.swagger.v3.oas.annotations.Operation
@@ -44,6 +45,7 @@ import org.springframework.web.bind.annotation.RestController
 @Principal(PrincipalType.GENERAL)
 class ArtifactShareController(
     private val artifactShareService: ArtifactShareService,
+    private val artifactShareNativePdfPreview: ArtifactShareNativePdfPreview,
 ) {
 
     @Operation(summary = "创建或更新作品分享")
@@ -129,8 +131,8 @@ class ArtifactShareController(
         return ResponseBuilder.success(artifactShareService.open(SecurityUtils.getUserId(), shareId))
     }
 
-    @Operation(summary = "短链打开：校验权限后返回内嵌预览页，地址栏保持 /a/{shareId}")
-    @GetMapping("/a/{shareId}", produces = [MediaType.TEXT_HTML_VALUE])
+    @Operation(summary = "短链打开：pdf 在当前短链上输出 PDF，其它类型返回内嵌预览页，地址栏保持 /a/{shareId}")
+    @GetMapping("/a/{shareId}")
     fun openRedirect(
         @PathVariable shareId: String,
         response: HttpServletResponse,
@@ -138,8 +140,8 @@ class ArtifactShareController(
         writeOpenPage({ artifactShareService.open(SecurityUtils.getUserId(), shareId) }, response)
     }
 
-    @Operation(summary = "短码打开：校验权限后返回内嵌预览页，地址栏保持 /share/{shortShareId}")
-    @GetMapping("/share/{shortShareId}", produces = [MediaType.TEXT_HTML_VALUE])
+    @Operation(summary = "短码打开：pdf 在当前短链上输出 PDF，其它类型返回内嵌预览页，地址栏保持 /share/{shortShareId}")
+    @GetMapping("/share/{shortShareId}")
     fun openByShortShareId(
         @PathVariable shortShareId: String,
         response: HttpServletResponse,
@@ -176,6 +178,10 @@ class ArtifactShareController(
     }
 
     private fun writePreviewPage(openInfo: ArtifactShareOpenInfo, response: HttpServletResponse) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store")
+        if (artifactShareNativePdfPreview.writeIfApplicable(openInfo)) {
+            return
+        }
         val title = openInfo.share.artifactName?.trim().orEmpty()
         writeHtml(response, HttpServletResponse.SC_OK, ArtifactSharePreviewPage.render(openInfo.previewUrl, title))
     }

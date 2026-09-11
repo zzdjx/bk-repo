@@ -16,17 +16,43 @@ class MediaPreviewContentTypeTest {
         assertEquals("audio/wav", MediaPreviewContentType.fromSuffix("wav"))
         assertEquals("audio/ogg", MediaPreviewContentType.fromSuffix("ogg"))
         assertEquals("audio/ogg", MediaPreviewContentType.fromSuffix("oga"))
-        assertEquals("audio/mp4", MediaPreviewContentType.fromSuffix("m4a"))
+        assertEquals("video/mp4", MediaPreviewContentType.fromSuffix("m4v"))
+        assertEquals("video/quicktime", MediaPreviewContentType.fromSuffix("mov"))
+        assertEquals("video/x-matroska", MediaPreviewContentType.fromSuffix("mkv"))
+        assertEquals("video/x-flv", MediaPreviewContentType.fromSuffix("flv"))
+        assertEquals("audio/aac", MediaPreviewContentType.fromSuffix("aac"))
+        assertEquals("application/pdf", MediaPreviewContentType.fromSuffix("pdf"))
+        assertEquals(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            MediaPreviewContentType.fromSuffix("pptx")
+        )
+        assertEquals(
+            "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+            MediaPreviewContentType.fromSuffix("ppsx")
+        )
+        assertEquals(
+            "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+            MediaPreviewContentType.fromSuffix("pptm")
+        )
+        assertEquals(
+            "application/vnd.ms-powerpoint",
+            MediaPreviewContentType.fromSuffix("ppt")
+        )
     }
 
     @Test
     fun `suffix matching is case insensitive`() {
         assertEquals("video/mp4", MediaPreviewContentType.fromSuffix("MP4"))
+        assertEquals("application/pdf", MediaPreviewContentType.fromSuffix("PDF"))
+        assertEquals(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            MediaPreviewContentType.fromSuffix("PPTX")
+        )
     }
 
     @Test
     fun `unknown suffix has no media preview content type`() {
-        assertNull(MediaPreviewContentType.fromSuffix("flv"))
-        assertNull(MediaPreviewContentType.fromSuffix("mkv"))
+        assertNull(MediaPreviewContentType.fromSuffix("exe"))
+        assertNull(MediaPreviewContentType.fromSuffix("docx"))
     }
 }

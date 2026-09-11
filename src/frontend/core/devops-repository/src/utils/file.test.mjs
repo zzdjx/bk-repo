@@ -9,11 +9,14 @@ import {
     isHtmlFile,
     isHtmlType,
     isJsx,
+    isLivePptx,
     isMarkdown,
     isMedia,
     isMediaAudio,
     isMediaVideo,
+    isNativePdfPreview,
     isOutDisplayType,
+    isPdf,
     isPic,
     isText,
     isXmind
@@ -121,6 +124,11 @@ test('preview type checks are case insensitive', () => {
     assert.equal(isJsx('src/APP.JSX'), 'jsx')
     assert.equal(isHtmlFile('web/INDEX.HTML'), 'html')
     assert.equal(isXmind('docs/MAP.XMIND'), 'xmind')
+    assert.equal(isLivePptx('talk/DECK.PPTX'), 'pptx')
+    assert.equal(isLivePptx('talk/show.ppsx'), 'ppsx')
+    assert.equal(isLivePptx('talk/macro.pptm'), 'pptm')
+    assert.equal(isLivePptx('talk/legacy.ppt'), 'ppt')
+    assert.equal(isLivePptx('talk/legacy.PPT'), 'ppt')
     assert.equal(isDisplayType('reports/REPORT.PDF'), 'pdf')
     assert.equal(isOutDisplayType('images/LOGO.PNG'), 'png')
 })
@@ -143,4 +151,23 @@ test('preview type checks match the complete suffix only', () => {
     // outsideFilePreview 会直接使用 getPreviewInfo 返回的 suffix 字段。
     assert.equal(isPic('PNG'), 'png')
     assert.equal(isExcel('XLSX'), 'xlsx')
+})
+
+test('isPdf recognizes native pdf suffix', () => {
+    assert.equal(isPdf('report.pdf'), true)
+    assert.equal(isPdf('docs/Report.PDF'), true)
+    assert.equal(isPdf('pdf'), true)
+    assert.equal(isPdf('notes.txt'), false)
+    assert.equal(isPdf('slides.pptx'), false)
+    assert.equal(isPdf('notpdf'), false)
+})
+
+test('isNativePdfPreview is only native pdf', () => {
+    assert.equal(isNativePdfPreview('report.pdf'), true)
+    assert.equal(Boolean(isNativePdfPreview('slides.pptx')), false)
+    assert.equal(Boolean(isNativePdfPreview('deck.ppt')), false)
+    assert.equal(Boolean(isNativePdfPreview('paper.docx')), false)
+    assert.equal(Boolean(isNativePdfPreview('table.xlsx')), false)
+    assert.equal(Boolean(isNativePdfPreview('notes.txt')), false)
+    assert.equal(Boolean(isNativePdfPreview('page.html')), false)
 })

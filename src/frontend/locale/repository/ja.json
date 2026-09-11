@@ -922,6 +922,11 @@
   "previewMediaPause": "一時停止",
   "previewMediaProgress": "再生位置",
   "previewMediaScrub": "シーク",
+  "pptxLivePrev": "前のスライド",
+  "pptxLiveNext": "次へ",
+  "pptxLivePresent": "プレゼン",
+  "pptxLiveHint": "スペース / クリックでアニメーションを進める",
+  "pptxLivePage": "{0}/{1} ページ",
   "helps": {
     "documentation": "製品ドキュメント",
     "releaseNote": "リリースノート",

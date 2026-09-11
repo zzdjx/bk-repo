@@ -104,9 +104,10 @@ class FileHandlerService(
     fun getFileTemplate(fileAttribute: FileAttribute): String = with(fileAttribute) {
         when {
             isHtmlView -> FilePreview.EXEL_FILE_PREVIEW_PAGE
-            type?.name == FileType.OFFICE.name -> when (suffix!!.lowercase()) {
-                "xlsx", "xls", "csv" -> FilePreview.XLSX_FILE_PREVIEW_PAGE
-                else   -> FilePreview.PDF_FILE_PREVIEW_PAGE
+            type?.name == FileType.OFFICE.name -> when {
+                suffix?.lowercase() in setOf("xlsx", "xls", "csv") -> FilePreview.XLSX_FILE_PREVIEW_PAGE
+                LivePptxPreview.shouldSkipOfficeConvert(this) -> FilePreview.PPTX_FILE_PREVIEW_PAGE
+                else -> FilePreview.PDF_FILE_PREVIEW_PAGE
             }
             type?.name == FileType.PDF.name -> FilePreview.PDF_FILE_PREVIEW_PAGE
             type?.name == FileType.SIMTEXT.name -> FilePreview.TXT_FILE_PREVIEW_PAGE
@@ -123,15 +124,16 @@ class FileHandlerService(
     }
 
     /**
-     * 获取文件属性
-     *
-     * @param params 原始参数
-     * @return 文件属性
+     * 远程预览入口：只按 URL 拉文件。extraParam 里的仓库坐标一律丢掉，避免走到 bkrepo 读节点。
      */
     fun getFileAttribute(params: String): FileAttribute {
         val attribute = params.readJsonString<FileAttribute>()
+        attribute.projectId = null
+        attribute.repoName = null
+        attribute.artifactUri = null
         checkRequest(attribute)
         adjustProperties(attribute)
+        attribute.storageType = 1
         return attribute
     }
 
@@ -165,14 +167,11 @@ class FileHandlerService(
         isCompressFile: Boolean
     ): String {
         var convertFileName = when (type) {
-            FileType.OFFICE -> {
-                if (suffix.equals("xlsx", ignoreCase = true)) {
-                    originFileName
-                } else if (suffix.equals("xls", ignoreCase = true) || suffix.equals("csv", ignoreCase = true)) {
+            FileType.OFFICE -> when {
+                suffix.equals("xlsx", ignoreCase = true) || LivePptxPreview.isSupported(suffix) -> originFileName
+                suffix.equals("xls", ignoreCase = true) || suffix.equals("csv", ignoreCase = true) ->
                     convertFilePrefixName + "xlsx"
-                } else {
-                    convertFilePrefixName + if (isHtmlView) "html" else "pdf"
-                }
+                else -> convertFilePrefixName + if (isHtmlView) "html" else "pdf"
             }
             FileType.PDF -> originFileName
             FileType.MEDIACONVERT -> convertFilePrefixName + "mp4"
@@ -275,6 +274,43 @@ class FileHandlerService(
             this.convertFileName = convertFileName
             this.isHtmlView = isHtmlView
         }
+    }
+
+    /**
+     * `convert=pdf` 时强制 LibreOffice 转 PDF，并把输出名改回 .pdf。
+     */
+    fun applyConvertQuery(fileAttribute: FileAttribute, convert: String?) {
+        if (!convert.equals("pdf", ignoreCase = true)) {
+            return
+        }
+        fileAttribute.forcePdfConvert = true
+        val suffix = fileAttribute.suffix ?: return
+        if (!LivePptxPreview.isSupported(suffix)) {
+            return
+        }
+        val originFileName = fileAttribute.fileName ?: return
+        val dot = originFileName.lastIndexOf('.')
+        if (dot <= 0) {
+            return
+        }
+        val prefix = originFileName.substring(0, dot) + suffix + "."
+        fileAttribute.convertFileName = prefix + "pdf"
+        fileAttribute.outFilePath = generateOutputFilePath(fileAttribute.convertFileName)
+    }
+
+    /**
+     * `part=ppt/media/...` 时只流出 OOXML 包内音视频，供 `<video>` / `<audio>` Range 加载。
+     */
+    fun applyEmbeddedPartQuery(fileAttribute: FileAttribute, part: String?) {
+        if (part.isNullOrBlank()) {
+            return
+        }
+        if (fileAttribute.storageType != 0 || !LivePptxPreview.isOoxml(fileAttribute.suffix)) {
+            throw PreviewInvalidException(PreviewMessageCode.PREVIEW_PARAMETER_INVALID, "part")
+        }
+        val normalized = PptxZipMedia.normalizePartPath(part)
+            ?: throw PreviewInvalidException(PreviewMessageCode.PREVIEW_PARAMETER_INVALID, "part")
+        fileAttribute.embeddedPartPath = normalized
     }
 
     // 生成输出文件路径，规范化后限制在预览根目录内

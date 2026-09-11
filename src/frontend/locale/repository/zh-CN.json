@@ -923,6 +923,11 @@
     "previewMediaPause": "暂停",
     "previewMediaProgress": "播放进度",
     "previewMediaScrub": "进度条",
+    "pptxLivePrev": "上一页",
+    "pptxLiveNext": "下一步",
+    "pptxLivePresent": "演示",
+    "pptxLiveHint": "空格 / 点击画布推进动画",
+    "pptxLivePage": "第 {0}/{1} 页",
     "helps": {
         "documentation": "产品文档",
         "releaseNote": "版本日志",

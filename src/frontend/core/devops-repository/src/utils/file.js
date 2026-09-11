@@ -21,6 +21,8 @@ const formatType = [
     'xlsm',
     'ppt',
     'pptx',
+    'pptm',
+    'ppsx',
     'vsd',
     'rtf',
     'odt',
@@ -81,6 +83,13 @@ const htmlFileType = [
 
 const xmindType = [
     'xmind'
+]
+
+const livePptxType = [
+    'pptx',
+    'pptm',
+    'ppsx',
+    'ppt'
 ]
 
 const compressedType = [
@@ -202,6 +211,10 @@ export function isXmind (param) {
     return findFileType(param, xmindType)
 }
 
+export function isLivePptx (param) {
+    return findFileType(param, livePptxType)
+}
+
 export function isCompressed (param) {
     return findFileType(param, compressedType)
 }
@@ -216,6 +229,17 @@ export function isMediaAudio (param) {
 
 export function isMedia (param) {
     return isMediaVideo(param) || isMediaAudio(param)
+}
+
+export function isPdf (param) {
+    return getFileSuffix(param) === 'pdf'
+}
+
+/**
+ * 走浏览器内置 PDF 阅读器：仅原生 PDF。PPT 等转换结果仍用 PDF.js。
+ */
+export function isNativePdfPreview (param) {
+    return Boolean(isPdf(param))
 }
 
 // 判断可预览的类型(不包括pic)

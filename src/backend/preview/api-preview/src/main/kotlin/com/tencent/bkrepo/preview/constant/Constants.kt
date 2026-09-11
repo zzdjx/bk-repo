@@ -40,6 +40,10 @@ const val PREVIEW_TMP_FILE_SAVE_PATH = BKREPO_PREFIX + "PREVIEW_TMP_FILE_SAVE_PA
 // 是否把制品流保存至文件
 const val PREVIEW_ARTIFACT_TO_FILE = BKREPO_PREFIX + "PREVIEW_ARTIFACT_TO_FILE"
 /**
- * 媒体预览强制响应 Content-Type。
+ * 内联预览强制响应 Content-Type（媒体、PDF）。
  */
 const val PREVIEW_RESPONSE_CONTENT_TYPE = BKREPO_PREFIX + "PREVIEW_RESPONSE_CONTENT_TYPE"
+/**
+ * 内联预览 Content-Disposition 文件名。短链 URL 最后一段是 shareId，下载名仍靠该头。
+ */
+const val PREVIEW_RESPONSE_FILENAME = BKREPO_PREFIX + "PREVIEW_RESPONSE_FILENAME"

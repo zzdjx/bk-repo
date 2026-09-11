@@ -31,6 +31,13 @@
             />
         </div>
         <div v-if="xmindShow" ref="container" class="xmind-preview-container"></div>
+        <pptx-live-preview
+            v-if="pptxShow"
+            :bytes="pptxBytes"
+            :file-name="filePath"
+            :media-base-url="pptxMediaBaseUrl"
+            @error="fallbackPptxToPdf"
+        />
         <media-preview
             v-if="mediaShow"
             :src="mediaUrl"
@@ -65,10 +72,13 @@
         customizePreviewLocalOfficeFile,
         customizePreviewRemoteOfficeFile,
         getPreviewLocalOfficeFileInfo, getPreviewRemoteOfficeFileInfo,
-        buildLocalOnlinePreviewUrl
+        buildLocalOnlinePreviewUrl,
+        buildRemoteOnlinePreviewUrl,
+        probeOnlinePreviewUrl,
+        openPreviewUrlInCurrentFrame
     } from '@repository/utils/previewOfficeFile'
     import { Base64 } from 'js-base64'
-    import { isCode, isExcel, isFormatType, isHtmlFile, isHtmlType, isJsx, isMarkdown, isMedia, isMediaVideo, isPic, isText, isXmind } from '@repository/utils/file'
+    import { isCode, isExcel, isFormatType, isHtmlFile, isHtmlType, isJsx, isLivePptx, isMarkdown, isMedia, isMediaVideo, isNativePdfPreview, isPic, isText, isXmind } from '@repository/utils/file'
     import { createAssetResolver, parsePreviewContext, resolvePreviewViewMode } from '@repository/utils/markdownJsxPreview'
     import { buildImageViewerOptions, isPurePreviewEnabled } from '@repository/utils/imagePreview'
     import { createOrUpdateXmindViewer, destroyXmindViewer } from '@repository/utils/xmindPreview'
@@ -104,7 +114,12 @@
 
     export default {
         name: 'FilePreview',
-        components: { VueOfficeExcel, SourcePreviewTabs, MediaPreview },
+        components: {
+            VueOfficeExcel,
+            SourcePreviewTabs,
+            MediaPreview,
+            PptxLivePreview: () => import('@repository/components/FilePreview/PptxLivePreview')
+        },
         mixins: [excelEnhanceMixin],
         props: {
             repoType: String,
@@ -127,24 +142,27 @@
                 hasError: false,
                 pageUrl: '',
                 showFrame: false,
+                pdfShow: false,
+                pdfPages: [],
+                pdfWidth: '',
+                pdfSrc: '',
+                pdfDoc: '',
+                pdfScale: 1.5,
                 loading: false,
                 csvShow: false,
                 imgShow: false,
-                pdfShow: false,
                 richTextShow: false,
                 richTextSource: '',
                 richTextFilePath: '',
                 xmindShow: false,
+                pptxShow: false,
+                pptxBytes: null,
+                pdfObjectUrl: '',
                 mediaShow: false,
                 mediaUrl: '',
                 mediaKind: 'video',
                 mediaDecodeError: false,
                 imgUrl: '',
-                pdfPages: [], // 页数
-                pdfWidth: '', // 宽度
-                pdfSrc: '', // 地址
-                pdfDoc: '', // 文档内容
-                pdfScale: 1.5, // 放大倍数
                 repoTypeEnum: [
                     'local',
                     'remote'
@@ -175,11 +193,23 @@
                     query: this.$route.query,
                     extraParam
                 })
+            },
+            pptxMediaBaseUrl () {
+                // 仅仓库预览支持 part= 流媒体。远程入口 storageType=1，part 会 400；
+                // 基址为空时 player 不剥离音视频，改用已下载 ZIP 包内媒体。
+                try {
+                    if (this.repoType === 'local') {
+                        return buildLocalOnlinePreviewUrl(this.projectId, this.repoName, '/' + this.filePath)
+                    }
+                } catch (e) {
+                    return ''
+                }
+                return ''
             }
         },
         async created () {
             // 需求 5.6：从 URL ?token=... 解析预览 token 并写入 sessionStorage（幂等）
-            capturePreviewTokenFromUrl()
+            capturePreviewTokenFromUrl(this.$route.query.token)
             this.loading = true
             if (!this.checkRepoType()) {
                 this.showError()
@@ -202,15 +232,7 @@
                     return
                 }
                 const mediaUrl = buildLocalOnlinePreviewUrl(this.projectId, this.repoName, '/' + this.filePath)
-                fetch(mediaUrl, {
-                    method: 'GET',
-                    credentials: 'include',
-                    headers: { Range: 'bytes=0-0' }
-                }).then(res => {
-                    if (!res.ok && res.status !== 206) {
-                        this.showError()
-                        return
-                    }
+                probeOnlinePreviewUrl(mediaUrl).then(() => {
                     this.loading = false
                     this.mediaShow = true
                     this.mediaKind = isMediaVideo(this.filePath) ? 'video' : 'audio'
@@ -218,32 +240,21 @@
                 }).catch(() => this.showError())
                 return
             }
+            if (this.openNativePdfPreview()) {
+                return
+            }
             if (isCode(this.filePath) || isHtmlFile(this.filePath)) {
                 this.previewViaOnlinePreview(res => this.dealDate(res))
             } else if (isExcel(this.filePath)) {
-                if (this.repoType === 'local') {
-                    customizePreviewLocalOfficeFile(this.projectId, this.repoName, '/' + this.filePath).then(async res => {
-                        if (!await this.prepareExcelPreview(res.data, isExcel(this.filePath) === 'xls')) return
-                        this.loading = false
-                        this.previewExcel = true
-                    }).catch(() => this.showError())
-                } else {
-                    customizePreviewRemoteOfficeFile(Base64.encode(Base64.decode(this.extraParam))).then(async res => {
-                        if (!await this.prepareExcelPreview(res.data, isExcel(this.filePath) === 'xls')) return
-                        this.loading = false
-                        this.previewExcel = true
-                    }).catch(() => this.showError())
-                }
+                this.previewViaOnlinePreview(async res => {
+                    if (!await this.prepareExcelPreview(res.data, isExcel(this.filePath) === 'xls')) return
+                    this.loading = false
+                    this.previewExcel = true
+                })
+            } else if (isLivePptx(this.filePath)) {
+                this.previewLivePptx()
             } else if (isFormatType(this.filePath) || isPic(this.filePath) || isMarkdown(this.filePath) || isJsx(this.filePath) || isXmind(this.filePath)) {
-                if (this.repoType === 'local') {
-                    customizePreviewLocalOfficeFile(this.projectId, this.repoName, '/' + this.filePath).then(res => {
-                        this.dealDate(res)
-                    }).catch(() => this.showError())
-                } else {
-                    customizePreviewRemoteOfficeFile(Base64.encode(Base64.decode(this.extraParam))).then(res => {
-                        this.dealDate(res)
-                    }).catch(() => this.showError())
-                }
+                this.previewViaOnlinePreview(res => this.dealDate(res))
             } else {
                 this.showError()
             }
@@ -255,21 +266,79 @@
             checkRepoType () {
                 return this.repoTypeEnum.includes(this.repoType)
             },
-            previewViaOnlinePreview (onSuccess) {
+            openNativePdfPreview () {
+                if (!isNativePdfPreview(this.filePath)) {
+                    return false
+                }
+                let pdfUrl
+                try {
+                    pdfUrl = this.nativePdfPreviewUrl()
+                } catch (e) {
+                    this.showError()
+                    return true
+                }
+                probeOnlinePreviewUrl(pdfUrl).then(() => {
+                    openPreviewUrlInCurrentFrame(pdfUrl)
+                }).catch(() => this.showError())
+                return true
+            },
+            nativePdfPreviewUrl () {
                 if (this.repoType === 'local') {
-                    customizePreviewLocalOfficeFile(this.projectId, this.repoName, '/' + this.filePath)
+                    return buildLocalOnlinePreviewUrl(this.projectId, this.repoName, '/' + this.filePath)
+                }
+                const extraParam = Base64.encode(Base64.decode(decodeURIComponent(this.extraParam)))
+                return buildRemoteOnlinePreviewUrl(extraParam)
+            },
+            previewViaOnlinePreview (onSuccess, extraQuery) {
+                if (this.repoType === 'local') {
+                    customizePreviewLocalOfficeFile(this.projectId, this.repoName, '/' + this.filePath, extraQuery)
                         .then(onSuccess)
                         .catch(() => this.showError())
                 } else {
-                    customizePreviewRemoteOfficeFile(Base64.encode(Base64.decode(this.extraParam)))
+                    customizePreviewRemoteOfficeFile(Base64.encode(Base64.decode(this.extraParam)), extraQuery)
                         .then(onSuccess)
                         .catch(() => this.showError())
+                }
+            },
+            previewLivePptx () {
+                this.previewViaOnlinePreview(async res => {
+                    try {
+                        this.pptxBytes = new Uint8Array(await res.data.arrayBuffer())
+                        this.pptxShow = true
+                        this.loading = false
+                    } catch (e) {
+                        this.fallbackPptxToPdf()
+                    }
+                })
+            },
+            fallbackPptxToPdf () {
+                this.pptxShow = false
+                this.pptxBytes = null
+                this.loading = true
+                this.previewViaOnlinePreview(res => {
+                    this.loading = false
+                    this.openPdfBlob(res.data)
+                }, { convert: 'pdf' })
+            },
+            openPdfBlob (data) {
+                this.revokePdfObjectUrl()
+                this.pdfObjectUrl = URL.createObjectURL(data)
+                this.pdfShow = true
+                this.loadFile(this.pdfObjectUrl)
+            },
+            revokePdfObjectUrl () {
+                if (this.pdfObjectUrl) {
+                    URL.revokeObjectURL(this.pdfObjectUrl)
+                    this.pdfObjectUrl = ''
                 }
             },
             showError () {
                 this.loading = false
                 this.previewBasic = false
                 this.mediaShow = false
+                this.pptxShow = false
+                this.pptxBytes = null
+                this.revokePdfObjectUrl()
                 this.mediaDecodeError = false
                 this.hasError = true
             },
@@ -287,18 +356,21 @@
                 this.previewBasic = false
                 this.showFrame = false
                 this.pageUrl = ''
+                this.pdfShow = false
                 this.csvShow = false
                 this.hasError = false
                 this.imgShow = false
                 this.imgUrl = ''
                 this.xmindShow = false
+                this.pptxShow = false
+                this.pptxBytes = null
+                this.revokePdfObjectUrl()
                 this.mediaShow = false
                 this.mediaUrl = ''
                 this.mediaKind = 'video'
                 this.mediaDecodeError = false
                 destroyXmindViewer(this.xmindViewer)
                 this.xmindViewer = null
-                this.pdfShow = false
                 this.richTextShow = false
                 this.richTextSource = ''
                 this.richTextFilePath = ''
@@ -342,11 +414,8 @@
             },
             async dealDate (res) {
                 this.loading = false
-                let url
                 if (!isHtmlType(this.filePath) && !isPic(this.filePath) && !isJsx(this.filePath) && !isMarkdown(this.filePath) && !isXmind(this.filePath) && !isCode(this.filePath) && !isHtmlFile(this.filePath)) {
-                    this.loadFile(URL.createObjectURL(res.data))
-                    this.pdfShow = true
-                    this.pageUrl = url
+                    this.openPdfBlob(res.data)
                 } else if (isPic(this.filePath)) {
                     this.imgShow = true
                     this.imgUrl = URL.createObjectURL(res.data)
@@ -371,9 +440,8 @@
                         )
                     })
                 } else {
-                    url = URL.createObjectURL(res.data)
                     this.showFrame = true
-                    this.pageUrl = url
+                    this.pageUrl = URL.createObjectURL(res.data)
                 }
             },
             loadFile (url) {
@@ -398,7 +466,6 @@
                     this.pdfWidth = viewport.width + 'px'
                     canvas.style.height = viewport.height + 'px'
                     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-                    // 将 PDF 页面渲染到 canvas 上下文中
                     const renderContext = {
                         canvasContext: ctx,
                         viewport: viewport
@@ -417,7 +484,6 @@
 @import '@vue-office/docx/lib/index.css';
 @import '@vue-office/excel/lib/index.css';
 @import 'viewerjs/dist/viewer.css';
-/* 添加到现有项目中 */
 .pdf-container-wrapper {
     position: relative !important;
     width: 100% !important;
@@ -425,8 +491,6 @@
     overflow: auto !important;
     background: #f5f5f5 !important;
 }
-
-/* 关键：绝对定位居中 */
 .pdf-container {
     position: absolute !important;
     left: 50% !important;
@@ -436,8 +500,6 @@
     min-width: 100% !important;
     box-sizing: border-box !important;
 }
-
-/* Canvas样式重置 */
 canvas {
     display: block !important;
     margin: 0 auto 20px auto !important;

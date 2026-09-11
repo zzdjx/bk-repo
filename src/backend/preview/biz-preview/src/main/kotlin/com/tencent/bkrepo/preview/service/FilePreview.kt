@@ -59,6 +59,7 @@ interface FilePreview {
         const val DRAWUI_FILE_PREVIEW_PAGE = "drawio"
         const val NOT_SUPPORTED_FILE_PAGE = "fileNotSupported"
         const val XLSX_FILE_PREVIEW_PAGE = "officeweb"
+        const val PPTX_FILE_PREVIEW_PAGE = "pptx"
         const val CSV_FILE_PREVIEW_PAGE = "csv"
         const val JSX_FILE_PREVIEW_PAGE = "jsx"
     }

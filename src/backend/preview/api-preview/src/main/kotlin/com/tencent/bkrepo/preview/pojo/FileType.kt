@@ -71,6 +71,8 @@ enum class FileType(val instanceName: String) {
             "xlsm",
             "ppt",
             "pptx",
+            "pptm",
+            "ppsx",
             "vsd",
             "rtf",
             "odt",

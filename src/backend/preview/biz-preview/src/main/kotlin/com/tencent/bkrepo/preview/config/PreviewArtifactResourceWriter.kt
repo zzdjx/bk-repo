@@ -53,7 +53,9 @@ import com.tencent.bkrepo.common.storage.monitor.Throughput
 import com.tencent.bkrepo.common.storage.monitor.measureThroughput
 import com.tencent.bkrepo.preview.constant.PREVIEW_ARTIFACT_TO_FILE
 import com.tencent.bkrepo.preview.constant.PREVIEW_RESPONSE_CONTENT_TYPE
+import com.tencent.bkrepo.preview.constant.PREVIEW_RESPONSE_FILENAME
 import com.tencent.bkrepo.preview.constant.PREVIEW_TMP_FILE_SAVE_PATH
+import com.tencent.bkrepo.preview.service.PreviewInlineDisposition
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.IOException
@@ -117,7 +119,9 @@ class PreviewArtifactResourceWriter(
         if (resource.useDisposition) {
             response.setHeader(HttpHeaders.CONTENT_DISPOSITION, HttpHeaderUtils.encodeDisposition(name))
         } else if (request.getAttribute(PREVIEW_RESPONSE_CONTENT_TYPE) != null) {
-            response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "inline")
+            val preferredName = request.getAttribute(PREVIEW_RESPONSE_FILENAME) as? String
+            val inlineName = preferredName?.trim()?.takeIf { it.isNotEmpty() } ?: name
+            response.setHeader(HttpHeaders.CONTENT_DISPOSITION, PreviewInlineDisposition.encode(inlineName))
         }
 
         resource.node?.let {

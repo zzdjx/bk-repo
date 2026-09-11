@@ -28,11 +28,7 @@ class DrivePreviewDownloadService(
         storageCredentials: StorageCredentials?,
         range: Range? = null,
     ): ArtifactInputStream {
-        val blockInfo = driveFileReadService.getFileBlockInfo(projectId, repoName, fullPath)
-            ?: throw PreviewNotFoundException(
-                PreviewMessageCode.PREVIEW_FILE_NOT_FOUND,
-                "$projectId|$repoName|$fullPath",
-            )
+        val blockInfo = requireBlockInfo(projectId, repoName, fullPath)
         val resolvedRange = range ?: resolvePreviewRange(blockInfo.size)
         return storageService.load(blockInfo.blocks, resolvedRange, storageCredentials)
             ?: throw PreviewNotFoundException(
@@ -40,6 +36,17 @@ class DrivePreviewDownloadService(
                 "$projectId|$repoName|$fullPath",
             )
     }
+
+    fun getFileSize(projectId: String, repoName: String, fullPath: String): Long {
+        return requireBlockInfo(projectId, repoName, fullPath).size
+    }
+
+    private fun requireBlockInfo(projectId: String, repoName: String, fullPath: String) =
+        driveFileReadService.getFileBlockInfo(projectId, repoName, fullPath)
+            ?: throw PreviewNotFoundException(
+                PreviewMessageCode.PREVIEW_FILE_NOT_FOUND,
+                "$projectId|$repoName|$fullPath",
+            )
 
     private fun resolvePreviewRange(total: Long): Range {
         val request = HttpContextHolder.getRequestOrNull() ?: return Range.full(total)

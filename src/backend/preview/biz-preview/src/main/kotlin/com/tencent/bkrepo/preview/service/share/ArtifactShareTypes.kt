@@ -32,6 +32,20 @@ object ArtifactShareTypes {
         }
     }
 
+    /**
+     * Chrome 内置阅读器的「演示」要求 PDF 是标签页顶层文档。
+     * 分享短链只对原生 PDF 直接输出 application/pdf；幻灯片仍走内嵌页 + PDF.js。
+     */
+    fun usesNativePdfViewer(type: String?, fullPath: String? = null): Boolean {
+        return resolvedType(type, fullPath) == PDF_TYPE
+    }
+
+    private fun resolvedType(type: String?, fullPath: String?): String? {
+        val stored = type?.trim()?.takeIf { it.isNotEmpty() }
+        return (stored ?: fullPath?.let { fromPath(it) })?.lowercase()
+    }
+
+    private const val PDF_TYPE = "pdf"
     private val IMAGE_EXTS = setOf("png", "jpg", "jpeg", "gif", "webp", "svg", "bmp")
     private val HTML_EXTS = setOf("html", "htm")
     private val MARKDOWN_EXTS = setOf("md", "markdown")

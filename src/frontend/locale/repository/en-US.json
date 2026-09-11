@@ -919,6 +919,11 @@
     "previewMediaPause": "Pause",
     "previewMediaProgress": "Playback progress",
     "previewMediaScrub": "Seek",
+    "pptxLivePrev": "Previous",
+    "pptxLiveNext": "Next",
+    "pptxLivePresent": "Present",
+    "pptxLiveHint": "Space / click the slide to play animations",
+    "pptxLivePage": "Slide {0}/{1}",
     "helps": {
         "documentation": "Documentation",
         "releaseNote": "Release Notes",

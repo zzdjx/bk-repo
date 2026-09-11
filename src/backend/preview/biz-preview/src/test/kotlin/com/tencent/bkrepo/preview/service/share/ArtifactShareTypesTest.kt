@@ -1,7 +1,9 @@
 package com.tencent.bkrepo.preview.service.share
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
@@ -44,5 +46,19 @@ class ArtifactShareTypesTest {
         assertNull(ArtifactShareTypes.fromPath("/clips/demo.mov"))
         assertNull(ArtifactShareTypes.fromPath("/clips/demo.avi"))
         assertNull(ArtifactShareTypes.fromPath("/clips/demo.mkv"))
+    }
+
+    @Test
+    fun `only native pdf uses native pdf viewer`() {
+        assertTrue(ArtifactShareTypes.usesNativePdfViewer("pdf"))
+        assertTrue(ArtifactShareTypes.usesNativePdfViewer("PDF"))
+        assertTrue(ArtifactShareTypes.usesNativePdfViewer(null, "/docs/demo.pdf"))
+        assertFalse(ArtifactShareTypes.usesNativePdfViewer("slides"))
+        assertFalse(ArtifactShareTypes.usesNativePdfViewer("  slides  "))
+        assertFalse(ArtifactShareTypes.usesNativePdfViewer("", "/talk/deck.pptx"))
+        assertFalse(ArtifactShareTypes.usesNativePdfViewer("html"))
+        assertFalse(ArtifactShareTypes.usesNativePdfViewer("video"))
+        assertFalse(ArtifactShareTypes.usesNativePdfViewer(null, "/sites/index.html"))
+        assertFalse(ArtifactShareTypes.usesNativePdfViewer(null, null))
     }
 }

@@ -37,6 +37,12 @@
             />
         </div>
         <div v-if="xmindShow" ref="container" class="xmind-preview-container"></div>
+        <pptx-live-preview
+            v-if="pptxShow"
+            :bytes="pptxBytes"
+            :file-name="pptxFileName"
+            @error="fallbackPptxToPdf"
+        />
         <div v-if="hasError" class="empty-data-container flex-center" style="background-color: white; height: 100%">
             <div class="flex-column flex-center">
                 <img width="480" height="240" style="float: left;margin-right: 3px" :src="window.BK_SUBPATH + 'ui/440.svg'" />
@@ -56,7 +62,9 @@
     import {
         capturePreviewTokenFromUrl,
         customizePreviewRemoteOfficeFile,
-        getPreviewRemoteOfficeFileInfo
+        getPreviewRemoteOfficeFileInfo,
+        buildRemoteOnlinePreviewUrl,
+        openPreviewUrlInCurrentFrame
     } from '@repository/utils/previewOfficeFile'
     import { mapActions } from 'vuex'
     import { Base64 } from 'js-base64'
@@ -66,7 +74,9 @@
         isHtmlFile,
         isHtmlType,
         isJsx,
+        isLivePptx,
         isMarkdown,
+        isNativePdfPreview,
         isOutDisplayType,
         isPic,
         isText,
@@ -106,7 +116,11 @@
 
     export default {
         name: 'OutsideFilePreview',
-        components: { VueOfficeExcel, SourcePreviewTabs },
+        components: {
+            VueOfficeExcel,
+            SourcePreviewTabs,
+            PptxLivePreview: () => import('@repository/components/FilePreview/PptxLivePreview')
+        },
         mixins: [excelEnhanceMixin],
         props: {
             extraParam: String
@@ -126,10 +140,15 @@
                 hasError: false,
                 pageUrl: '',
                 showFrame: false,
+                pdfShow: false,
+                pdfPages: [],
+                pdfWidth: '',
+                pdfSrc: '',
+                pdfDoc: '',
+                pdfScale: 1.5,
                 loading: false,
                 imgShow: false,
                 imgUrl: '',
-                pdfShow: false,
                 richTextShow: false,
                 richTextSource: '',
                 richTextFilePath: '',
@@ -140,11 +159,10 @@
                 },
                 xmindShow: false,
                 xmindViewer: null,
-                pdfPages: [], // 页数
-                pdfWidth: '', // 宽度
-                pdfSrc: '', // 地址
-                pdfDoc: '', // 文档内容
-                pdfScale: 1.5 // 放大倍数
+                pptxShow: false,
+                pptxBytes: null,
+                pptxFileName: '',
+                pdfObjectUrl: ''
             }
         },
         computed: {
@@ -174,7 +192,7 @@
         },
         async created () {
             // 需求 5.6：从 URL ?token=... 解析预览 token 并写入 sessionStorage（幂等）
-            capturePreviewTokenFromUrl()
+            capturePreviewTokenFromUrl(this.$route.query.token)
             this.loading = true
             if (!this.enableMultipleTypeFilePreview) {
                 this.showError()
@@ -204,7 +222,13 @@
                         this.initWaterMark(res.data.data.watermark)
                     }
                     if (isOutDisplayType(res.data.data.suffix)) {
-                        customizePreviewRemoteOfficeFile(Base64.encode(Base64.decode(this.extraParam))).then(async fileDate => {
+                        const suffix = res.data.data.suffix
+                        const extraParam = Base64.encode(param)
+                        if (isNativePdfPreview(res.data.data.fileName || suffix)) {
+                            openPreviewUrlInCurrentFrame(buildRemoteOnlinePreviewUrl(extraParam))
+                            return
+                        }
+                        customizePreviewRemoteOfficeFile(extraParam).then(async fileDate => {
                             const isExcelFile = isExcel(res.data.data.suffix)
                             if (!isExcelFile) this.loading = false
                             if (isExcelFile) {
@@ -248,9 +272,16 @@
                                         target
                                     )
                                 })
+                            } else if (isLivePptx(res.data.data.suffix) || isLivePptx(res.data.data.fileName)) {
+                                try {
+                                    this.pptxFileName = res.data.data.fileName || `preview.${res.data.data.suffix}`
+                                    this.pptxBytes = new Uint8Array(await fileDate.data.arrayBuffer())
+                                    this.pptxShow = true
+                                } catch (e) {
+                                    this.fallbackPptxToPdf(extraParam)
+                                }
                             } else {
-                                this.pdfShow = true
-                                this.loadFile(URL.createObjectURL(fileDate.data))
+                                this.openPdfBlob(fileDate.data)
                             }
                         })
                     } else {
@@ -271,7 +302,35 @@
             ]),
             showError () {
                 this.loading = false
+                this.pptxShow = false
+                this.pptxBytes = null
+                this.revokePdfObjectUrl()
                 this.hasError = true
+            },
+            fallbackPptxToPdf (encodedExtra) {
+                this.pptxShow = false
+                this.pptxBytes = null
+                this.pptxFileName = ''
+                this.loading = true
+                const extraParam = typeof encodedExtra === 'string' && encodedExtra
+                    ? encodedExtra
+                    : Base64.encode(Base64.decode(decodeURIComponent(this.extraParam)))
+                customizePreviewRemoteOfficeFile(extraParam, { convert: 'pdf' }).then(fileDate => {
+                    this.loading = false
+                    this.openPdfBlob(fileDate.data)
+                }).catch(() => this.showError())
+            },
+            openPdfBlob (data) {
+                this.revokePdfObjectUrl()
+                this.pdfObjectUrl = URL.createObjectURL(data)
+                this.pdfShow = true
+                this.loadFile(this.pdfObjectUrl)
+            },
+            revokePdfObjectUrl () {
+                if (this.pdfObjectUrl) {
+                    URL.revokeObjectURL(this.pdfObjectUrl)
+                    this.pdfObjectUrl = ''
+                }
             },
             cancel () {
                 this.destroyExcelPreview()
@@ -280,14 +339,18 @@
                 this.previewBasic = false
                 this.showFrame = false
                 this.pageUrl = ''
+                this.pdfShow = false
                 this.imgShow = false
                 this.imgUrl = ''
                 this.hasError = false
                 this.csvShow = false
                 this.xmindShow = false
+                this.pptxShow = false
+                this.pptxBytes = null
+                this.pptxFileName = ''
+                this.revokePdfObjectUrl()
                 destroyXmindViewer(this.xmindViewer)
                 this.xmindViewer = null
-                this.pdfShow = false
                 this.richTextShow = false
                 this.richTextSource = ''
                 this.richTextFilePath = ''
@@ -318,7 +381,6 @@
                     this.pdfWidth = viewport.width + 'px'
                     canvas.style.height = viewport.height + 'px'
                     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-                    // 将 PDF 页面渲染到 canvas 上下文中
                     const renderContext = {
                         canvasContext: ctx,
                         viewport: viewport
@@ -336,7 +398,6 @@
 @import '@vue-office/docx/lib/index.css';
 @import '@vue-office/excel/lib/index.css';
 @import 'viewerjs/dist/viewer.css';
-/* 添加到现有项目中 */
 .pdf-container-wrapper {
     position: relative !important;
     width: 100% !important;
@@ -344,8 +405,6 @@
     overflow: auto !important;
     background: #f5f5f5 !important;
 }
-
-/* 关键：绝对定位居中 */
 .pdf-container {
     position: absolute !important;
     left: 50% !important;
@@ -355,8 +414,6 @@
     min-width: 100% !important;
     box-sizing: border-box !important;
 }
-
-/* Canvas样式重置 */
 canvas {
     display: block !important;
     margin: 0 auto 20px auto !important;
