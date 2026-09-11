@@ -86,7 +86,7 @@ class ArtifactPreviewPathTraversalTest {
     private fun newFileHandlerService(previewRoot: File): FileHandlerService {
         val config = mockk<PreviewConfig>()
         every { config.fileDir } returns previewRoot.absolutePath
-        return FileHandlerService(config, mockk<CommonResourceService>())
+        return FileHandlerService(config, mockk<CommonResourceService>(), mockk())
     }
 
     private fun artifactInfo(): ArtifactInfo =

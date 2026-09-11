@@ -49,6 +49,16 @@ class ArtifactShareTypesTest {
     }
 
     @Test
+    fun `glb maps to 3d and gltf stays unsupported`() {
+        assertEquals("3d", ArtifactShareTypes.fromPath("/models/hero.glb"))
+        assertEquals("3d", ArtifactShareTypes.fromPath("/models/hero.GLB"))
+        assertEquals("3d", ArtifactShareTypes.resolve("  ", "/models/hero.glb"))
+        assertEquals("other", ArtifactShareTypes.resolve("other", "/models/hero.glb"))
+        assertNull(ArtifactShareTypes.fromPath("/models/hero.gltf"))
+        assertNull(ArtifactShareTypes.fromPath("/models/hero.obj"))
+    }
+
+    @Test
     fun `only native pdf uses native pdf viewer`() {
         assertTrue(ArtifactShareTypes.usesNativePdfViewer("pdf"))
         assertTrue(ArtifactShareTypes.usesNativePdfViewer("PDF"))
