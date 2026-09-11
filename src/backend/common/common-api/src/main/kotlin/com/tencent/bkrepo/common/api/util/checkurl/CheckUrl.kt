@@ -57,5 +57,14 @@ object CheckUrl {
         return config.mode.isBlank() || config.mode !in modeValues
     }
 
-    private fun isHostnameValid(hostname: String): Boolean = domainPattern.containsMatchIn(hostname)
+    /**
+     * 校验hostname格式：必须匹配域名格式，且不能是[PrivateAddressMatcher.isAmbiguousIpv4Literal]识别出的
+     * 非规范IPv4字面量（如0177.0.0.1、192.168.000.001、0x7f.0.0.1）。这类写法点分格式上能匹配域名正则，
+     * 但实际会被HTTP客户端解析成对应IP，若当成域名放行会绕过下方的[PrivateAddressMatcher.isForbiddenLiteral]
+     * 内网/回环拦截。
+     */
+    private fun isHostnameValid(hostname: String): Boolean {
+        if (!domainPattern.containsMatchIn(hostname)) return false
+        return !PrivateAddressMatcher.isAmbiguousIpv4Literal(hostname)
+    }
 }

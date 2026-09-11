@@ -59,6 +59,30 @@ object PrivateAddressMatcher {
     }
 
     /**
+     * 单个IPv4字面量分段的BSD/inet_aton风格写法：十进制（可含前导零，即八进制）或0x/0X前缀的十六进制。
+     */
+    private const val IPV4_LIKE_SEGMENT = "(0[xX][0-9a-fA-F]+|[0-9]+)"
+
+    /**
+     * 匹配1~4段、以点分隔、每段均为[IPV4_LIKE_SEGMENT]的字符串，覆盖inet_aton支持的
+     * 八进制(0177.0.0.1)、十六进制(0x7f.0.0.1)、前导零十进制(192.168.000.001)、
+     * 简写(127.1、0x7f000001)等非规范IPv4写法。
+     */
+    private val ipv4LikePattern = Regex("^$IPV4_LIKE_SEGMENT(\\.$IPV4_LIKE_SEGMENT){0,3}$")
+
+    /**
+     * 判断host是否为“看起来像IPv4字面量，但不是[InetAddresses.isInetAddress]认可的规范点分十进制”的可疑输入。
+     * 这类写法（如0177.0.0.1、192.168.000.001、0x7f.0.0.1、127.1）会被[InetAddresses.isInetAddress]判定为
+     * “不是IP”，从而被调用方当成域名放过域名格式/白名单校验；但`java.net.InetAddress`在真正建立连接时仍会把
+     * 它们解析为对应的IP地址（不经过DNS查询），可用于绕过[isForbiddenLiteral]的内网/回环地址拦截。
+     * 调用方应将命中该方法的host直接拒绝，而不是当成域名继续校验。
+     */
+    fun isAmbiguousIpv4Literal(host: String): Boolean {
+        if (InetAddresses.isInetAddress(host)) return false
+        return ipv4LikePattern.matches(host)
+    }
+
+    /**
      * 判断是否为JDK内置识别的保留地址（回环、链路本地、多播、任意地址）
      */
     private fun isReservedAddress(addr: InetAddress): Boolean {

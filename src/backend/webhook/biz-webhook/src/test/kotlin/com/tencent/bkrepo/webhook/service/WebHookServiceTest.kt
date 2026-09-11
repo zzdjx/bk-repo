@@ -28,6 +28,7 @@
 package com.tencent.bkrepo.webhook.service
 
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.artifact.event.base.EventType
 import com.tencent.bkrepo.common.security.exception.PermissionException
 import com.tencent.bkrepo.webhook.UT_LONG_HEADER_VALUE
@@ -212,6 +213,71 @@ class WebHookServiceTest @Autowired constructor(
 
         assertThrows<PermissionException> {
             webHookService.retryWebHookRequest(log.id.orEmpty())
+        }
+    }
+
+    @Test
+    @DisplayName("创建WebHook时拒绝不带域名格式的地址(SSRF)")
+    fun `createWebHook rejects url without domain format`() {
+        val request = CreateWebHookRequest(
+            url = "https://localhost",
+            headers = mapOf("key" to "value"),
+            triggers = listOf(EventType.NODE_CREATED),
+            associationType = AssociationType.PROJECT,
+            associationId = UT_PROJECT_ID
+        )
+        assertThrows<ErrorCodeException> {
+            webHookService.createWebHook(UT_USER, request)
+        }
+    }
+
+    @Test
+    @DisplayName("创建WebHook时拒绝非http(s)协议的地址(SSRF)")
+    fun `createWebHook rejects non http scheme url`() {
+        val request = CreateWebHookRequest(
+            url = "file:///etc/passwd",
+            headers = mapOf("key" to "value"),
+            triggers = listOf(EventType.NODE_CREATED),
+            associationType = AssociationType.PROJECT,
+            associationId = UT_PROJECT_ID
+        )
+        assertThrows<ErrorCodeException> {
+            webHookService.createWebHook(UT_USER, request)
+        }
+    }
+
+    @Test
+    @DisplayName("更新WebHook时拒绝不带域名格式的地址(SSRF)")
+    fun `updateWebHook rejects url without domain format`() {
+        val created = webHookService.createWebHook(
+            UT_USER,
+            CreateWebHookRequest(
+                url = "https://webhook.example.com",
+                headers = mapOf("key" to "value"),
+                triggers = listOf(EventType.NODE_CREATED),
+                associationType = AssociationType.PROJECT,
+                associationId = UT_PROJECT_ID
+            )
+        )
+        assertThrows<ErrorCodeException> {
+            webHookService.updateWebHook(UT_USER, UpdateWebHookRequest(created.id, "https://localhost"))
+        }
+    }
+
+    @Test
+    @DisplayName("创建WebHook时拒绝内网/回环字面量IP地址(SSRF)")
+    fun `createWebHook rejects private ip literal url`() {
+        listOf("http://127.0.0.1", "http://10.0.0.1", "http://169.254.169.254").forEach { url ->
+            val request = CreateWebHookRequest(
+                url = url,
+                headers = mapOf("key" to "value"),
+                triggers = listOf(EventType.NODE_CREATED),
+                associationType = AssociationType.PROJECT,
+                associationId = UT_PROJECT_ID
+            )
+            assertThrows<ErrorCodeException> {
+                webHookService.createWebHook(UT_USER, request)
+            }
         }
     }
 }
