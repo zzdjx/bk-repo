@@ -68,7 +68,9 @@ class WebHookExecutor(
     private val registry: ObservationRegistry
 ) {
 
-    private val httpClient = HttpClientBuilderFactory.create(registry = registry).build()
+    private val httpClient = HttpClientBuilderFactory.create(registry = registry)
+        .dns(WebHookCallbackDns(webHookProperties))
+        .build()
 
     init {
         httpClient.dispatcher.maxRequests = webHookProperties.maxRequests ?: 200

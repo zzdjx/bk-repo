@@ -44,6 +44,7 @@ object SecUrlValidator {
             schemes = schemes.toMutableList(),
             mode = mode,
             rules = rules.toMutableList(),
+            blockPrivateIp = blockPrivateIp,
         )
     }
 }

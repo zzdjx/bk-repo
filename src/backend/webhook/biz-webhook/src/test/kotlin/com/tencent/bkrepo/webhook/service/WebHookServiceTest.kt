@@ -28,6 +28,7 @@
 package com.tencent.bkrepo.webhook.service
 
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.artifact.event.base.EventType
 import com.tencent.bkrepo.common.security.exception.PermissionException
 import com.tencent.bkrepo.webhook.UT_LONG_HEADER_VALUE
@@ -83,7 +84,7 @@ class WebHookServiceTest @Autowired constructor(
     @DisplayName("创建WebHook测试")
     fun create() {
         val request = CreateWebHookRequest(
-            url = "https://localhost",
+            url = "https://webhook.example.com",
             headers = mapOf("key" to "value"),
             triggers = listOf(EventType.NODE_CREATED),
             associationType = AssociationType.PROJECT,
@@ -98,7 +99,7 @@ class WebHookServiceTest @Autowired constructor(
     @DisplayName("查询WebHook时对 headers 值做掩码")
     fun `getWebHook masks header values`() {
         val request = CreateWebHookRequest(
-            url = "https://localhost",
+            url = "https://webhook.example.com",
             headers = mapOf(
                 "authorization" to UT_SHORT_HEADER_VALUE,
                 "x-token" to UT_LONG_HEADER_VALUE
@@ -121,7 +122,7 @@ class WebHookServiceTest @Autowired constructor(
     @DisplayName("更新时回传掩码请求头应保留原始值")
     fun `updateWebHook keeps original headers when masked values are submitted`() {
         val request = CreateWebHookRequest(
-            url = "https://localhost",
+            url = "https://webhook.example.com",
             headers = mapOf(
                 "authorization" to UT_SHORT_HEADER_VALUE,
                 "x-token" to UT_LONG_HEADER_VALUE
@@ -135,13 +136,13 @@ class WebHookServiceTest @Autowired constructor(
             UT_USER,
             UpdateWebHookRequest(
                 id = created.id,
-                url = "https://127.0.0.1",
+                url = "https://webhook2.example.com",
                 headers = created.headers
             )
         )
 
         val stored = webHookDao.findById(created.id)
-        Assertions.assertEquals("https://127.0.0.1", stored?.url)
+        Assertions.assertEquals("https://webhook2.example.com", stored?.url)
         Assertions.assertEquals(UT_SHORT_HEADER_VALUE, stored?.headers?.get("authorization"))
         Assertions.assertEquals(UT_LONG_HEADER_VALUE, stored?.headers?.get("x-token"))
     }
@@ -157,7 +158,7 @@ class WebHookServiceTest @Autowired constructor(
     @DisplayName("删除WebHook")
     fun delete() {
         val request = CreateWebHookRequest(
-            url = "https://localhost",
+            url = "https://webhook.example.com",
             headers = mapOf("key" to "value"),
             triggers = listOf(EventType.NODE_CREATED),
             associationType = AssociationType.PROJECT,
@@ -171,16 +172,16 @@ class WebHookServiceTest @Autowired constructor(
     @DisplayName("更新WebHook")
     fun update() {
         val createWebHookRequest = CreateWebHookRequest(
-            url = "https://localhost",
+            url = "https://webhook.example.com",
             headers = mapOf("key" to "value"),
             triggers = listOf(EventType.NODE_CREATED),
             associationType = AssociationType.PROJECT,
             associationId = UT_PROJECT_ID
         )
         var webhook = webHookService.createWebHook(UT_USER, createWebHookRequest)
-        val updateWebHookRequest = UpdateWebHookRequest(webhook.id, "https://127.0.0.1")
+        val updateWebHookRequest = UpdateWebHookRequest(webhook.id, "https://webhook2.example.com")
         webhook = webHookService.updateWebHook(UT_USER, updateWebHookRequest)
-        Assertions.assertEquals(webhook.url, "https://127.0.0.1")
+        Assertions.assertEquals(webhook.url, "https://webhook2.example.com")
     }
 
     @Test
@@ -189,7 +190,7 @@ class WebHookServiceTest @Autowired constructor(
         val webhook = webHookService.createWebHook(
             UT_USER,
             CreateWebHookRequest(
-                url = "https://localhost",
+                url = "https://webhook.example.com",
                 headers = mapOf("key" to "value"),
                 triggers = listOf(EventType.NODE_CREATED),
                 associationType = AssociationType.PROJECT,
@@ -212,6 +213,71 @@ class WebHookServiceTest @Autowired constructor(
 
         assertThrows<PermissionException> {
             webHookService.retryWebHookRequest(log.id.orEmpty())
+        }
+    }
+
+    @Test
+    @DisplayName("创建WebHook时拒绝不带域名格式的地址(SSRF)")
+    fun `createWebHook rejects url without domain format`() {
+        val request = CreateWebHookRequest(
+            url = "https://localhost",
+            headers = mapOf("key" to "value"),
+            triggers = listOf(EventType.NODE_CREATED),
+            associationType = AssociationType.PROJECT,
+            associationId = UT_PROJECT_ID
+        )
+        assertThrows<ErrorCodeException> {
+            webHookService.createWebHook(UT_USER, request)
+        }
+    }
+
+    @Test
+    @DisplayName("创建WebHook时拒绝非http(s)协议的地址(SSRF)")
+    fun `createWebHook rejects non http scheme url`() {
+        val request = CreateWebHookRequest(
+            url = "file:///etc/passwd",
+            headers = mapOf("key" to "value"),
+            triggers = listOf(EventType.NODE_CREATED),
+            associationType = AssociationType.PROJECT,
+            associationId = UT_PROJECT_ID
+        )
+        assertThrows<ErrorCodeException> {
+            webHookService.createWebHook(UT_USER, request)
+        }
+    }
+
+    @Test
+    @DisplayName("更新WebHook时拒绝不带域名格式的地址(SSRF)")
+    fun `updateWebHook rejects url without domain format`() {
+        val created = webHookService.createWebHook(
+            UT_USER,
+            CreateWebHookRequest(
+                url = "https://webhook.example.com",
+                headers = mapOf("key" to "value"),
+                triggers = listOf(EventType.NODE_CREATED),
+                associationType = AssociationType.PROJECT,
+                associationId = UT_PROJECT_ID
+            )
+        )
+        assertThrows<ErrorCodeException> {
+            webHookService.updateWebHook(UT_USER, UpdateWebHookRequest(created.id, "https://localhost"))
+        }
+    }
+
+    @Test
+    @DisplayName("创建WebHook时拒绝内网/回环字面量IP地址(SSRF)")
+    fun `createWebHook rejects private ip literal url`() {
+        listOf("http://127.0.0.1", "http://10.0.0.1", "http://169.254.169.254").forEach { url ->
+            val request = CreateWebHookRequest(
+                url = url,
+                headers = mapOf("key" to "value"),
+                triggers = listOf(EventType.NODE_CREATED),
+                associationType = AssociationType.PROJECT,
+                associationId = UT_PROJECT_ID
+            )
+            assertThrows<ErrorCodeException> {
+                webHookService.createWebHook(UT_USER, request)
+            }
         }
     }
 }
