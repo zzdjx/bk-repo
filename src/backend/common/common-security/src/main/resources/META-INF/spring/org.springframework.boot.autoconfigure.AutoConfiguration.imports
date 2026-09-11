@@ -1,1 +1,2 @@
+com.tencent.bkrepo.common.security.crypto.CryptoMongoConfiguration
 com.tencent.bkrepo.common.security.SecurityAutoConfiguration

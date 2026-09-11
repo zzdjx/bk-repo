@@ -32,11 +32,13 @@
 package com.tencent.bkrepo.common.security.crypto
 
 import org.springframework.boot.context.properties.ConfigurationProperties
+import java.security.MessageDigest
 
 /**
  * 加解密密钥。代码里不保留默认值，未配置的密钥在被用到时才报错，见 [CryptoPropertiesInitializer]。
- * helm 部署由 chart 渲染时随机生成，二进制部署用 scripts/gen-crypto-keys.sh 生成后填入。
- * 公钥可留空，启动时从私钥推导。
+ * 有 Mongo 时完整配置（含公钥）以 DB 为准；DB 无记录时沿用 helm / 本地配置并原子写入。
+ * helm 由 chart 渲染时随机生成，二进制部署用 scripts/gen-crypto-keys.sh 生成后填入。
+ * 公钥可留空，启动时从私钥推导后一并入库。
  */
 @ConfigurationProperties("security.crypto")
 data class CryptoProperties(
@@ -76,4 +78,74 @@ data class CryptoProperties(
      * AES IV，16 字节。
      */
     var aesIv: String = ""
-)
+) {
+    fun hasMaterial(): Boolean {
+        return privateKeyStr.isNotEmpty() ||
+            privateKeyStr2048PKCS8.isNotEmpty() ||
+            privateKeyStr2048PKCS1.isNotEmpty() ||
+            aesKey.isNotEmpty() ||
+            aesIv.isNotEmpty()
+    }
+
+    /**
+     * 入库校验指纹。对**已经归一化**的 9 个字段按固定顺序用 `|` 拼接后做 SHA-256，小写 hex。
+     * 空字段也要占位（会出现 `||`）。手改库必须按这串重算整份，只改一把钥会启动失败。
+     *
+     * rsaAlgorithm|privateKeyStr|publicKeyStr|privateKeyStr2048PKCS8|publicKeyStr2048PKCS8|
+     * privateKeyStr2048PKCS1|publicKeyStr2048PKCS1|aesKey|aesIv
+     *
+     * openssl 转私钥/公钥的步骤见 [TSecurityCryptoKeyring]。
+     */
+    fun fingerprint(): String {
+        val payload = listOf(
+            rsaAlgorithm,
+            privateKeyStr,
+            publicKeyStr,
+            privateKeyStr2048PKCS8,
+            publicKeyStr2048PKCS8,
+            privateKeyStr2048PKCS1,
+            publicKeyStr2048PKCS1,
+            aesKey,
+            aesIv
+        ).joinToString("|")
+        val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * DB 已有的值永远胜出。某类密钥在库里为空时用 [from] 补上：库里本来就没有，谈不上换钥。
+     * 公私钥 / AES 成对补，避免只补一半。
+     */
+    fun fillMissingFrom(from: CryptoProperties): CryptoProperties {
+        val merged = copy()
+        if (merged.privateKeyStr.isEmpty()) {
+            merged.privateKeyStr = from.privateKeyStr
+            merged.publicKeyStr = from.publicKeyStr
+        }
+        if (merged.privateKeyStr2048PKCS8.isEmpty()) {
+            merged.privateKeyStr2048PKCS8 = from.privateKeyStr2048PKCS8
+            merged.publicKeyStr2048PKCS8 = from.publicKeyStr2048PKCS8
+        }
+        if (merged.privateKeyStr2048PKCS1.isEmpty()) {
+            merged.privateKeyStr2048PKCS1 = from.privateKeyStr2048PKCS1
+            merged.publicKeyStr2048PKCS1 = from.publicKeyStr2048PKCS1
+        }
+        if (merged.aesKey.isEmpty()) {
+            merged.aesKey = from.aesKey
+            merged.aesIv = from.aesIv
+        }
+        return merged
+    }
+
+    fun overwrite(from: CryptoProperties) {
+        rsaAlgorithm = from.rsaAlgorithm
+        privateKeyStr = from.privateKeyStr
+        publicKeyStr = from.publicKeyStr
+        privateKeyStr2048PKCS8 = from.privateKeyStr2048PKCS8
+        publicKeyStr2048PKCS8 = from.publicKeyStr2048PKCS8
+        privateKeyStr2048PKCS1 = from.privateKeyStr2048PKCS1
+        publicKeyStr2048PKCS1 = from.publicKeyStr2048PKCS1
+        aesKey = from.aesKey
+        aesIv = from.aesIv
+    }
+}
