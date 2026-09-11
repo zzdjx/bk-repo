@@ -29,10 +29,32 @@
  * SOFTWARE.
  */
 
+import java.security.KeyPairGenerator
+import java.util.Base64
+
 plugins {
     id("com.tencent.devops.boot") version Versions.DevopsBoot
     id("com.tencent.devops.publish") version Versions.DevopsBoot apply false
     id("io.github.gradle-nexus.publish-plugin") version "2.0.0"
+}
+
+// 测试用密钥，只出私钥，公钥由 CryptoPropertiesInitializer 推导
+fun rsaTestPrivateKey(bits: Int): String {
+    val generator = KeyPairGenerator.getInstance("RSA")
+    generator.initialize(bits)
+    return Base64.getEncoder().encodeToString(generator.generateKeyPair().private.encoded)
+}
+
+val testCryptoProperties: Map<String, String> by lazy {
+    mapOf(
+        // 登录密码加解密不限位数，1024 位构建更快
+        "security.crypto.privateKeyStr" to rsaTestPrivateKey(1024),
+        // OAuth/OIDC 的 JWT 走 RS256，jjwt 按 RFC 7518 强制要求 >= 2048 位，否则抛 WeakKeyException
+        "security.crypto.privateKeyStr2048PKCS8" to rsaTestPrivateKey(2048),
+        "security.crypto.privateKeyStr2048PKCS1" to rsaTestPrivateKey(2048),
+        "security.crypto.aesKey" to "0".repeat(32),
+        "security.crypto.aesIv" to "0".repeat(16)
+    )
 }
 
 allprojects {
@@ -114,6 +136,7 @@ allprojects {
         systemProperty("backup.encrypt-key", "0".repeat(32))
         systemProperty("security.auth.jwt.secret-key", "UtJwtKey-" + "0".repeat(24))
         systemProperty("security.service.secret-key", "0".repeat(64))
+        testCryptoProperties.forEach { (key, value) -> systemProperty(key, value) }
         testLogging {
             events("passed", "skipped", "failed")
             showStackTraces = true

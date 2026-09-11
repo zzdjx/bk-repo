@@ -25,4 +25,14 @@ class FileTypeTest {
         assertEquals(FileType.MEDIA, FileType.typeFromFileName("Demo.MP4"))
         assertEquals(FileType.OTHER, FileType.typeFromFileName("Demo.FLV"))
     }
+
+    @Test
+    fun `preview type mapping is case insensitive`() {
+        assertEquals(FileType.OFFICE, FileType.typeFromFileName("TABLE.XLSX"))
+        assertEquals(FileType.PDF, FileType.typeFromFileName("REPORT.PDF"))
+        assertEquals(FileType.PICTURE, FileType.typeFromFileName("IMAGE.PNG"))
+        assertEquals(FileType.MARKDOWN, FileType.typeFromFileName("README.MD"))
+        assertEquals(FileType.XMIND, FileType.typeFromFileName("MIND.XMIND"))
+        assertEquals(FileType.COMPRESS, FileType.typeFromFileName("ARCHIVE.ZIP"))
+    }
 }

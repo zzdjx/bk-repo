@@ -178,7 +178,7 @@
                                     { clickEvent: () => showDetail(row), label: $t('detail') },
                                     row.folder && row.category !== 'REMOTE' && { clickEvent: () => calculateFolderSize(row), label: $t('realSize') },
                                     !row.folder && getBtnDisabled(row.name) && { clickEvent: () => handlerPreviewBasicsFile(row), label: $t('preview') }, //基本类型文件 eg: txt
-                                    !row.folder && row.category !== 'REMOTE' && baseCompressedType.includes(row.name.slice(-3)) && { clickEvent: () => handlerPreviewCompressedFile(row), label: $t('preview') }, //压缩文件 eg: rar|zip|gz|tgz|tar|jar
+                                    !row.folder && row.category !== 'REMOTE' && isCompressedFile(row.name) && { clickEvent: () => handlerPreviewCompressedFile(row), label: $t('preview') }, //压缩文件 eg: rar|zip|gz|tgz|tar|jar
                                     ...(!row.metadata.forbidStatus ? [
                                         (row.category !== 'REMOTE' || !row.folder) && { clickEvent: () => handlerDownload(row), label: $t('download') },
                                         ...(repoName !== 'pipeline' && row.category !== 'REMOTE' ? [
@@ -394,7 +394,7 @@
     import compressedFileTable from './compressedFileTable'
     import previewBasicFileDialog from './previewBasicFileDialog'
     import { Base64 } from 'js-base64'
-    import { isCode, isMedia, isOutDisplayType, isText } from '@repository/utils/file'
+    import { isCode, isCompressed, isMedia, isOutDisplayType, isText } from '@repository/utils/file'
     import {
         CLIENT_DOWNLOAD_CANCELLED,
         CLIENT_DOWNLOAD_FAILED,
@@ -455,7 +455,6 @@
                     limit: 20,
                     limitList: [10, 20, 50, 100]
                 },
-                baseCompressedType: ['rar', 'zip', 'gz', 'tgz', 'tar', 'jar'],
                 compressedData: [],
                 metadataLabelList: [],
                 debounceClickTreeNode: null,
@@ -1911,6 +1910,9 @@
 
             canOpenFilePreview (path) {
                 return Boolean(isOutDisplayType(path) || (this.localRepo && isMedia(path)))
+            },
+            isCompressedFile (path) {
+                return Boolean(isCompressed(path))
             },
             getBtnDisabled (name) {
                 if (this.enableMultipleTypeFilePreview) {

@@ -32,3 +32,13 @@ const val APP_ENDPOINT = "/ws/app"
 const val DESKTOP_ENDPOINT = "/ws/desktop"
 
 const val SESSION_ID = "sessionId"
+
+/**
+ * 握手端点，写入 session attributes
+ */
+const val ENDPOINT = "endpoint"
+
+/**
+ * CopyPDU 订阅 topic 前缀
+ */
+const val CLIPBOARD_COPY_TOPIC_PREFIX = "/topic/clipboard/copy/"

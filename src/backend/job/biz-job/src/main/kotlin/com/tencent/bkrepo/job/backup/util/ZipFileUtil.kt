@@ -3,6 +3,7 @@ package com.tencent.bkrepo.job.backup.util
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -22,10 +23,15 @@ object ZipFileUtil {
 
     fun decompressFile(zipFilePath: String, destinationFolder: String) {
         val zipFile = ZipFile(zipFilePath)
+        val destinationDirCanonicalPath = File(destinationFolder).canonicalPath
         val entries = zipFile.entries()
         while (entries.hasMoreElements()) {
             val entry = entries.nextElement()
             val entryDestination = File(destinationFolder, entry.name)
+            val entryCanonicalPath = entryDestination.canonicalPath
+            if (!entryCanonicalPath.startsWith(destinationDirCanonicalPath + File.separator)) {
+                throw IOException("Zip entry[${entry.name}] is outside of the target dir[$destinationFolder]")
+            }
             if (entry.isDirectory) {
                 entryDestination.mkdirs()
             } else {

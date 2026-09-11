@@ -2,9 +2,14 @@
     <div>
         <vue-office-excel
             v-if="previewExcel"
+            :key="excelPreviewKey"
             :src="dataSource"
             :options="excelOptions"
             style="max-height: 100vh; overflow-y: auto"
+            @rendered="handleExcelRendered"
+            @error="handleExcelRenderError"
+            @switchSheet="handleExcelSwitchSheet"
+            @cellSelected="handleExcelCellSelected"
         />
         <iframe v-if="showFrame" :src="pageUrl" frameborder="0" style="width: 100%; height: 100%"></iframe>
         <div v-if="pdfShow" class="pdf-container-wrapper">
@@ -71,6 +76,7 @@
     import { buildImageViewerOptions, isPurePreviewEnabled } from '@repository/utils/imagePreview'
     import { createOrUpdateXmindViewer, destroyXmindViewer } from '@repository/utils/xmindPreview'
     import SourcePreviewTabs from '@repository/components/FilePreview/SourcePreviewTabs'
+    import excelEnhanceMixin from '@repository/components/FilePreview/excelEnhanceMixin'
     import Viewer from 'viewerjs'
 
     const PDFJS = require('pdfjs-dist')
@@ -101,6 +107,7 @@
     export default {
         name: 'OutsideFilePreview',
         components: { VueOfficeExcel, SourcePreviewTabs },
+        mixins: [excelEnhanceMixin],
         props: {
             extraParam: String
         },
@@ -113,19 +120,6 @@
                     isLoading: false
                 },
                 dialogWidth: window.innerWidth - 1000,
-                excelOptions: {
-                    xls: false, // 预览xlsx文件设为false；预览xls文件设为true
-                    minColLength: 0, // excel最少渲染多少列，如果想实现xlsx文件内容有几列，就渲染几列，可以将此值设置为0.
-                    minRowLength: 0, // excel最少渲染多少行，如果想实现根据xlsx实际函数渲染，可以将此值设置为0.
-                    widthOffset: 10, // 如果渲染出来的结果感觉单元格宽度不够，可以在默认渲染的列表宽度上再加 Npx宽
-                    heightOffset: 10, // 在默认渲染的列表高度上再加 Npx高
-                    beforeTransformData: (workbookData) => {
-                        return workbookData
-                    }, // 底层通过exceljs获取excel文件内容，通过该钩子函数，可以对获取的excel文件内容进行修改，比如某个单元格的数据显示不正确，可以在此自行修改每个单元格的value值。
-                    transformData: (workbookData) => {
-                        return workbookData
-                    } // 将获取到的excel数据进行处理之后且渲染到页面之前，可通过transformData对即将渲染的数据及样式进行修改，此时每个单元格的text值就是即将渲染到页面上的内容
-                },
                 previewExcel: false,
                 previewBasic: false,
                 basicFileText: '',
@@ -211,11 +205,15 @@
                     }
                     if (isOutDisplayType(res.data.data.suffix)) {
                         customizePreviewRemoteOfficeFile(Base64.encode(Base64.decode(this.extraParam))).then(async fileDate => {
-                            this.loading = false
-                            if (isExcel(res.data.data.suffix)) {
+                            const isExcelFile = isExcel(res.data.data.suffix)
+                            if (!isExcelFile) this.loading = false
+                            if (isExcelFile) {
+                                if (!await this.prepareExcelPreview(
+                                    fileDate.data,
+                                    isExcel(res.data.data.suffix) === 'xls'
+                                )) return
+                                this.loading = false
                                 this.previewExcel = true
-                                this.excelOptions.xls = res.data.data.suffix.endsWith('xls')
-                                this.dataSource = fileDate.data
                             } else if (isHtmlType(res.data.data.suffix)) {
                                 const url = URL.createObjectURL(fileDate.data)
                                 this.showFrame = true
@@ -276,6 +274,7 @@
                 this.hasError = true
             },
             cancel () {
+                this.destroyExcelPreview()
                 this.dataSource = ''
                 this.previewExcel = false
                 this.previewBasic = false
@@ -292,7 +291,6 @@
                 this.richTextShow = false
                 this.richTextSource = ''
                 this.richTextFilePath = ''
-                this.excelOptions.xls = false
                 window.resetWaterMark()
             },
             initWaterMark (param) {

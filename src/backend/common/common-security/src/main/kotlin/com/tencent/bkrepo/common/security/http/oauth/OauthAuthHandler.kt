@@ -62,15 +62,19 @@ open class OauthAuthHandler(
         require(authCredentials is OauthAuthCredentials)
         return try {
             val claims = JwtUtils.validateToken(
-                signingKey = RsaUtils.stringToPrivateKey(cryptoProperties.privateKeyStr2048PKCS8),
+                signingKey = RsaUtils.stringToPublicKey(cryptoProperties.publicKeyStr2048PKCS8),
                 token = authCredentials.token
             )
+            authenticationManager.checkOauthToken(authCredentials.token)
             val scopeList = claims.body["scope"] as? List<*>
-            val scope = scopeList?.joinToString(",")
-                ?: authenticationManager.findOauthToken(authCredentials.token)?.scope
                 ?: throw AuthenticationException("Invalid access token")
-            request.setAttribute(AUTHORITIES_KEY, scope)
+            request.setAttribute(AUTHORITIES_KEY, scopeList.joinToString(","))
             claims.body.subject
+        } catch (e: AuthenticationException) {
+            logger.info(
+                "invalid oauth token[${MaskPartStringUtil.maskPartString(authCredentials.token)}]: ${e.message}"
+            )
+            throw e
         } catch (e: Exception) {
             logger.info(
                 "invalid oauth token[${MaskPartStringUtil.maskPartString(authCredentials.token)}]: ${e.message}"

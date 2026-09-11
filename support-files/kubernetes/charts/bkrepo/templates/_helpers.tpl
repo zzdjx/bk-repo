@@ -255,18 +255,28 @@ Read a persisted secret: data key, nested application.yml, else dotted key.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if hasPrefix "${" ($existing | toString | trim) -}}
+{{- else -}}
 {{- $existing -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
 Resolve: explicit values > lookup ConfigMap > generate.
-Lookup reuses as-is so a later upgrade does not rotate the signing key.
+Lookup reuses as-is so a later upgrade does not rotate the key.
 Writes the result back to setDict so toYaml common.config emits it.
 Caches on .Values.common so one render yields one value.
+generator: "alphaNum" (default, length bytes) or "rsa" (PKCS#1 PEM private key).
+rsa borrows genCA for its 2048-bit key and drops the cert, because genPrivateKey
+is hardcoded to 4096 and neither takes a bit-length argument. 2048 keeps helm
+aligned with scripts/gen-crypto-keys.sh.
 */}}
 {{- define "bkrepo.secretKey.resolve" -}}
 {{- $root := .root -}}
 {{- $value := .value | toString | trim -}}
+{{- if hasPrefix "${" $value -}}
+{{- $value = "" -}}
+{{- end -}}
 {{- $out := "" -}}
 {{- if $value -}}
 {{- $out = $value -}}
@@ -282,12 +292,14 @@ Caches on .Values.common so one render yields one value.
     "dotted" .dotted) | trim -}}
 {{- if $existing -}}
 {{- $out = $existing -}}
+{{- else if eq (.generator | default "alphaNum") "rsa" -}}
+{{- $out = (genCA "bkrepo-crypto" 1).Key | trim -}}
 {{- else -}}
-{{- $out = randAlphaNum 32 -}}
+{{- $out = randAlphaNum (.length | default 32) -}}
 {{- end -}}
 {{- $_ := set $root.Values.common .cacheKey $out -}}
 {{- end -}}
-{{- if .setDict -}}
+{{- if and .setDict $out -}}
 {{- $_ := set .setDict .setKey $out -}}
 {{- end -}}
 {{- $out -}}
@@ -393,4 +405,45 @@ JWT signing key. Empty -> lookup ConfigMap, else generate.
 {{- fail "replicationUDP.secretKey must be at least 64 bytes (HS512)" -}}
 {{- end -}}
 {{- $key -}}
+{{- end -}}
+
+{{/*
+Fill security.crypto. Same path as JWT: explicit values > lookup ConfigMap > generate.
+Only private keys are stored; each service derives the public key from the private one.
+*/}}
+{{- define "bkrepo.crypto.material" -}}
+{{- $crypto := .Values.common.config.security.crypto -}}
+{{- include "bkrepo.crypto.privateKey" (dict "root" . "key" "privateKeyStr") -}}
+{{- include "bkrepo.crypto.privateKey" (dict "root" . "key" "privateKeyStr2048PKCS8") -}}
+{{- include "bkrepo.crypto.privateKey" (dict "root" . "key" "privateKeyStr2048PKCS1") -}}
+{{- include "bkrepo.secretKey.resolve" (dict
+    "root" .
+    "value" $crypto.aesKey
+    "cacheKey" "_generatedCryptoAesKey"
+    "nested" (list "security" "crypto" "aesKey")
+    "dotted" "security.crypto.aesKey"
+    "setDict" $crypto
+    "setKey" "aesKey") -}}
+{{- include "bkrepo.secretKey.resolve" (dict
+    "root" .
+    "value" $crypto.aesIv
+    "cacheKey" "_generatedCryptoAesIv"
+    "nested" (list "security" "crypto" "aesIv")
+    "dotted" "security.crypto.aesIv"
+    "setDict" $crypto
+    "setKey" "aesIv"
+    "length" 16) -}}
+{{- end -}}
+
+{{- define "bkrepo.crypto.privateKey" -}}
+{{- $crypto := .root.Values.common.config.security.crypto -}}
+{{- include "bkrepo.secretKey.resolve" (dict
+    "root" .root
+    "value" (index $crypto .key | default "")
+    "cacheKey" (printf "_generatedCrypto_%s" .key)
+    "nested" (list "security" "crypto" .key)
+    "dotted" (printf "security.crypto.%s" .key)
+    "setDict" $crypto
+    "setKey" .key
+    "generator" "rsa") -}}
 {{- end -}}

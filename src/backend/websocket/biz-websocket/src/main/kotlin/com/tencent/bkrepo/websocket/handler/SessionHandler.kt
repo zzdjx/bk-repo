@@ -42,6 +42,7 @@ import com.tencent.bkrepo.common.security.util.JwtUtils
 import com.tencent.bkrepo.websocket.config.WebSocketMetrics
 import com.tencent.bkrepo.websocket.constant.APP_ENDPOINT
 import com.tencent.bkrepo.websocket.constant.DESKTOP_ENDPOINT
+import com.tencent.bkrepo.websocket.constant.ENDPOINT
 import com.tencent.bkrepo.websocket.constant.SESSION_ID
 import com.tencent.bkrepo.websocket.constant.USER_ENDPOINT
 import com.tencent.bkrepo.websocket.service.WebsocketService
@@ -125,11 +126,13 @@ class SessionHandler(
                 val appId = authenticationManager.checkPlatformAccount(accessKey, secretKey)
                 session.attributes[PLATFORM_KEY] = appId
                 session.attributes[USER_KEY] = session.handshakeHeaders[AUTH_HEADER_UID]?.first()
+                session.attributes[ENDPOINT] = resolveEndpoint(uri.path)
             }
             uri.path.startsWith(APP_ENDPOINT) -> {
                 val token = session.handshakeHeaders[HttpHeaders.AUTHORIZATION]?.firstOrNull().orEmpty()
                 val claims = JwtUtils.validateToken(signingKey, token).payload
                 session.attributes[USER_KEY] = claims.subject
+                session.attributes[ENDPOINT] = APP_ENDPOINT
             }
             else -> throw AuthenticationException("invalid uri")
         }
@@ -138,6 +141,14 @@ class SessionHandler(
         logger.info("connection success: |$sessionId| $uri | $remoteId | ${session.attributes[USER_KEY]} ")
         webSocketMetrics.connectionCount.incrementAndGet()
         super.afterConnectionEstablished(session)
+    }
+
+    private fun resolveEndpoint(path: String): String {
+        return when {
+            path.startsWith(USER_ENDPOINT) -> USER_ENDPOINT
+            path.startsWith(DESKTOP_ENDPOINT) -> DESKTOP_ENDPOINT
+            else -> throw AuthenticationException("invalid uri")
+        }
     }
 
     companion object {

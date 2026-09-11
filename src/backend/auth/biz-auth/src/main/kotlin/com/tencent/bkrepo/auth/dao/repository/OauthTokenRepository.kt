@@ -36,6 +36,7 @@ interface OauthTokenRepository : MongoRepository<TOauthToken, String> {
     fun findFirstByAccessToken(accessToken: String): TOauthToken?
     fun findByUserId(userId: String): List<TOauthToken>
     fun findFirstByAccountIdAndRefreshToken(accountId: String, refreshToken: String): TOauthToken?
+    fun deleteByAccountIdAndRefreshToken(accountId: String, refreshToken: String): Long
     fun deleteByAccessToken(accessToken: String)
     fun deleteByAccountId(accountId: String)
     fun deleteByAccountIdAndUserId(accountId: String, userId: String)

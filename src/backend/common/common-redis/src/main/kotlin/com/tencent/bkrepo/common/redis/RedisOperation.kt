@@ -31,6 +31,7 @@ import org.springframework.data.redis.core.Cursor
 import org.springframework.data.redis.core.RedisCallback
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.core.ScanOptions
+import org.springframework.data.redis.core.script.DefaultRedisScript
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
@@ -41,6 +42,13 @@ class RedisOperation(private val redisTemplate: RedisTemplate<String, String>) {
 
     fun get(key: String): String? {
         return redisTemplate.opsForValue().get(key)
+    }
+
+    /**
+     * 原子读取并删除。使用 Lua `GET`+`DEL`，兼容 Redis 2.6+，避免 `GETDEL`（6.2+）。
+     */
+    fun getAndDelete(key: String): String? {
+        return redisTemplate.execute(GET_AND_DELETE_SCRIPT, listOf(key))
     }
 
     fun getAndSet(key: String, defaultValue: String, expiredInSecond: Long? = null): String? {
@@ -171,5 +179,12 @@ class RedisOperation(private val redisTemplate: RedisTemplate<String, String>) {
 
     fun <T> execute(action: RedisCallback<T>): T ? {
         return redisTemplate.execute(action)
+    }
+
+    companion object {
+        private val GET_AND_DELETE_SCRIPT = DefaultRedisScript(
+            "local v = redis.call('get', KEYS[1]); if v then redis.call('del', KEYS[1]) end; return v",
+            String::class.java
+        )
     }
 }

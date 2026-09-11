@@ -34,6 +34,7 @@ import com.tencent.bkrepo.websocket.constant.DESKTOP_ENDPOINT
 import com.tencent.bkrepo.websocket.constant.USER_ENDPOINT
 import com.tencent.bkrepo.websocket.dispatch.push.TransferPush
 import com.tencent.bkrepo.websocket.handler.SessionWebSocketHandlerDecoratorFactory
+import com.tencent.bkrepo.websocket.interceptor.ClipboardSubscribeInterceptor
 import com.tencent.bkrepo.websocket.listener.TransferPushListener
 import com.tencent.bkrepo.websocket.service.WebsocketService
 import io.micrometer.observation.ObservationRegistry
@@ -59,6 +60,7 @@ class WebsocketConfiguration(
     private val jwtAuthProperties: JwtAuthProperties,
     private val authenticationManager: AuthenticationManager,
     private val webSocketMetrics: WebSocketMetrics,
+    private val clipboardSubscribeInterceptor: ClipboardSubscribeInterceptor,
     private val registry: ObservationRegistry
 ) : WebSocketMessageBrokerConfigurer {
 
@@ -92,6 +94,7 @@ class WebsocketConfiguration(
         registration.taskExecutor().corePoolSize(defaultCorePoolSize)
             .maxPoolSize(defaultCorePoolSize * 2)
             .keepAliveSeconds(60)
+        registration.interceptors(clipboardSubscribeInterceptor)
     }
 
     @Override

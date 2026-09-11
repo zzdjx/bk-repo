@@ -37,8 +37,15 @@ import org.springframework.context.annotation.Configuration
 @EnableConfigurationProperties(CryptoProperties::class)
 class CryptoConfiguration {
     @Bean
-    fun rsaUtils(cryptoProperties: CryptoProperties) = RsaUtils(cryptoProperties)
+    fun cryptoPropertiesInitializer(cryptoProperties: CryptoProperties) =
+        CryptoPropertiesInitializer(cryptoProperties)
+
+    // initializer 作为入参，保证密钥归一化与校验先于任何使用方完成
+    @Bean
+    fun rsaUtils(cryptoProperties: CryptoProperties, initializer: CryptoPropertiesInitializer) =
+        RsaUtils(cryptoProperties)
 
     @Bean
-    fun aesUtils(cryptoProperties: CryptoProperties) = AESUtils(cryptoProperties)
+    fun aesUtils(cryptoProperties: CryptoProperties, initializer: CryptoPropertiesInitializer) =
+        AESUtils(cryptoProperties)
 }

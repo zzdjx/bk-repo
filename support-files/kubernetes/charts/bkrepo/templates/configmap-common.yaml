@@ -95,6 +95,7 @@ data:
     {{- $_ := include "bkrepo.jwtSecretKey" . -}}
     {{- $_ := include "bkrepo.servicePreviousSecretKey" . -}}
     {{- $_ := include "bkrepo.serviceSecretKey" . -}}
+    {{- $_ := include "bkrepo.crypto.material" . -}}
     {{- if .Values.replicationUDP.secretKey }}
     fdtp.server.secretKey: {{ include "bkrepo.fdtpSecretKey" . | quote }}
     {{- end }}

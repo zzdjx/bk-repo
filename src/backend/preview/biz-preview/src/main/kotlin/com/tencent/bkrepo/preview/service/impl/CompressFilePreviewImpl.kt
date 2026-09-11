@@ -105,7 +105,7 @@ class CompressFilePreviewImpl(
     private fun getArchiveInputStream(artifactInfo: ArtifactInfo): ArchiveInputStream {
         with(artifactInfo) {
             val fileExtension = PathUtils.resolveExtension(getArtifactName())
-            if (!Regex(COMPRESSED_FILE_TYPE_PATTERN).matches(fileExtension)) {
+            if (!Regex(COMPRESSED_FILE_TYPE_PATTERN, RegexOption.IGNORE_CASE).matches(fileExtension)) {
                 throw ErrorCodeException(ArtifactMessageCode.ARTIFACT_TYPE_UNSUPPORTED, fileExtension)
             }
             val node = nodeService.getNodeDetail(artifactInfo)
@@ -116,7 +116,9 @@ class CompressFilePreviewImpl(
             val context = ArtifactDownloadContext()
             var inputStream: InputStream = storageManager.loadArtifactInputStream(node, context.storageCredentials)
                 ?: throw ArtifactNotFoundException(getArtifactFullPath())
-            if (fileExtension == GZ_FILE_TYPE || fileExtension == TGZ_FILE_TYPE) {
+            if (fileExtension.equals(GZ_FILE_TYPE, ignoreCase = true) ||
+                fileExtension.equals(TGZ_FILE_TYPE, ignoreCase = true)
+            ) {
                 inputStream = GzipCompressorInputStream(inputStream)
             }
             return try {

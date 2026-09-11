@@ -54,8 +54,8 @@ class TranscodeJobEventHandler @Autowired constructor(
 
         for (condition in conditions) {
             if (condition.type == "Complete" && condition.status == "True") {
-                logger.info("k8s job $jobName completed successfully. Deleting it...")
-                deleteJobs(jobName, jobNamespace, labels)
+                logger.info("k8s job $jobName completed. Verifying mongo job status...")
+                verifyAndCleanup(jobName, jobNamespace, labels)
                 break
             }
 
@@ -71,6 +71,32 @@ class TranscodeJobEventHandler @Autowired constructor(
                 break
             }
         }
+    }
+
+    /**
+     * K8s Job Complete 时的核验。exit 0 不代表转码成功，
+     * 正常成功的任务在退出前会上报 SUCCESS。
+     * Complete 时 mongo 状态仍停留在 INIT/RUNNING，说明状态上报失败，
+     * 置为 FILE_ERROR 终态，不进入重试通道，避免永久占用转码配额
+     */
+    private fun verifyAndCleanup(jobName: String, jobNamespace: String, labels: Map<String, String>?) {
+        val jobId = labels?.get(TranscodeJobService.TRANSCODE_JOB_ID_LABEL)?.takeIf { it.isNotBlank() }
+        val status = jobId?.let { mediaTranscodeJobDao.findById(it) }?.status
+        if (status == MediaTranscodeJobStatus.INIT || status == MediaTranscodeJobStatus.RUNNING) {
+            logger.warn(
+                "k8s job $jobName completed but mongo job status is [$status] (report failed), " +
+                    "marking it as FILE_ERROR"
+            )
+            try {
+                mediaTranscodeJobDao.updateJobStatus(jobId!!, MediaTranscodeJobStatus.FILE_ERROR)
+                labels?.get(TranscodeJobService.TRANSCODE_JOB_PROJECT_ID)?.let {
+                    TranscodeMetrics.recordStatusChange(it, MediaTranscodeJobStatus.FILE_ERROR)
+                }
+            } catch (e: Exception) {
+                logger.error("failed to mark mongo job [$jobId] status [FILE_ERROR]", e)
+            }
+        }
+        deleteJobs(jobName, jobNamespace, labels)
     }
 
     private fun deleteJobs(

@@ -39,30 +39,39 @@ class AESUtils(
     cryptoProperties: CryptoProperties
 ) {
     init {
-        aes = AES(
-            Mode.CBC,
-            Padding.PKCS5Padding,
-            cryptoProperties.aesKey.toByteArray(),
-            cryptoProperties.aesIv.toByteArray()
-        )
-
+        // 未配置时不建实例，等真正用到再报错，避免用不上代理密钥的服务（如 proxy）启动即失败
+        aes = if (cryptoProperties.aesKey.isEmpty() || cryptoProperties.aesIv.isEmpty()) {
+            null
+        } else {
+            AES(
+                Mode.CBC,
+                Padding.PKCS5Padding,
+                cryptoProperties.aesKey.toByteArray(),
+                cryptoProperties.aesIv.toByteArray()
+            )
+        }
     }
 
     companion object {
-        lateinit var aes: AES
+        private var aes: AES? = null
+
+        private fun aes(): AES = checkNotNull(aes) {
+            "security.crypto.aesKey and security.crypto.aesIv are required, " +
+                "generate them with scripts/gen-crypto-keys.sh"
+        }
 
         /**
          * 加密
          */
         fun encrypt(value: String): String {
-            return aes.encryptBase64(value)
+            return aes().encryptBase64(value)
         }
 
         /**
          * 解密
          */
         fun decrypt(value: String): String {
-            return aes.decryptStr(value)
+            return aes().decryptStr(value)
         }
 
         fun encrypt(value: String, key: String): String {

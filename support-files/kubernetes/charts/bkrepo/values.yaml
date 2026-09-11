@@ -260,6 +260,28 @@ common:
         secretKey: ""
         ## 仅校验、不签发。换钥时填写；空升级不自动填。
         previousSecretKey: ""
+      ## 空则渲染时随机生成并写入 common ConfigMap，升级时从该 ConfigMap 读回，不轮钥。
+      ## 公钥留空即可，服务启动时从私钥推导；要固定密钥用 scripts/gen-crypto-keys.sh 生成后填入。
+      ## 升级前若 ConfigMap 已被删除或改名（换 release 名、跨集群重建等），lookup 读不回旧值，
+      ## 这里留空就会生成新钥，此时务必把旧值显式填进来：
+      ##   privateKeyStr 换钥后存量密文由代码兜底解密，并由 LegacyCryptoRewriteJob 重加密，不会丢；
+      ##   其余四把（2048PKCS8/2048PKCS1/aesKey/aesIv）没有兜底，换钥后对应密文一律解不开：
+      ##     OAuth token 重新授权即可，制品传输 crypt key 下次请求自愈，
+      ##     但 aesKey 换掉后存量 proxy 的 secretKey 解不开且没有重置接口，只能删除代理节点重建。
+      ## 旧值可从升级前的 ConfigMap 取：kubectl get cm <release>-common -o yaml
+      ## 从没配过这几项的老集群升级，旧值就是升级前代码里的硬编码默认值，可从上一个 release 的
+      ## CryptoProperties.kt 抄进来先保证平滑，之后再择期换钥（换钥影响见上）。
+      ## privateKeyStr 用 genCA 借壳生成 2048 位私钥后丢掉证书，因为 helm 的 genPrivateKey
+      ## 固定 4096 位且两者都不接收位数参数，看到 chart 生成 CA 不必困惑。
+      crypto:
+        privateKeyStr: ""
+        publicKeyStr: ""
+        privateKeyStr2048PKCS8: ""
+        publicKeyStr2048PKCS8: ""
+        privateKeyStr2048PKCS1: ""
+        publicKeyStr2048PKCS1: ""
+        aesKey: ""
+        aesIv: ""
     ## bkrepo存储配置
     storage:
       ## bkrepo receive默认配置

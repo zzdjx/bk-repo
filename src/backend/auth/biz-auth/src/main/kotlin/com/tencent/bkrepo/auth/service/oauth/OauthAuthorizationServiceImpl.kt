@@ -36,6 +36,7 @@ import com.tencent.bkrepo.auth.exception.OauthException
 import com.tencent.bkrepo.auth.message.AuthMessageCode
 import com.tencent.bkrepo.auth.model.TAccount
 import com.tencent.bkrepo.auth.model.TOauthToken
+import com.tencent.bkrepo.auth.pojo.enums.CredentialStatus
 import com.tencent.bkrepo.auth.pojo.enums.OauthErrorType
 import com.tencent.bkrepo.auth.pojo.enums.ResourceType
 import com.tencent.bkrepo.auth.pojo.oauth.AuthorizationGrantType
@@ -48,6 +49,7 @@ import com.tencent.bkrepo.auth.pojo.oauth.JsonWebKeySet
 import com.tencent.bkrepo.auth.pojo.oauth.OauthToken
 import com.tencent.bkrepo.auth.pojo.oauth.OidcConfiguration
 import com.tencent.bkrepo.auth.pojo.oauth.UserInfo
+import com.tencent.bkrepo.auth.pojo.token.CredentialSet
 import com.tencent.bkrepo.auth.service.OauthAuthorizationService
 import com.tencent.bkrepo.auth.service.UserService
 import com.tencent.bkrepo.auth.util.OauthUtils
@@ -120,18 +122,7 @@ class OauthAuthorizationServiceImpl(
     }
 
     override fun createToken(generateTokenRequest: GenerateTokenRequest) {
-        val authorization = HeaderUtils.getHeader(HttpHeaders.AUTHORIZATION)?.removePrefix(BASIC_AUTH_PREFIX)
-        val clientId: String
-        val clientSecret: String?
-        if (authorization.isNullOrBlank()) {
-            val request = HttpContextHolder.getRequest()
-            clientId = request.getParameter("client_id")
-            clientSecret = request.getParameter("client_secret")
-        } else {
-            val data = Base64Decoder.decodeStr(authorization).split(StringPool.COLON)
-            clientId = data.first()
-            clientSecret = data.last()
-        }
+        val (clientId, clientSecret) = resolveClientCredentials(generateTokenRequest)
         val tOauthToken =
             if (generateTokenRequest.grantType.equals(AuthorizationGrantType.AUTHORIZATION_CODE.value(), true)) {
                 createAuthorizationCodeToken(generateTokenRequest, clientId, clientSecret)
@@ -140,27 +131,50 @@ class OauthAuthorizationServiceImpl(
             } else {
                 throw OauthException(OauthErrorType.UNSUPPORTED_GRANT_TYPE, generateTokenRequest.grantType)
             }
-
-        val token = transfer(tOauthToken)
-        responseToken(token)
+        responseToken(transfer(tOauthToken))
     }
 
     override fun refreshToken(generateTokenRequest: GenerateTokenRequest) {
-        with(generateTokenRequest) {
-            Preconditions.checkNotNull(clientId, this::clientId.name)
-            Preconditions.checkNotNull(refreshToken, this::refreshToken.name)
-            var token = oauthTokenRepository.findFirstByAccountIdAndRefreshToken(clientId!!, refreshToken!!)
-                ?: throw OauthException(OauthErrorType.INVALID_GRANT, "refresh token[$refreshToken] not found")
-            val client = accountDao.findById(clientId!!)
-                ?: throw OauthException(OauthErrorType.INVALID_GRANT, "client[$clientId] not found")
-            token = buildOauthToken(
-                userId = token.userId,
-                nonce = OauthUtils.generateRandomString(10),
-                client = client,
-                openId = token.idToken != null
-            )
-            responseToken(transfer(token))
+        val (clientId, clientSecret) = resolveClientCredentials(generateTokenRequest)
+        val refreshToken = generateTokenRequest.refreshToken
+            ?: throw OauthException(OauthErrorType.INVALID_REQUEST, "refresh_token")
+        val existing = oauthTokenRepository.findFirstByAccountIdAndRefreshToken(clientId, refreshToken)
+            ?: throw OauthException(OauthErrorType.INVALID_GRANT, "refresh token[$refreshToken] not found")
+        val client = checkClientSecret(clientId, clientSecret, null, null)
+        val token = buildOauthToken(
+            userId = existing.userId,
+            nonce = OauthUtils.generateRandomString(10),
+            client = client,
+            openId = existing.idToken != null
+        )
+        val deleted = oauthTokenRepository.deleteByAccountIdAndRefreshToken(clientId, refreshToken)
+        if (deleted == 0L) {
+            oauthTokenRepository.deleteByAccessToken(token.accessToken)
+            throw OauthException(OauthErrorType.INVALID_GRANT, "refresh token[$refreshToken] not found")
         }
+        responseToken(transfer(token))
+    }
+
+    private fun resolveClientCredentials(generateTokenRequest: GenerateTokenRequest): Pair<String, String?> {
+        val authorization = HeaderUtils.getHeader(HttpHeaders.AUTHORIZATION)?.removePrefix(BASIC_AUTH_PREFIX)
+        if (!authorization.isNullOrBlank()) {
+            val decoded = Base64Decoder.decodeStr(authorization)
+            val separatorIndex = decoded.indexOf(StringPool.COLON)
+            if (separatorIndex <= 0) {
+                throw OauthException(OauthErrorType.INVALID_REQUEST, "client_id")
+            }
+            val headerClientId = decoded.substring(0, separatorIndex).takeIf { it.isNotBlank() }
+                ?: throw OauthException(OauthErrorType.INVALID_REQUEST, "client_id")
+            val headerClientSecret = decoded.substring(separatorIndex + 1).takeIf { it.isNotBlank() }
+            return headerClientId to headerClientSecret
+        }
+        val request = HttpContextHolder.getRequestOrNull()
+        val clientId = generateTokenRequest.clientId?.takeIf { it.isNotBlank() }
+            ?: request?.getParameter("client_id")?.takeIf { it.isNotBlank() }
+            ?: throw OauthException(OauthErrorType.INVALID_REQUEST, "client_id")
+        val clientSecret = generateTokenRequest.clientSecret?.takeIf { it.isNotBlank() }
+            ?: request?.getParameter("client_secret")?.takeIf { it.isNotBlank() }
+        return clientId to clientSecret
     }
 
     private fun createAuthorizationCodeToken(
@@ -168,20 +182,26 @@ class OauthAuthorizationServiceImpl(
         clientId: String,
         clientSecret: String?
     ): TOauthToken {
-        Preconditions.checkNotNull(generateTokenRequest.code, GenerateTokenRequest::code.name)
-        val code = generateTokenRequest.code!!
+        val code = generateTokenRequest.code
+            ?: throw OauthException(OauthErrorType.INVALID_REQUEST, "code")
         val userIdKey = "$clientId:$code:userId"
         val openIdKey = "$clientId:$code:openId"
         val nonceKey = "$clientId:$code:nonce"
-        val userId = redisOperation.get(userIdKey)
+        val challengeKey = "$clientId:$code:challenge"
+        val userId = redisOperation.getAndDelete(userIdKey)
             ?: throw OauthException(OauthErrorType.INVALID_REQUEST, "auth code check failed")
-        val openId = redisOperation.get(openIdKey).toBoolean()
-        val nonce = redisOperation.get(nonceKey)
-        val client = checkClientSecret(clientId, clientSecret, code, generateTokenRequest.codeVerifier)
-        val tOauthToken = buildOauthToken(userId, nonce, client, openId)
-
-        userService.addUserAccount(userId, client.id!!)
-        return tOauthToken
+        try {
+            val openId = redisOperation.get(openIdKey).toBoolean()
+            val nonce = redisOperation.get(nonceKey)
+            val client = checkClientSecret(clientId, clientSecret, code, generateTokenRequest.codeVerifier)
+            val accountId = client.id
+                ?: throw OauthException(OauthErrorType.INVALID_CLIENT, "client[$clientId] not found")
+            val tOauthToken = buildOauthToken(userId, nonce, client, openId)
+            userService.addUserAccount(userId, accountId)
+            return tOauthToken
+        } finally {
+            redisOperation.delete(listOf(openIdKey, nonceKey, challengeKey))
+        }
     }
 
     private fun createClientCredentialsToken(
@@ -190,7 +210,7 @@ class OauthAuthorizationServiceImpl(
     ): TOauthToken {
         Preconditions.checkNotBlank(clientSecret, "client_secret")
         val client = accountDao.findById(clientId) ?: throw ErrorCodeException(AuthMessageCode.AUTH_CLIENT_NOT_EXIST)
-        client.credentials.find {
+        enabledCredentials(client).find {
             it.authorizationGrantType == AuthorizationGrantType.CLIENT_CREDENTIALS &&
                 MessageDigest.isEqual(it.secretKey.toByteArray(), clientSecret?.toByteArray())
         } ?: throw ErrorCodeException(AuthMessageCode.AUTH_CLIENT_NOT_EXIST)
@@ -259,6 +279,7 @@ class OauthAuthorizationServiceImpl(
             signingKey = RsaUtils.stringToPublicKey(cryptoProperties.publicKeyStr2048PKCS8),
             token = accessToken
         )
+        oauthTokenRepository.findFirstByAccessToken(accessToken) ?: return null
         return claims.body.subject
     }
 
@@ -334,35 +355,53 @@ class OauthAuthorizationServiceImpl(
         code: String?,
         codeVerifier: String?
     ): TAccount {
-        if (clientSecret.isNullOrBlank() && codeVerifier.isNullOrBlank()) {
-            throw OauthException(OauthErrorType.INVALID_REQUEST, "need clientSecret or codeVerifier")
-        }
-
         val client = accountDao.findById(clientId)
             ?: throw OauthException(OauthErrorType.INVALID_CLIENT, "client[$clientId] not found")
-
-        val credential = if (clientSecret.isNullOrBlank()) {
-            client.credentials.find { it.authorizationGrantType == AuthorizationGrantType.AUTHORIZATION_CODE }
+        val challenge = if (code.isNullOrBlank()) {
+            null
         } else {
-            client.credentials.find {
-                it.authorizationGrantType == AuthorizationGrantType.AUTHORIZATION_CODE &&
-                    MessageDigest.isEqual(it.secretKey.toByteArray(), clientSecret.toByteArray())
-            }
+            redisOperation.get("$clientId:$code:challenge")
         }
-        if (credential == null) {
-            throw OauthException(OauthErrorType.UNAUTHORIZED_CLIENT, "auth secret check failed")
-        }
-
+        resolveOauthCredential(client, clientSecret, code, codeVerifier, challenge)
         if (!code.isNullOrBlank()) {
-            checkCodeVerifier(clientId, code, codeVerifier)
+            checkCodeVerifier(challenge, codeVerifier)
         }
         return client
     }
 
-    private fun checkCodeVerifier(clientId: String, code: String, codeVerifier: String?) {
-        val challengeKey = "$clientId:$code:challenge"
-        val value = redisOperation.get(challengeKey) ?: return
-        val (method, challenge) = value.split(StringPool.COLON)
+    private fun resolveOauthCredential(
+        client: TAccount,
+        clientSecret: String?,
+        code: String?,
+        codeVerifier: String?,
+        challenge: String?
+    ): CredentialSet {
+        val codeCredentials = enabledCredentials(client).filter {
+            it.authorizationGrantType == AuthorizationGrantType.AUTHORIZATION_CODE
+        }
+        val credential = if (!clientSecret.isNullOrBlank()) {
+            codeCredentials.find {
+                MessageDigest.isEqual(it.secretKey.toByteArray(), clientSecret.toByteArray())
+            }
+        } else if (codeCredentials.any { it.publicClient }) {
+            if (!code.isNullOrBlank() && (codeVerifier.isNullOrBlank() || challenge.isNullOrBlank())) {
+                throw OauthException(OauthErrorType.INVALID_REQUEST, "need clientSecret or codeVerifier")
+            }
+            codeCredentials.find { it.publicClient }
+        } else {
+            throw OauthException(OauthErrorType.UNAUTHORIZED_CLIENT, "auth secret check failed")
+        }
+        return credential ?: throw OauthException(OauthErrorType.UNAUTHORIZED_CLIENT, "auth secret check failed")
+    }
+
+    private fun enabledCredentials(client: TAccount) =
+        client.credentials.filter { it.status == CredentialStatus.ENABLE }
+
+    private fun checkCodeVerifier(challengeValue: String?, codeVerifier: String?) {
+        if (challengeValue.isNullOrBlank()) {
+            return
+        }
+        val (method, challenge) = challengeValue.split(StringPool.COLON)
         val pass = when (method) {
             "plain" -> MessageDigest.isEqual(challenge.toByteArray(), codeVerifier?.toByteArray())
             "S256" -> {

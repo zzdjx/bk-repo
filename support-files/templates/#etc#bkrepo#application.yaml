@@ -42,6 +42,16 @@ security:
   service:
     # required when enabled; no strength check
     secretKey: __BK_REPO_SERVICE_SECRET_KEY__
+  # generate: bash scripts/gen-crypto-keys.sh
+  crypto:
+    privateKeyStr: "__BK_REPO_CRYPTO_PRIVATE_KEY_STR__"
+    publicKeyStr: "__BK_REPO_CRYPTO_PUBLIC_KEY_STR__"
+    privateKeyStr2048PKCS8: "__BK_REPO_CRYPTO_PRIVATE_KEY_STR_2048_PKCS8__"
+    publicKeyStr2048PKCS8: "__BK_REPO_CRYPTO_PUBLIC_KEY_STR_2048_PKCS8__"
+    privateKeyStr2048PKCS1: "__BK_REPO_CRYPTO_PRIVATE_KEY_STR_2048_PKCS1__"
+    publicKeyStr2048PKCS1: "__BK_REPO_CRYPTO_PUBLIC_KEY_STR_2048_PKCS1__"
+    aesKey: "__BK_REPO_CRYPTO_AES_KEY__"
+    aesIv: "__BK_REPO_CRYPTO_AES_IV__"
 
 fdtp:
   server:
