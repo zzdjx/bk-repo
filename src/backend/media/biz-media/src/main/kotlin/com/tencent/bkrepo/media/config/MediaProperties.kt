@@ -17,6 +17,7 @@ class MediaProperties {
     var enabledLiveProjects: List<String> = mutableListOf()
     var reconnectByRepoProjects: MutableSet<String> = mutableSetOf()
     var rtcSecret: String = "rtc-stream-pull-secret-2m98cx37yr21"
+    var hookSecret: String = ""
     var remoteDevHost: String = ""
     var plugin: PluginProperties = PluginProperties()
 
