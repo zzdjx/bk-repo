@@ -62,6 +62,7 @@ bk-repo是一个基于微服务架构设计的制品管理平台
 
 ## Contributing
 - 关于 bk-repo 分支管理、issue 以及 pr 规范，请阅读 [Contributing](CONTRIBUTING.md)
+- 开发工作流与架构说明（含 AI 编码上下文）：[docs/README.md](docs/README.md)、[AGENTS.md](AGENTS.md)
 - [腾讯开源激励计划](https://opensource.tencent.com/contribution) 鼓励开发者的参与和贡献，期待你的加入
 
 

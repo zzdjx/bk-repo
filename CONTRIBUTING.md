@@ -8,8 +8,7 @@
 
 ## 设计文档
 
-任何功能和特性都应该要有相应的设计文档。设计文档需要归档到**docs/fetures**目录中，方便团队进行审阅，也方便后续加入的开发者了解特性设计
-详情。
+任何功能和特性都应该要有相应的设计文档。进行中的需求放在 [docs/requirements/](docs/requirements/)，已交付功能说明放在 [docs/features/](docs/features/)。跨服务、改存储语义或鉴权边界时，先写 [docs/superpowers/](docs/superpowers/) 再拆需求。
 
 ## 贡献功能与特性
 
