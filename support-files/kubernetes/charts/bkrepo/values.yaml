@@ -357,13 +357,13 @@ gateway:
   bkciPort:
   ## ci模式必填，蓝鲸paas域名
   bkPaasUrl: paas.example.com
-  ## ci模式必填，登录地址
+  ## ci模式必填，登录地址；ticket 模式同时作为登录服务根地址拼 get_info
   bkLoginUrl: http://paas.example.com/login/
   ## 是否开启多租户
   enableMultiTenantMode: false
   ## 运营租户默认
   oPTenantId: system
-  ## ticket 模式填登录服务根地址；ci/token 模式仍作 ssm token url
+  ## odc/太湖登录使用，不要删
   ssmTokenUrl:
   ## 蓝鲸apigw地址
   bkApigwUrl:

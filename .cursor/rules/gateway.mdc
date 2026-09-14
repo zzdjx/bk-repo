@@ -24,10 +24,10 @@ alwaysApply: false
 
 ## 登录态
 
-- `auth_mode=ticket`：Cookie / `X-DEVOPS-BK-TICKET` 走 `GET {oauth.url}/user/get_info?bk_ticket=`（`oauth.url` 只配登录服务根地址，path 写在 Lua 里）。成功看 `ret==0`，用户名取 `data.username`。Web 与 WebSocket 共用 `oauthUtil:verify_ticket(..., "ticket")`
+- `auth_mode=ticket`：Cookie / `X-DEVOPS-BK-TICKET` 走 `GET {bk_login_url}/user/get_info?bk_ticket=`（Helm `bkLoginUrl` / `BK_REPO_PAAS_LOGIN_URL`，path 写在 Lua 里）。成功看 `ret==0`，用户名取 `data.username`。Web 与 WebSocket 共用 `oauthUtil:verify_ticket(..., "ticket")`
+- `oauth.url`（`BK_REPO_SSM_TOKEN_URL`）留给 odc/太湖登录，不要删
 - 不要改用 `get_full_info`；部门信息不在网关登录里取
 - `auth_mode=token` 仍走 APIGW `bk_login/get_user`，不要接到 get_info
-- `input_type != "ticket"` 的 OAuth（`id_provider=bk_login`）路径不要改
 
 ## 禁止
 

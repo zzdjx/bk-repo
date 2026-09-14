@@ -27,8 +27,9 @@ graph LR
 
 网关登录态（`src/gateway/lua/auth/auth_web.lua`）：
 
-- `auth_mode=ticket`：`oauthUtil:verify_bk_ticket`，`GET {oauth.url}/user/get_info?bk_ticket=`（`oauth.url` 只配登录服务根地址），成功 `ret==0` 取 `data.username`，写入 `X-BKREPO-UID`；下游 token 仍是原始 `bk_ticket`
+- `auth_mode=ticket`：`oauthUtil:verify_bk_ticket`，`GET {bk_login_url}/user/get_info?bk_ticket=`（`bkLoginUrl` / `BK_REPO_PAAS_LOGIN_URL` 配登录服务根地址），成功 `ret==0` 取 `data.username`，写入 `X-BKREPO-UID`；下游 token 仍是原始 `bk_ticket`
 - `auth_mode=token`：APIGW `bk_login/get_user`（多租户走 userinfo）
+- `auth_mode=odc`：太湖登录走 `oauth.url`（`BK_REPO_SSM_TOKEN_URL`），不要删
 - 网关只识别用户，不替代项目/仓库/节点鉴权
 
 ## 目录

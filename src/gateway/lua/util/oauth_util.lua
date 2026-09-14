@@ -48,8 +48,9 @@ function _M:verify_mobile_gateway()
     return nil
 end
 
---- ticket 模式：GET {oauth.url}/user/get_info?bk_ticket=，只取 username。
---- oauth.url 只配登录服务根地址，path 写在代码里。成功码是 ret==0，用户名在 data.username。
+--- ticket 模式：GET {bk_login_url}/user/get_info?bk_ticket=，只取 username。
+--- bk_login_url 配登录服务根地址，path 写在代码里。oauth.url 留给 odc/太湖登录。
+--- 成功码是 ret==0，用户名在 data.username。
 function _M:verify_bk_ticket(bk_ticket)
     local user_cache = ngx.shared.user_info_store
     local user_cache_value = user_cache:get(bk_ticket)
@@ -57,7 +58,11 @@ function _M:verify_bk_ticket(bk_ticket)
         return user_cache_value
     end
 
-    local base = config.oauth.url or ""
+    local base = config.bk_login_url or ""
+    local qpos = string.find(base, "?", 1, true)
+    if qpos then
+        base = string.sub(base, 1, qpos - 1)
+    end
     if string.sub(base, -1) == "/" then
         base = string.sub(base, 1, -2)
     end

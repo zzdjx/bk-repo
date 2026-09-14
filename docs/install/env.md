@@ -23,7 +23,7 @@
 | BK_REPO_HOME               | bkrepo部署目录       | /data/bkce                                                                                            |
 | BK_REPO_LOGS_DIR           | bkrepo日志目录       | /data/logs                                                                                            |
 | BK_REPO_PAAS_FQDN          | bkrepo paas fqdn | paas.example.com                                                                                      |
-| BK_REPO_PAAS_LOGIN_URL     | 蓝鲸paas登录地址       | http://paas.example.com:80/login/?c_url=                                                              |
+| BK_REPO_PAAS_LOGIN_URL     | 蓝鲸paas登录地址；ticket 模式同时作为登录服务根地址拼 get_info | http://paas.example.com:80/login/?c_url= |
 | BK_REPO_AUTHORIZATION      | bkrepo认证token    | Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw== |
 | BK_REPO_GATEWAY_CORS_ALLOW_LIST | 网关跨域允许列表         |                                                                                                       |
 | BK_REPO_GATEWAY_DNS_ADDR   | 网关dns解析服务地址      | 127.0.0.1:53                                                                                          |
@@ -91,7 +91,7 @@
 | BK_CI_AUTH_ENV            | 蓝盾auth环境         | prod                             |
 | BK_CI_PUBLIC_URL          | 蓝盾url              | http://devops.example.com        |
 | BK_CI_AUTH_TOKEN          | 蓝盾auth token       |                                  |
-| BK_REPO_SSM_TOKEN_URL     | ssm token 路径；ticket 模式填登录服务根地址 | http://login.example.com |
+| BK_REPO_SSM_TOKEN_URL     | ssm / odc 太湖登录地址 | |
 
 ## docker api配置项
 
