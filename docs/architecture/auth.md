@@ -25,6 +25,12 @@ graph LR
 
 仓库访问模式见 `TRepoAuthConfig`：`DEFAULT` vs `STRICT`。STRICT 下 Generic 仓要做路径级校验，不要改短路逻辑。临时 token 的 `permits` 递减必须走 `AuthTemporaryTokenDao.decrementPermits`（`findAndModify`），中心/边缘 token 实现不同，不能混用。
 
+网关登录态（`src/gateway/lua/auth/auth_web.lua`）：
+
+- `auth_mode=ticket`：`oauthUtil:verify_bk_ticket`，`GET {oauth.url}/user/get_info?bk_ticket=`（`oauth.url` 只配登录服务根地址），成功 `ret==0` 取 `data.username`，写入 `X-BKREPO-UID`；下游 token 仍是原始 `bk_ticket`
+- `auth_mode=token`：APIGW `bk_login/get_user`（多租户走 userinfo）
+- 网关只识别用户，不替代项目/仓库/节点鉴权
+
 ## 目录
 
 ```text
@@ -78,3 +84,4 @@ src/gateway/lua/auth/
 | 日期 | 变更 |
 |------|------|
 | 2026-09-14 | 初版；补 STRICT 模式、token permits、单 Bean 约束 |
+| 2026-09-14 | ticket 模式验票从 SSM OAuth 改为登录服务 `get_info` |

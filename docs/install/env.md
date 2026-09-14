@@ -91,10 +91,7 @@
 | BK_CI_AUTH_ENV            | 蓝盾auth环境         | prod                             |
 | BK_CI_PUBLIC_URL          | 蓝盾url              | http://devops.example.com        |
 | BK_CI_AUTH_TOKEN          | 蓝盾auth token       |                                  |
-| BK_REPO_SSM_ENV           | 蓝鲸ssm环境          | prod                             |
-| BK_REPO_SSM_HOST          | 蓝鲸ssm主机地址      | bkssm.service.consul             |
-| BK_REPO_SSM_HTTP_PORT     | 蓝鲸ssm http端口     | 5000                             |
-| BK_REPO_SSM_IP0           | 蓝鲸ssm ip           | bkssm.service.consul             |
+| BK_REPO_SSM_TOKEN_URL     | ssm token 路径；ticket 模式填登录服务根地址 | http://login.example.com |
 
 ## docker api配置项
 

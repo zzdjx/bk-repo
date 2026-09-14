@@ -22,6 +22,13 @@ alwaysApply: false
 - 改前缀或服务名时，核对后端 `@RequestMapping` 与 `docs/apidoc`
 - Docker / OCI Registry 走专用 vhost，不要套 Generic 的 user/service 规则
 
+## 登录态
+
+- `auth_mode=ticket`：Cookie / `X-DEVOPS-BK-TICKET` 走 `GET {oauth.url}/user/get_info?bk_ticket=`（`oauth.url` 只配登录服务根地址，path 写在 Lua 里）。成功看 `ret==0`，用户名取 `data.username`。Web 与 WebSocket 共用 `oauthUtil:verify_ticket(..., "ticket")`
+- 不要改用 `get_full_info`；部门信息不在网关登录里取
+- `auth_mode=token` 仍走 APIGW `bk_login/get_user`，不要接到 get_info
+- `input_type != "ticket"` 的 OAuth（`id_provider=bk_login`）路径不要改
+
 ## 禁止
 
 - 不要把项目/仓库/节点鉴权只放在 Lua，替代服务内 `@Permission` / `PermissionManager`
