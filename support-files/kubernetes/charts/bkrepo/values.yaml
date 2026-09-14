@@ -492,6 +492,8 @@ repository:
 
 ## 认证服务配置
 auth:
+  ## 写入 auth ConfigMap 根级的额外 application.yml，没有则留空 map
+  commonConfig: {}
   config:
     ## 是否允许使用内置默认口令 password 登录。生产环境必须为 false
     allowDefaultPwd: false
