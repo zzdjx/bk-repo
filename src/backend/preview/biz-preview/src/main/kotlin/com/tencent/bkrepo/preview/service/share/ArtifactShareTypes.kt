@@ -28,6 +28,7 @@ object ArtifactShareTypes {
             ext in CODE_EXTS -> "code"
             ext in VIDEO_EXTS -> "video"
             ext in AUDIO_EXTS -> "audio"
+            ext == "glb" -> "3d"
             else -> null
         }
     }

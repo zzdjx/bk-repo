@@ -86,6 +86,18 @@ class PreviewConfig {
     val maxFileSize: Long = 50
 
     /**
+     * 三维预览体积告警阈值（MB）。小于等于 0 表示不告警。
+     */
+    @Value("\${preview.online3d.warnFileSize:50}")
+    val online3dWarnFileSize: Long = 50
+
+    /**
+     * 三维预览体积硬顶（MB）。小于等于 0 表示不限制。
+     */
+    @Value("\${preview.online3d.maxFileSize:300}")
+    val online3dMaxFileSize: Long = 300
+
+    /**
      * 是否删除临时文件
      */
     @Value("\${preview.isDeleteTmpFile:true}")

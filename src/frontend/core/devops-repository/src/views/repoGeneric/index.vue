@@ -394,7 +394,7 @@
     import compressedFileTable from './compressedFileTable'
     import previewBasicFileDialog from './previewBasicFileDialog'
     import { Base64 } from 'js-base64'
-    import { isCode, isCompressed, isMedia, isOutDisplayType, isText } from '@repository/utils/file'
+    import { isCode, isCompressed, isGlb, isMedia, isOutDisplayType, isText } from '@repository/utils/file'
     import {
         CLIENT_DOWNLOAD_CANCELLED,
         CLIENT_DOWNLOAD_FAILED,
@@ -1909,7 +1909,7 @@
             },
 
             canOpenFilePreview (path) {
-                return Boolean(isOutDisplayType(path) || (this.localRepo && isMedia(path)))
+                return Boolean(isOutDisplayType(path) || (this.localRepo && (isMedia(path) || isGlb(path))))
             },
             isCompressedFile (path) {
                 return Boolean(isCompressed(path))

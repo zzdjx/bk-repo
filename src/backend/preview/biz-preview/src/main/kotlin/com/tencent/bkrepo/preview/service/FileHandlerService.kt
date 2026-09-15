@@ -36,9 +36,11 @@ import com.tencent.bkrepo.common.artifact.api.ArtifactInfo
 import com.tencent.bkrepo.preview.config.configuration.PreviewConfig
 import com.tencent.bkrepo.preview.constant.PreviewMessageCode
 import com.tencent.bkrepo.preview.exception.PreviewInvalidException
+import com.tencent.bkrepo.preview.exception.PreviewNotFoundException
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.pojo.FileType
 import com.tencent.bkrepo.preview.pojo.PreviewInfo
+import com.tencent.bkrepo.preview.pojo.Watermark
 import com.tencent.bkrepo.preview.utils.FileUtils
 import com.tencent.bkrepo.preview.utils.UrlEncoderUtils
 import com.tencent.bkrepo.preview.utils.WebUtils
@@ -51,7 +53,8 @@ import java.util.UUID
 @Component
 class FileHandlerService(
     private val config: PreviewConfig,
-    private val resourceService: CommonResourceService
+    private val resourceService: CommonResourceService,
+    private val fileTransferService: FileTransferService
 ) {
 
     companion object {
@@ -68,13 +71,7 @@ class FileHandlerService(
         val watermark = resourceService.getWatermark(decodedParams)
         logger.info("Preview info, url：{}, previewType：{}, fileTemplate: {}",
             fileAttribute.url, fileAttribute.type, fileTemplate)
-        return PreviewInfo(
-            fileName = fileAttribute.fileName,
-            fileType = fileAttribute.type!!.name,
-            suffix = fileAttribute.suffix,
-            fileTemplate = fileTemplate,
-            watermark = watermark
-        )
+        return toPreviewInfo(fileAttribute, fileTemplate, watermark)
     }
 
     /**
@@ -86,13 +83,7 @@ class FileHandlerService(
         val watermark = resourceService.getWatermark(decodedParams)
         logger.info("Preview info, url：{}, previewType：{}, fileTemplate: {}",
             fileAttribute.url, fileAttribute.type, fileTemplate)
-        return PreviewInfo(
-            fileName = fileAttribute.fileName,
-            fileType = fileAttribute.type!!.name,
-            suffix = fileAttribute.suffix,
-            fileTemplate = fileTemplate,
-            watermark = watermark
-        )
+        return toPreviewInfo(fileAttribute, fileTemplate, watermark)
     }
 
     /**
@@ -119,7 +110,43 @@ class FileHandlerService(
             type?.name == FileType.MEDIA.name -> FilePreview.MEDIA_FILE_PREVIEW_PAGE
             type?.name == FileType.SVG.name -> FilePreview.SVG_FILE_PREVIEW_PAGE
             type?.name == FileType.JSX.name -> FilePreview.JSX_FILE_PREVIEW_PAGE
+            type?.name == FileType.ONLINE3D.name && storageType == 0 && Online3dPreview.isGlb(suffix) ->
+                FilePreview.ONLINE3D_PREVIEW_PAGE
             else -> FilePreview.NOT_SUPPORTED_FILE_PAGE
+        }
+    }
+
+    private fun toPreviewInfo(
+        fileAttribute: FileAttribute,
+        fileTemplate: String,
+        watermark: Watermark?
+    ): PreviewInfo {
+        val isOnline3dPreview = fileTemplate == FilePreview.ONLINE3D_PREVIEW_PAGE
+        return PreviewInfo(
+            fileName = fileAttribute.fileName,
+            fileType = fileAttribute.type?.name,
+            suffix = fileAttribute.suffix,
+            fileTemplate = fileTemplate,
+            watermark = watermark,
+            warnFileSize = config.online3dWarnFileSize.takeIf { isOnline3dPreview },
+            maxFileSize = config.online3dMaxFileSize.takeIf { isOnline3dPreview },
+            size = resolveOnline3dSourceSize(fileAttribute, fileTemplate)
+        )
+    }
+
+    private fun resolveOnline3dSourceSize(fileAttribute: FileAttribute, fileTemplate: String): Long? {
+        if (fileTemplate != FilePreview.ONLINE3D_PREVIEW_PAGE || fileAttribute.storageType != 0) {
+            return null
+        }
+        return try {
+            fileTransferService.originalFileSize(fileAttribute)
+        } catch (e: PreviewNotFoundException) {
+            logger.warn(
+                "Resolve glb size failed, project [${fileAttribute.projectId}], " +
+                    "repo [${fileAttribute.repoName}], path [${fileAttribute.artifactUri}]",
+                e
+            )
+            null
         }
     }
 

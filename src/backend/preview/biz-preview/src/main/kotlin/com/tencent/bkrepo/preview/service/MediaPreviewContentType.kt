@@ -1,7 +1,7 @@
 package com.tencent.bkrepo.preview.service
 
 /**
- * 内联预览按后缀强制的响应 Content-Type（媒体、PDF、PPTX）。
+ * 内联预览按后缀强制的响应 Content-Type（媒体、PDF、PPTX、GLB）。
  */
 object MediaPreviewContentType {
     private val SUFFIX_TO_CONTENT_TYPE = mapOf(
@@ -32,7 +32,8 @@ object MediaPreviewContentType {
         "pptx" to "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "ppsx" to "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
         "pptm" to "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
-        "ppt" to "application/vnd.ms-powerpoint"
+        "ppt" to "application/vnd.ms-powerpoint",
+        "glb" to "model/gltf-binary"
     )
 
     /**

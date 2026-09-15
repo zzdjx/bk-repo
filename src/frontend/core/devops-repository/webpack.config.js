@@ -34,7 +34,10 @@ module.exports = (env, argv) => {
                 { from: path.join(__dirname, './static'), to: dist },
                 { from: path.join(__dirname, '../../../../versionLogs'), to: `${dist}/versionLogs` },
                 { from: path.join(__dirname, './public'), to: dist },
-                { from: path.join(frontendNodeModules, '@babel/standalone/babel.min.js'), to: `${dist}/libs/babel.min.js` }
+                { from: path.join(frontendNodeModules, '@babel/standalone/babel.min.js'), to: `${dist}/libs/babel.min.js` },
+                { from: path.join(frontendNodeModules, '@google/model-viewer/dist/model-viewer.min.js'), to: `${dist}/libs/model-viewer/model-viewer.min.js` },
+                { from: path.join(frontendNodeModules, 'three/examples/jsm/libs/draco/gltf'), to: `${dist}/libs/model-viewer/draco` },
+                { from: path.join(frontendNodeModules, 'meshoptimizer/meshopt_decoder.js'), to: `${dist}/libs/model-viewer/meshopt_decoder.js` }
             ]
         }),
         new MonacoWebpackPlugin()

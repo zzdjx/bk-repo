@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test
 @DisplayName("PPTX 内嵌媒体 part 查询参数")
 class FileHandlerServiceEmbeddedPartTest {
 
-    private val service = FileHandlerService(PreviewConfig(), mockk<CommonResourceService>())
+    private val service = FileHandlerService(PreviewConfig(), mockk<CommonResourceService>(), mockk())
 
     @Test
     fun `blank part is ignored`() {
