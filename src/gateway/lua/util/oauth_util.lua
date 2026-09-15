@@ -66,7 +66,7 @@ function _M:verify_bk_ticket(bk_ticket)
     if string.sub(base, -1) == "/" then
         base = string.sub(base, 1, -2)
     end
-    local addr = base .. "/user/get_info?bk_ticket=" .. ngx.escape_uri(bk_ticket)
+    local addr = base .. "/user/get_info/?bk_ticket=" .. ngx.escape_uri(bk_ticket)
 
     local http_cli = http.new()
     --- 分阶段设置超时：连接超时2s，发送超时3s，读取超时10s
