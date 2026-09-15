@@ -109,10 +109,6 @@ function _M:verify_bk_ticket(bk_ticket)
     return user_cache_value
 end
 
-function _M:verify_ticket(bk_ticket, input_type)
-    return self:verify_bk_ticket(bk_ticket)
-end
-
 function _M:verify_bk_token(auth_url, token, force_refresh)
     local user_cache = ngx.shared.user_info_store
     --- force_refresh 为 true 时跳过本地缓存，直接向远端拉取最新用户信息（用于时区等信息变更后主动刷新）

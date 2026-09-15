@@ -71,7 +71,7 @@ elseif config.auth_mode == "ticket" then
         bk_ticket = urlUtil:parseUrl(ngx.var.request_uri)["x-devops-bk-ticket"]
     end
     if bk_ticket ~= nil then
-        username = oauthUtil:verify_ticket(bk_ticket, "ticket")
+        username = oauthUtil:verify_bk_ticket(bk_ticket)
         ngx.header["x-bk-tenant-id"] = "system"
         token = bk_ticket
     else
