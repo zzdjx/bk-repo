@@ -29,6 +29,7 @@ package com.tencent.bkrepo.common.security.crypto
 
 import com.tencent.bkrepo.common.security.util.AESUtils
 import com.tencent.bkrepo.common.security.util.RsaUtils
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -37,8 +38,10 @@ import org.springframework.context.annotation.Configuration
 @EnableConfigurationProperties(CryptoProperties::class)
 class CryptoConfiguration {
     @Bean
-    fun cryptoPropertiesInitializer(cryptoProperties: CryptoProperties) =
-        CryptoPropertiesInitializer(cryptoProperties)
+    fun cryptoPropertiesInitializer(
+        cryptoProperties: CryptoProperties,
+        store: ObjectProvider<CryptoPropertiesStore>
+    ) = CryptoPropertiesInitializer(cryptoProperties, store.ifAvailable)
 
     // initializer 作为入参，保证密钥归一化与校验先于任何使用方完成
     @Bean

@@ -9,14 +9,24 @@ import com.tencent.bkrepo.common.security.crypto.CryptoProperties
 import org.slf4j.LoggerFactory
 
 class CryptKeyDecryptor(
-    cryptoProperties: CryptoProperties
+    private val cryptoProperties: CryptoProperties
 ) {
 
-    private val rsa = RSA(
-        cryptoProperties.rsaAlgorithm,
-        cryptoProperties.privateKeyStr2048PKCS1,
-        cryptoProperties.publicKeyStr2048PKCS1,
-    )
+    /**
+     * 密钥会被 [com.tencent.bkrepo.common.security.crypto.CryptoPropertiesInitializer] 归一化并可能被 DB keyring
+     * 覆盖，而本 Bean 所在的 ArtifactAutoConfiguration 排在 SecurityAutoConfiguration 之前创建。
+     * 延迟到首次使用再取，避免构造期拿到未归一化或未被 DB 覆盖的旧密钥。
+     */
+    private val rsa by lazy {
+        check(cryptoProperties.privateKeyStr2048PKCS1.isNotEmpty()) {
+            "security.crypto.privateKeyStr2048PKCS1 is required when artifact.crypt.enabled is true"
+        }
+        RSA(
+            cryptoProperties.rsaAlgorithm,
+            cryptoProperties.privateKeyStr2048PKCS1,
+            cryptoProperties.publicKeyStr2048PKCS1,
+        )
+    }
 
 
     fun getKey(encryptedKey: String): String {
