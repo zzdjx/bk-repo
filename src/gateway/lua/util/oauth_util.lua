@@ -48,112 +48,64 @@ function _M:verify_mobile_gateway()
     return nil
 end
 
-function _M:verify_ticket(bk_ticket, input_type)
+--- ticket 模式：GET {bk_login_url}/user/get_info?bk_ticket=，只取 username。
+--- bk_login_url 配登录服务根地址，path 写在代码里。oauth.url 留给 odc/太湖登录。
+--- 成功码是 ret==0，用户名在 data.username。
+function _M:verify_bk_ticket(bk_ticket)
     local user_cache = ngx.shared.user_info_store
     local user_cache_value = user_cache:get(bk_ticket)
-    if user_cache_value == nil then
-        --- 初始化HTTP连接
-        local httpc = http.new()
-        --- 分阶段设置超时：连接超时2s，发送超时3s，读取超时10s
-        httpc:set_timeouts(2000, 3000, 10000)
-        --- 开始连接
-        local ok, conn_err = httpc:connect(config.oauth.ip, config.oauth.port)
-        if not ok then
-            ngx.log(ngx.ERR, "verify_ticket(): failed to connect oauth server: ", conn_err,
-                    " ip=", tostring(config.oauth.ip), " port=", tostring(config.oauth.port))
-            ngx.exit(401)
-            return
-        end
-
-        --- 组装请求body
-        if input_type == "ticket" then
-            requestBody = {
-                env_name = config.oauth.env,
-                app_code = config.oauth.app_code,
-                app_secret = config.oauth.app_secret,
-                grant_type = "authorization_code",
-                id_provider = "bk_login_ied",
-                bk_ticket = bk_ticket
-            }
-        else
-            requestBody = {
-                grant_type = "authorization_code",
-                id_provider = "bk_login",
-                bk_token = bk_ticket
-            }
-        end
-
-        --- 转换请求内容
-        local requestBodyJson = json.encode(requestBody)
-        if requestBodyJson == nil then
-            ngx.log(ngx.ERR, "failed to encode auth/token request body: ", logUtil:dump(requestBody))
-            ngx.exit(401)
-            return
-        end
-
-        --- 发送请求
-        -- local url = config.oauth.scheme .. config.oauth.ip  .. config.oauth.loginUrl .. bk_token
-        local url = config.oauth.url
-        local httpHeaders
-        if input_type == "ticket" then
-            httpHeaders = {
-                ["Host"] = config.oauth.host,
-                ["Accept"] = "application/json",
-                ["Content-Type"] = "application/json"
-            }
-        else
-            httpHeaders = {
-                ["Host"] = config.oauth.host,
-                ["Accept"] = "application/json",
-                ["Content-Type"] = "application/json",
-                ["X-BK-APP-CODE"] = config.oauth.app_code,
-                ["X-BK-APP-SECRET"] = config.oauth.app_secret
-            }
-        end
-        local res, err = httpc:request({
-            path = url,
-            method = "POST",
-            headers = httpHeaders,
-            body = requestBodyJson
-        })
-        --- 判断是否出错了
-        if not res then
-            ngx.log(ngx.ERR, "failed to request get_ticket: ", err)
-            ngx.exit(401)
-            return
-        end
-        --- 判断返回的状态码是否是200
-        if res.status ~= 200 then
-            ngx.log(ngx.STDERR, "failed to request get_ticket, status: ", res.status)
-            ngx.exit(401)
-            return
-        end
-        --- 获取所有回复
-        local responseBody = res:read_body()
-        --- 设置HTTP保持连接
-        httpc:set_keepalive(60000, 5)
-        --- 转换JSON的返回数据为TABLE
-        local result = json.decode(responseBody)
-        --- 判断JSON转换是否成功
-        if result == nil then
-            ngx.log(ngx.ERR, "failed to parse get_ticket response：", responseBody)
-            ngx.exit(401)
-            return
-        end
-
-        --- 判断返回码:Q!
-        if result.code ~= 0 then
-            ngx.log(ngx.INFO, "invalid get_ticket: ", result.message)
-            ngx.exit(401)
-            return
-        end
-        if input_type == "ticket" then
-            user_cache_value = result.data.user_id
-        else
-            user_cache_value = result.data.identity.username
-        end
-        user_cache:set(bk_ticket, user_cache_value, 180)
+    if user_cache_value ~= nil then
+        return user_cache_value
     end
+
+    local base = config.bk_login_url or ""
+    local qpos = string.find(base, "?", 1, true)
+    if qpos then
+        base = string.sub(base, 1, qpos - 1)
+    end
+    if string.sub(base, -1) == "/" then
+        base = string.sub(base, 1, -2)
+    end
+    local addr = base .. "/user/get_info/?bk_ticket=" .. ngx.escape_uri(bk_ticket)
+
+    local http_cli = http.new()
+    --- 分阶段设置超时：连接超时2s，发送超时3s，读取超时10s
+    http_cli:set_timeouts(2000, 3000, 10000)
+    local res, err = http_cli:request_uri(addr, {
+        method = "GET",
+        ssl_verify = false,
+        headers = {
+            ["Accept"] = "application/json"
+        }
+    })
+    if not res then
+        ngx.log(ngx.ERR, "failed to request login get_info: ", err)
+        ngx.exit(401)
+        return
+    end
+    if res.status ~= 200 then
+        ngx.log(ngx.STDERR, "failed to request login get_info, status: ", res.status)
+        ngx.exit(401)
+        return
+    end
+    local result = json.decode(res.body)
+    if result == nil then
+        ngx.log(ngx.ERR, "failed to parse login get_info response")
+        ngx.exit(401)
+        return
+    end
+    if result.ret ~= 0 then
+        ngx.log(ngx.INFO, "invalid bk_ticket, ret: ", tostring(result.ret), " msg: ", tostring(result.msg))
+        ngx.exit(401)
+        return
+    end
+    if result.data == nil or result.data.username == nil or result.data.username == "" then
+        ngx.log(ngx.ERR, "invalid login get_info response, missing username")
+        ngx.exit(401)
+        return
+    end
+    user_cache_value = result.data.username
+    user_cache:set(bk_ticket, user_cache_value, 180)
     return user_cache_value
 end
 

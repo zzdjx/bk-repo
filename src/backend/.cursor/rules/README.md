@@ -1,6 +1,8 @@
 # BK-REPO 后端开发规则
 
-本目录包含 BK-REPO 后端项目的 Cursor AI 开发规则，使用 `.mdc` 格式（带元数据的 Markdown）。
+仓库级工作流（先读 docs、同步文档）在仓库根 [`.cursor/rules/workflow.mdc`](../../../.cursor/rules/workflow.mdc)，不在本目录重复。
+
+本目录只放后端分层编码规范，使用 `.mdc` 格式（带元数据的 Markdown）。
 
 ## 📁 规则文件
 

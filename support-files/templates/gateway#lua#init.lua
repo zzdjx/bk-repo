@@ -37,15 +37,12 @@ config = {
     nodes_url = "/v1/catalog/nodes"
   },
   oauth = {  -- 对接蓝鲸权限中心才需要的配置
-    ip = "__BK_REPO_SSM_IP0__",
-    env = "__BK_REPO_SSM_ENV__",
-    port = "__BK_REPO_SSM_HTTP_PORT__",
-    host = "__BK_REPO_SSM_HOST__",
-    url = "__BK_REPO_SSM_TOKEN_URL__",     -- 接口路径
+    url = "__BK_REPO_SSM_TOKEN_URL__",     -- odc/太湖登录使用，不要删
     app_code = "__BK_REPO_APP_CODE__",
     app_secret = "__BK_REPO_APP_TOKEN__",
     apigw_url = "__BK_APIGW_URL__"
   },
+  bk_login_url = "__BK_REPO_PAAS_LOGIN_URL__", -- ticket 模式拼 /user/get_info
   bkrepo = {
     authorization = "__BK_REPO_AUTHORIZATION__",
     domain = "__BK_REPO_DOMAIN__"

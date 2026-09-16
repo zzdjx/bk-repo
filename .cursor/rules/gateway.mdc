@@ -1,0 +1,36 @@
+---
+description: bk-repo OpenResty 网关路由与鉴权
+globs: src/gateway/**/*.{conf,lua}
+alwaysApply: false
+---
+
+# 网关
+
+网关只做路由、鉴权和 URI 改写，不做业务。
+
+## 两条入口
+
+- 浏览器：`/web/{service}/...`（`bkrepo.web.conf`）→ `auth_request /auth/web`，转发时去掉 `/web/{service}`，并带 `X-BKREPO-UID`、`X-BKREPO-API-TYPE=web`
+- 开放 API：`/(api/|){service}/...`（`bkrepo.backend.conf`）**无** `auth_request`。本 location 必须把 `X-BKREPO-API-TYPE` 写成 `api`，防止客户端伪造成 `web`。仅 `Authorization: Platform` 才转发 `X-BKREPO-UID`
+- 路径里出现 `/service` 直接 404，避免浏览器打到服务间接口
+- `/actuator/health`、`/actuator/env` 对网关外网 403
+
+## 转发
+
+- `router_srv.lua` 的 `allow_services` 是白名单；新微服务名要同时加这里和 Consul/K8s
+- `docker` 在 assembly 场景改写成 `oci`
+- 改前缀或服务名时，核对后端 `@RequestMapping` 与 `docs/apidoc`
+- Docker / OCI Registry 走专用 vhost，不要套 Generic 的 user/service 规则
+
+## 登录态
+
+- `auth_mode=ticket`：Cookie / `X-DEVOPS-BK-TICKET` 走 `GET {bk_login_url}/user/get_info?bk_ticket=`（Helm `bkLoginUrl` / `BK_REPO_PAAS_LOGIN_URL`，path 写在 Lua 里）。成功看 `ret==0`，用户名取 `data.username`。Web 与 WebSocket 共用 `oauthUtil:verify_bk_ticket`
+- `oauth.url`（`BK_REPO_SSM_TOKEN_URL`）留给 odc/太湖登录，不要删
+- 不要改用 `get_full_info`；部门信息不在网关登录里取
+- `auth_mode=token` 仍走 APIGW `bk_login/get_user`，不要接到 get_info
+
+## 禁止
+
+- 不要把项目/仓库/节点鉴权只放在 Lua，替代服务内 `@Permission` / `PermissionManager`
+- 不要在 backend location 转发未经验证的 `X-BKREPO-UID`
+- 不要从网关放开 actuator

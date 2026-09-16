@@ -357,22 +357,14 @@ gateway:
   bkciPort:
   ## ci模式必填，蓝鲸paas域名
   bkPaasUrl: paas.example.com
-  ## ci模式必填，登录地址
+  ## ci模式必填，登录地址；ticket 模式同时作为登录服务根地址拼 get_info
   bkLoginUrl: http://paas.example.com/login/
   ## 是否开启多租户
   enableMultiTenantMode: false
   ## 运营租户默认
   oPTenantId: system
-  ## ci模式必填，ssm ip
-  ssmIP0:
-  ## ci模式必填，ssm host
-  ssmHost:
-  ## ci模式必填，ssm port
-  ssmPort:
-  ## ci模式必填，ssm token url
+  ## odc/太湖登录使用，不要删
   ssmTokenUrl:
-  ## ci模式必填，ssm env
-  ssmEnv:
   ## 蓝鲸apigw地址
   bkApigwUrl:
   ## ci模式必填，app code
@@ -500,6 +492,8 @@ repository:
 
 ## 认证服务配置
 auth:
+  ## 写入 auth ConfigMap 根级的额外 application.yml，没有则留空 map
+  commonConfig: {}
   config:
     ## 是否允许使用内置默认口令 password 登录。生产环境必须为 false
     allowDefaultPwd: false
