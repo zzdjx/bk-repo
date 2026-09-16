@@ -22,6 +22,7 @@ class MediaPreviewContentTypeTest {
         assertEquals("video/x-flv", MediaPreviewContentType.fromSuffix("flv"))
         assertEquals("audio/aac", MediaPreviewContentType.fromSuffix("aac"))
         assertEquals("application/pdf", MediaPreviewContentType.fromSuffix("pdf"))
+        assertEquals("model/gltf-binary", MediaPreviewContentType.fromSuffix("glb"))
         assertEquals(
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             MediaPreviewContentType.fromSuffix("pptx")
@@ -44,6 +45,7 @@ class MediaPreviewContentTypeTest {
     fun `suffix matching is case insensitive`() {
         assertEquals("video/mp4", MediaPreviewContentType.fromSuffix("MP4"))
         assertEquals("application/pdf", MediaPreviewContentType.fromSuffix("PDF"))
+        assertEquals("model/gltf-binary", MediaPreviewContentType.fromSuffix("GLB"))
         assertEquals(
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             MediaPreviewContentType.fromSuffix("PPTX")

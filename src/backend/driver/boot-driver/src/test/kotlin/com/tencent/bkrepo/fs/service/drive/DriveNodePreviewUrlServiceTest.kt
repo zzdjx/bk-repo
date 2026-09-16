@@ -99,6 +99,36 @@ class DriveNodePreviewUrlServiceTest {
     }
 
     @Test
+    fun `IMATE_AGENT keeps 3d artifact type`() = runBlocking {
+        mockFilePath(
+            INO,
+            "/models/hero.glb",
+            metadata = listOf(
+                TMetadata(key = DriveNodePreviewUrlService.METADATA_ARTIFACT_TYPE, value = "3d"),
+            ),
+        )
+        val url = service.buildPreviewUrl(
+            projectId = PROJECT_ID,
+            repoName = REPO_NAME,
+            ino = INO,
+            type = DriveNodePreviewUrlService.TYPE_IMATE_AGENT,
+        )
+        assertEquals("imate_artifact://$INO?name=hero.glb&type=3d", url)
+    }
+
+    @Test
+    fun `IMATE_AGENT missing type on glb stays other`() = runBlocking {
+        mockFilePath(INO, "/models/hero.glb")
+        val url = service.buildPreviewUrl(
+            projectId = PROJECT_ID,
+            repoName = REPO_NAME,
+            ino = INO,
+            type = DriveNodePreviewUrlService.TYPE_IMATE_AGENT,
+        )
+        assertEquals("imate_artifact://$INO?name=hero.glb&type=other", url)
+    }
+
+    @Test
     fun `IMATE_AGENT unknown artifact type becomes other`() = runBlocking {
         mockFilePath(
             INO,

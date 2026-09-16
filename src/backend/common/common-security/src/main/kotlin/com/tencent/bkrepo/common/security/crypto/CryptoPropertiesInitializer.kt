@@ -1,33 +1,119 @@
 package com.tencent.bkrepo.common.security.crypto
 
 import com.tencent.bkrepo.common.security.util.RsaUtils
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.InitializingBean
+import java.util.Base64
 
 /**
- * 密钥归一化与校验。私钥统一转成单行 PKCS#8 Base64，公钥未配置时从私钥推导。
- * 代码里不再保留任何默认密钥。这里只归一化配了的密钥，缺哪把由真正用到它的
- * [RsaUtils] / [com.tencent.bkrepo.common.security.util.AESUtils] 报错，
- * 否则 proxy 这类一把都用不上的服务会被迫配齐全套才能启动。
- * helm 由 chart 渲染时生成，二进制部署用 scripts/gen-crypto-keys.sh 生成后填入配置。
+ * 密钥归一化、公私钥校验，并在有 Mongo 时把完整配置固化到 DB。
+ * 有 Store 时先读库，只校验最终采用的那套；DB 有有效记录则以 DB 为准。
+ * 查询失败、半对密钥或 fingerprint 对不上时启动失败，禁止当成无记录重新生成。
+ * DB 已有的密钥类型以库为准；库里为空的类型用当前配置补上并写回。
  */
 class CryptoPropertiesInitializer(
-    private val properties: CryptoProperties
+    private val properties: CryptoProperties,
+    private val store: CryptoPropertiesStore? = null
 ) : InitializingBean {
 
-    override fun afterPropertiesSet() = with(properties) {
+    override fun afterPropertiesSet() {
+        if (store == null) {
+            normalize(properties)
+            validate(properties)
+            return
+        }
+        val existing = store.load()
+        if (existing != null) {
+            adopt(mergeWithLocal(existing))
+            return
+        }
+        normalize(properties)
+        validate(properties)
+        if (!properties.hasMaterial()) {
+            return
+        }
+        val persisted = store.insertIfAbsent(properties)
+        if (persisted !== properties) {
+            adopt(persisted)
+        }
+    }
+
+    /**
+     * DB 非空字段不动。空的密钥类型用当前配置补上并写回。
+     * 本地配置坏了则只采用 DB，不补。
+     */
+    private fun mergeWithLocal(existing: CryptoProperties): CryptoProperties {
+        val keyring = store ?: return existing
+        val local = try {
+            val snapshot = properties.copy()
+            normalize(snapshot)
+            validate(snapshot)
+            snapshot
+        } catch (ignored: Exception) {
+            return existing
+        }
+        val merged = existing.fillMissingFrom(local)
+        if (merged.fingerprint() == existing.fingerprint()) {
+            return existing
+        }
+        return keyring.patch(existing.fingerprint(), merged) ?: keyring.load() ?: existing
+    }
+
+    private fun adopt(persisted: CryptoProperties) {
+        val localFingerprint = fingerprintOrNull(properties)
+        normalize(persisted)
+        validate(persisted)
+        properties.overwrite(persisted)
+        if (localFingerprint != null && localFingerprint != properties.fingerprint()) {
+            logger.warn(
+                "security.crypto config differs from DB keyring, DB keyring wins and config is ignored. " +
+                    "Rotating an in-use key requires re-encrypting existing data, do it manually. " +
+                    "config=[$localFingerprint], db=[${properties.fingerprint()}]"
+            )
+        }
+    }
+
+    /**
+     * 本地配置可能已坏（重建后不成对），不能因此挡住读库。算不出指纹就跳过对比。
+     */
+    private fun fingerprintOrNull(source: CryptoProperties): String? {
+        return try {
+            val snapshot = source.copy()
+            normalize(snapshot)
+            snapshot.fingerprint()
+        } catch (ignored: Exception) {
+            null
+        }
+    }
+
+    private fun normalize(target: CryptoProperties) = with(target) {
         privateKeyStr = normalizePrivateKey(privateKeyStr)
-        publicKeyStr = resolvePublicKey(privateKeyStr, publicKeyStr)
+        publicKeyStr = resolvePublicKey("publicKeyStr", privateKeyStr, publicKeyStr)
         privateKeyStr2048PKCS8 = normalizePrivateKey(privateKeyStr2048PKCS8)
-        publicKeyStr2048PKCS8 = resolvePublicKey(privateKeyStr2048PKCS8, publicKeyStr2048PKCS8)
+        publicKeyStr2048PKCS8 = resolvePublicKey(
+            "publicKeyStr2048PKCS8",
+            privateKeyStr2048PKCS8,
+            publicKeyStr2048PKCS8
+        )
         privateKeyStr2048PKCS1 = normalizePrivateKey(privateKeyStr2048PKCS1)
-        publicKeyStr2048PKCS1 = resolvePublicKey(privateKeyStr2048PKCS1, publicKeyStr2048PKCS1)
+        publicKeyStr2048PKCS1 = resolvePublicKey(
+            "publicKeyStr2048PKCS1",
+            privateKeyStr2048PKCS1,
+            publicKeyStr2048PKCS1
+        )
         aesKey = clean(aesKey)
+        aesIv = clean(aesIv)
+    }
+
+    private fun validate(target: CryptoProperties) = with(target) {
         check(aesKey.isEmpty() || aesKey.toByteArray().size in AES_KEY_LENGTHS) {
             "security.crypto.aesKey must be 16, 24 or 32 bytes"
         }
-        aesIv = clean(aesIv)
         check(aesIv.isEmpty() || aesIv.toByteArray().size == AES_IV_LENGTH) {
             "security.crypto.aesIv must be $AES_IV_LENGTH bytes"
+        }
+        check(aesKey.isEmpty() == aesIv.isEmpty()) {
+            "security.crypto keyring is incomplete: aesKey/aesIv"
         }
     }
 
@@ -37,12 +123,23 @@ class CryptoPropertiesInitializer(
             .orEmpty()
     }
 
-    private fun resolvePublicKey(privateKey: String, publicKey: String): String {
+    private fun resolvePublicKey(field: String, privateKey: String, publicKey: String): String {
         val cleaned = clean(publicKey)
-        if (cleaned.isNotEmpty() || privateKey.isEmpty()) {
-            return cleaned
+        if (privateKey.isEmpty()) {
+            check(cleaned.isEmpty()) { "security.crypto.$field has no matching private key" }
+            return ""
         }
-        return RsaUtils.derivePublicKey(privateKey)
+        val derived = RsaUtils.derivePublicKey(privateKey)
+        if (cleaned.isEmpty()) {
+            return derived
+        }
+        val provided = try {
+            Base64.getEncoder().encodeToString(RsaUtils.stringToPublicKey(cleaned).encoded)
+        } catch (exception: Exception) {
+            throw IllegalStateException("security.crypto.$field is invalid", exception)
+        }
+        check(provided == derived) { "security.crypto.$field does not match its private key" }
+        return derived
     }
 
     /**
@@ -59,5 +156,6 @@ class CryptoPropertiesInitializer(
     companion object {
         private val AES_KEY_LENGTHS = setOf(16, 24, 32)
         private const val AES_IV_LENGTH = 16
+        private val logger = LoggerFactory.getLogger(CryptoPropertiesInitializer::class.java)
     }
 }

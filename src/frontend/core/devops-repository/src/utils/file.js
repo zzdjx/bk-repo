@@ -109,6 +109,10 @@ const mediaAudioType = [
     'm4a'
 ]
 
+const glbType = [
+    'glb'
+]
+
 // 与 preview 服务 FileType.CODES 对齐（html 已拆到 isHtmlFile 做渲染预览）
 // 含原文本类后缀：统一走 onlinePreview + Monaco
 const codeType = [
@@ -229,6 +233,10 @@ export function isMediaAudio (param) {
 
 export function isMedia (param) {
     return isMediaVideo(param) || isMediaAudio(param)
+}
+
+export function isGlb (param) {
+    return Boolean(findFileType(param, glbType))
 }
 
 export function isPdf (param) {

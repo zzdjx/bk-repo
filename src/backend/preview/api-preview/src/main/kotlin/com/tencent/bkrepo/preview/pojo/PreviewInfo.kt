@@ -50,4 +50,19 @@ data class PreviewInfo (
     var fileTemplate: String? = null,
     @get:Schema(title = "水印")
     var watermark: Watermark? = null,
+    /**
+     * 三维预览体积告警阈值（MB），小于等于 0 表示不告警
+     */
+    @get:Schema(title = "三维预览体积告警阈值（MB）")
+    var warnFileSize: Long? = null,
+    /**
+     * 三维预览体积硬顶（MB），小于等于 0 表示不限制
+     */
+    @get:Schema(title = "三维预览体积硬顶（MB）")
+    var maxFileSize: Long? = null,
+    /**
+     * 源文件大小（byte），三维预览用于前端拦截
+     */
+    @get:Schema(title = "源文件大小（byte）")
+    var size: Long? = null,
 )

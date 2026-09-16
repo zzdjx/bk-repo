@@ -34,6 +34,7 @@ const DEFAULT_LANGUAGE = 'zh-cn'
  *     vue-demi 的 ESM/CJS 互操作问题通过 webpack resolve.alias 在打包层解决（见 webpack.base.js）。
  */
 Vue.use(VueCompositionAPI)
+Vue.config.ignoredElements = ['model-viewer']
 
 Vue.component('Icon', Icon)
 Vue.component('CanwayDialog', CanwayDialog)

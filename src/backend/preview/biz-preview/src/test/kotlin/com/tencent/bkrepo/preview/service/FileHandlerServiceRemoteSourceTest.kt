@@ -23,7 +23,7 @@ class FileHandlerServiceRemoteSourceTest {
     private val service by lazy {
         val config = mockk<PreviewConfig>()
         every { config.fileDir } returns workspace.toAbsolutePath().toString()
-        FileHandlerService(config, mockk<CommonResourceService>(relaxed = true))
+        FileHandlerService(config, mockk<CommonResourceService>(relaxed = true), mockk())
     }
 
     @Test
