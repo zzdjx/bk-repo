@@ -225,11 +225,17 @@
     background: #111;
     color: #eee;
     z-index: 10000000;
+    container-type: size;
 }
 .pptx-live-thumbs {
+    --pptx-live-thumb-visible: 10;
+    --pptx-live-thumb-gap: 8px;
+    --pptx-live-thumb-chrome: 36px;
+    --pptx-live-thumb-h: calc((100cqh - var(--pptx-live-thumb-chrome) - (var(--pptx-live-thumb-visible) - 1) * var(--pptx-live-thumb-gap)) / var(--pptx-live-thumb-visible));
+    --pptx-live-thumb-w: calc(var(--pptx-live-thumb-h) * 16 / 9);
     flex: none;
-    width: 176px;
-    min-width: 176px;
+    width: calc(var(--pptx-live-thumb-w) + 44px);
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
     background: #161616;
@@ -242,10 +248,46 @@
     border-right: 0;
     background: transparent;
 }
+.pptx-live-thumbs ::v-deep .pptxv-thumbs-list {
+    height: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumbs-window {
+    gap: var(--pptx-live-thumb-gap);
+}
 .pptx-live-thumbs ::v-deep .pptxv-thumbs-footer,
 .pptx-live-thumbs ::v-deep .pptxv-thumbs-add,
 .pptx-live-thumbs ::v-deep .pptxv-thumb-section-actions {
     display: none !important;
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumb {
+    flex: none;
+    height: var(--pptx-live-thumb-h);
+    min-height: var(--pptx-live-thumb-h);
+    max-height: var(--pptx-live-thumb-h);
+    width: max-content;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumb-frame {
+    box-sizing: border-box;
+    flex: none;
+    height: var(--pptx-live-thumb-h) !important;
+    width: var(--pptx-live-thumb-w) !important;
+    overflow: hidden;
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumb-frame .pptxv-stage {
+    transform: scale(min(
+        calc((var(--pptx-live-thumb-w) - 10px) / var(--pptx-slide-w, 1280px)),
+        calc((var(--pptx-live-thumb-h) - 10px) / var(--pptx-slide-h, 720px))
+    )) !important;
+    transform-origin: top left !important;
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumb.is-active .pptxv-thumb-frame {
+    border-width: 5px;
+    border-color: #3a84ff;
 }
 .pptx-live-main {
     flex: 1;
@@ -353,6 +395,13 @@ html.pptx-live-presenting .pptxv-presenter,
 }
 .pptx-live-preview:not(.is-presenting) .pptxv-thumbs {
     display: flex !important;
+}
+.pptx-live-thumbs .pptxv-thumbs-list::-webkit-scrollbar {
+    width: 6px;
+}
+.pptx-live-thumbs .pptxv-thumbs-list::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
 }
 .pptx-live-stage .pptxv-media.pptx-live-has-audio {
     overflow: visible;
