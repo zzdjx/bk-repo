@@ -30,7 +30,7 @@ usage() {
 
     --base <ref>     对比基线（目标分支名或 commit）。不传则读 CI 环境变量
     --head <ref>     对比终点，默认 HEAD
-    --full           强制全量 ./gradlew build
+    --full           强制全量 ./gradlew clean build
     --dry-run        只打印将要执行的 Gradle 命令，不构建
     --self-check     校验路径到模块的映射，然后退出
     -h, --help       帮助
@@ -242,7 +242,7 @@ resolve_commit() {
 
 run_gradle() {
     [ -x "$BACKEND_DIR/gradlew" ] || die "找不到 $BACKEND_DIR/gradlew"
-    local gradle_cmd=("$BACKEND_DIR/gradlew" -p "$BACKEND_DIR")
+    local gradle_cmd=("$BACKEND_DIR/gradlew" -p "$BACKEND_DIR" clean)
     gradle_cmd+=("$@")
     gradle_cmd+=(--continue)
     if [ ${#GRADLE_ARGS[@]} -gt 0 ]; then
