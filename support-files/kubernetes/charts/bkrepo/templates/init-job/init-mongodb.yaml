@@ -62,9 +62,9 @@ spec:
             - name: BK_REPO_BCS_SECRETKEY
               value: {{ .Values.auth.bcs.secretKey }}
             - name: BK_REPO_ACCESSKEY
-              value: {{ .Values.gateway.accessKey }}
+              value: {{ include "bkrepo.platform.accessKey" . | quote }}
             - name: BK_REPO_SECRETKEY
-              value: {{ .Values.gateway.secretKey }}
+              value: {{ include "bkrepo.platform.secretKey" . | quote }}
             - name: BK_REPO_ENABLE_MULTI_TENANT_MODE
               value: {{ default "false" .Values.gateway.enableMultiTenantMode | quote }}
             - name: BK_REPO_ENABLE_MONGODB_TLS

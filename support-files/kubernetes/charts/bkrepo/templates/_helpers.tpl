@@ -143,9 +143,10 @@ Return the value of auth url
 {{- end -}}
 
 {{/*
-True if value is a Platform auth header: "Platform " + base64(accessKey:secretKey).
+Decode a Platform auth header ("Platform " + base64(accessKey:secretKey)) to
+"accessKey:secretKey". Empty output means the header is malformed.
 */}}
-{{- define "bkrepo.platformAuth.valid" -}}
+{{- define "bkrepo.platformAuth.decode" -}}
 {{- $auth := . | toString | trim -}}
 {{- if hasPrefix "Platform " $auth -}}
 {{- $payload := trimPrefix "Platform " $auth | trim -}}
@@ -153,35 +154,65 @@ True if value is a Platform auth header: "Platform " + base64(accessKey:secretKe
 {{- $decoded := $payload | b64dec -}}
 {{- $parts := splitn ":" 2 $decoded -}}
 {{- if and $parts._0 $parts._1 -}}
-true
+{{- $decoded -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Return the value of authorization.
+Fail when "accessKey:secretKey" uses the publicly known default pair.
+*/}}
+{{- define "bkrepo.platformAuth.rejectDefault" -}}
+{{- $parts := splitn ":" 2 (. | toString) -}}
+{{- if or (eq $parts._0 "18b61c9c-901b-4ea3-89c3-1f74be944b66") (eq $parts._1 "Us8ZGDXPqk86cwMukYABQqCZLAkM3K") -}}
+{{- fail "gateway accessKey/secretKey must not use the publicly known default pair. Set unique values via gateway.accessKey/gateway.secretKey, or a gateway.authorization built from them." -}}
+{{- end -}}
+{{- end -}}
 
-New installs must set gateway.accessKey and gateway.secretKey.
-Upgrades may keep a valid gateway.authorization and leave accessKey/secretKey empty.
+{{/*
+Return "accessKey:secretKey" for the gateway platform account.
+
+gateway.accessKey + gateway.secretKey win. Otherwise fall back to
+gateway.authorization, which must decode to a pair; new installs additionally
+reject the publicly known default pair.
+*/}}
+{{- define "bkrepo.platformCredential" -}}
+{{- $ak := .Values.gateway.accessKey | toString | trim -}}
+{{- $sk := .Values.gateway.secretKey | toString | trim -}}
+{{- if and $ak $sk -}}
+{{- $pair := printf "%s:%s" $ak $sk -}}
+{{- include "bkrepo.platformAuth.rejectDefault" $pair -}}
+{{- $pair -}}
+{{- else -}}
+{{- $pair := include "bkrepo.platformAuth.decode" (.Values.gateway.authorization | toString) -}}
+{{- if not $pair -}}
+{{- if .Release.IsInstall -}}
+{{- fail "New installs must set both gateway.accessKey and gateway.secretKey, or a gateway.authorization of the form 'Platform <base64(accessKey:secretKey)>'. Example: --set gateway.accessKey=<ak> --set gateway.secretKey=<sk>" -}}
+{{- else -}}
+{{- fail "Upgrade requires a valid gateway.authorization (Platform <base64(accessKey:secretKey)>) or both gateway.accessKey and gateway.secretKey." -}}
+{{- end -}}
+{{- end -}}
+{{- if .Release.IsInstall -}}
+{{- include "bkrepo.platformAuth.rejectDefault" $pair -}}
+{{- end -}}
+{{- $pair -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return the value of authorization.
 */}}
 {{- define "bkrepo.authorization" -}}
-{{- $ak := .Values.gateway.accessKey | toString -}}
-{{- $sk := .Values.gateway.secretKey | toString -}}
-{{- if and $ak $sk -}}
-{{- if or (eq $ak "18b61c9c-901b-4ea3-89c3-1f74be944b66") (eq $sk "Us8ZGDXPqk86cwMukYABQqCZLAkM3K") -}}
-{{- fail "gateway.accessKey/secretKey must not use the publicly known default pair. Set unique values." -}}
+{{- printf "Platform %s" (include "bkrepo.platformCredential" . | b64enc) -}}
 {{- end -}}
-{{- printf "Platform %s" (printf "%s:%s" $ak $sk | b64enc) -}}
-{{- else if .Release.IsInstall -}}
-{{- fail "New installs must set gateway.accessKey and gateway.secretKey (do not rely on gateway.authorization). Example: --set gateway.accessKey=<ak> --set gateway.secretKey=<sk>" -}}
-{{- else -}}
-{{- $auth := .Values.gateway.authorization | toString | trim -}}
-{{- if ne (include "bkrepo.platformAuth.valid" $auth | trim) "true" -}}
-{{- fail "Upgrade requires a valid gateway.authorization (Platform <base64(accessKey:secretKey)>) or set both gateway.accessKey and gateway.secretKey." -}}
+
+{{- define "bkrepo.platform.accessKey" -}}
+{{- (splitn ":" 2 (include "bkrepo.platformCredential" .))._0 -}}
 {{- end -}}
-{{- $auth -}}
-{{- end -}}
+
+{{- define "bkrepo.platform.secretKey" -}}
+{{- (splitn ":" 2 (include "bkrepo.platformCredential" .))._1 -}}
 {{- end -}}
 
 

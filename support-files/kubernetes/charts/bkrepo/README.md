@@ -15,7 +15,14 @@ $ helm repo add bkee <bkrepo helm repo url>
 $ helm install bkrepo bkee/bkrepo --set common.password=<your-password> --set mongodb.auth.password=<your-mongo-password> --set gateway.accessKey=<your-access-key> --set gateway.secretKey=<your-secret-key>
 ```
 
-上述命令将在Kubernetes集群中部署bkrepo, 并输出访问指引。`common.password` 与 `mongodb.auth.password` 必须显式指定，禁止使用公开默认口令。新安装还必须设置 `gateway.accessKey` 与 `gateway.secretKey`。存量升级若已有格式正确的 `gateway.authorization`（`Platform <base64(ak:sk)>`），可继续使用，不必改这两个字段。
+上述命令将在Kubernetes集群中部署bkrepo, 并输出访问指引。`common.password` 与 `mongodb.auth.password` 必须显式指定，禁止使用公开默认口令。
+
+网关平台账号有两种配法，新安装任选其一：
+
+- 配 `gateway.accessKey` 与 `gateway.secretKey`（推荐，两者必须同时配）
+- 只配 `gateway.authorization`，格式为 `Platform <base64(accessKey:secretKey)>`
+
+新安装两种配法都不接受仓库内那对公开默认凭证。存量升级可继续使用已有且格式正确的 `gateway.authorization`。
 
 ## 卸载Chart
 使用以下命令卸载`bkrepo`:
@@ -189,9 +196,9 @@ $ helm uninstall bkrepo
 | `gateway.service.nodePort` | 服务类型为`NodePort`时端口设置 | `80` |
 | `gateway.host` | bkrepo 地址 | `bkrepo.example.com` |
 | `gateway.dnsServer` | dns服务器地址，用于配置nginx resolver | `local=on`(openrestry语法，取本机`/etc/resolv.conf`配置) |
-| `gateway.authorization` | 网关访问微服务认证信息。新安装请用 accessKey/secretKey；升级可保留已有且格式正确的值 | `"Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="` |
-| `gateway.accessKey` | 网关平台账号 accessKey（新安装必填，禁止公开默认值） | `""` |
-| `gateway.secretKey` | 网关平台账号 secretKey（新安装必填，禁止公开默认值） | `""` |
+| `gateway.authorization` | 网关访问微服务认证信息，`Platform <base64(ak:sk)>`。新安装可只配这一项，但必须能解析出 ak/sk 且不是公开默认值 | `"Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="` |
+| `gateway.accessKey` | 网关平台账号 accessKey，与 secretKey 同时配置时优先于 authorization（禁止公开默认值） | `""` |
+| `gateway.secretKey` | 网关平台账号 secretKey，与 accessKey 同时配置时优先于 authorization（禁止公开默认值） | `""` |
 | `gateway.deployMode` | 部署模式，standalone: 独立模式，ci: 与ci搭配模式 | `standalone` |
 
 ### repository服务配置
