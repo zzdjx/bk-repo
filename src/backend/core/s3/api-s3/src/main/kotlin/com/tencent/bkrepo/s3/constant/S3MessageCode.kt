@@ -40,6 +40,9 @@ enum class S3MessageCode(private val key: String) : MessageCode {
     S3_NO_SUCH_KEY("s3.object.key.not-such"),
     S3_NO_SUCH_BUCKET("s3.object.bucket.no-such"),
     S3_NO_SUCH_ACCESS("s3.object.access.no-such"),
+    S3_REQUEST_TIME_TOO_SKEWED("s3.request.time-too-skewed"),
+    S3_CONTENT_SHA256_MISMATCH("s3.request.content-sha256-mismatch"),
+    S3_AUTHORIZATION_HEADER_MALFORMED("s3.request.authorization-header-malformed"),
     ;
 
     override fun getBusinessCode() = ordinal + 1

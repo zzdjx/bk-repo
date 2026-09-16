@@ -39,10 +39,21 @@ import com.tencent.bkrepo.s3.artifact.S3LocalRepository
 import com.tencent.bkrepo.s3.artifact.S3RemoteRepository
 import com.tencent.bkrepo.s3.artifact.S3VirtualRepository
 import com.tencent.bkrepo.s3.artifact.auth.AWS4AuthHandler
+import com.tencent.bkrepo.s3.config.S3AuthProperties
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration
 
 @Configuration
+@EnableConfigurationProperties(S3AuthProperties::class)
 class S3RegistryArtifactConfigurer : ArtifactConfigurerSupport() {
+
+    private lateinit var beanFactory: ConfigurableListableBeanFactory
+
+    override fun postProcessBeanFactory(beanFactory: ConfigurableListableBeanFactory) {
+        this.beanFactory = beanFactory
+        super.postProcessBeanFactory(beanFactory)
+    }
 
     override fun getRepositoryType() = RepositoryType.S3
     override fun getRepositoryTypes(): List<RepositoryType> {
@@ -55,7 +66,10 @@ class S3RegistryArtifactConfigurer : ArtifactConfigurerSupport() {
     override fun getAuthSecurityCustomizer(): HttpAuthSecurityCustomizer =
         HttpAuthSecurityCustomizer { httpAuthSecurity ->
             val authenticationManager = httpAuthSecurity.authenticationManager!!
-            val s3LoginAuthHandler = AWS4AuthHandler(authenticationManager)
+            val s3LoginAuthHandler = AWS4AuthHandler(
+                authenticationManager,
+                beanFactory.getBean(S3AuthProperties::class.java)
+            )
             httpAuthSecurity.withPrefix("/s3").addHttpAuthHandler(s3LoginAuthHandler)
         }
 

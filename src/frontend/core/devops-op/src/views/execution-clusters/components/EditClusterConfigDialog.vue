@@ -31,13 +31,13 @@
         <el-input v-model="executionCluster.kubernetesProperties.certificateAuthorityData" style="height: 40px ; width: 500px;" :disabled="showMode" />
       </el-form-item>
       <el-form-item v-if="executionCluster.type !== 'docker'" label="token" prop="token">
-        <el-input v-model="executionCluster.kubernetesProperties.token" style="height: 40px ; width: 500px;" :disabled="showMode" />
+        <el-input v-model="executionCluster.kubernetesProperties.token" style="height: 40px ; width: 500px;" placeholder="空或 * 表示不修改" :disabled="showMode" />
       </el-form-item>
       <el-form-item v-if="executionCluster.type !== 'docker'" label="clientCertificateData" prop="clientCertificateData">
-        <el-input v-model="executionCluster.kubernetesProperties.clientCertificateData" style="height: 40px ; width: 500px;" :disabled="showMode" />
+        <el-input v-model="executionCluster.kubernetesProperties.clientCertificateData" style="height: 40px ; width: 500px;" placeholder="空或 * 表示不修改" :disabled="showMode" />
       </el-form-item>
       <el-form-item v-if="executionCluster.type !== 'docker'" label="clientKeyData" prop="clientCertificateData">
-        <el-input v-model="executionCluster.kubernetesProperties.clientKeyData" style="height: 40px ; width: 500px;" :disabled="showMode" />
+        <el-input v-model="executionCluster.kubernetesProperties.clientKeyData" style="height: 40px ; width: 500px;" placeholder="空或 * 表示不修改" :disabled="showMode" />
       </el-form-item>
       <el-form-item v-if="executionCluster.type !== 'docker'" label="最大使用内存(B)" prop="kubernetesProperties.limitMem" :rules="[{ required: true, message: '最大使用内存不能为空'}]">
         <el-input-number v-model="executionCluster.kubernetesProperties.limitMem" style="height: 40px ; width: 200px;" controls-position="right" :min="1" :disabled="showMode" />

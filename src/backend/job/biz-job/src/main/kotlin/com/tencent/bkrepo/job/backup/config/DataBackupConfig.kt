@@ -14,4 +14,9 @@ data class DataBackupConfig(
      * 备份数据存储实例
      * */
     var cos: InnerCosCredentials = InnerCosCredentials(),
+
+    /**
+     * 敏感字段 AES 密钥，16/24/32 字节。仅使用备份/恢复时需要，未配置不影响其它功能。
+     */
+    var encryptKey: String = "",
 )

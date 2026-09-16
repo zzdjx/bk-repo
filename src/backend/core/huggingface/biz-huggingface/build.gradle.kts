@@ -30,4 +30,5 @@ dependencies {
     api(project(":core:huggingface:api-huggingface"))
     api(("org.eclipse.jgit:org.eclipse.jgit"))
     api(project(":core:lfs:api-lfs"))
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
 }

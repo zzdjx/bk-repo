@@ -47,6 +47,7 @@ import com.tencent.bkrepo.common.analysis.pojo.scanner.standard.LicenseResult
 import com.tencent.bkrepo.common.analysis.pojo.scanner.standard.SecurityResult
 import com.tencent.bkrepo.common.analysis.pojo.scanner.standard.StandardScanExecutorResult
 import com.tencent.bkrepo.common.analysis.pojo.scanner.standard.StandardScanner
+import com.tencent.bkrepo.common.analysis.pojo.scanner.utils.levelOf
 import com.tencent.bkrepo.common.api.exception.BadRequestException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.api.pojo.Page
@@ -121,9 +122,21 @@ class StandardResultManager(
         pageLimit: PageLimit,
         arguments: StandardLoadResultArguments
     ): Page<LicenseResult> {
+        val rule = arguments.rule
+        if (rule != null && !rule.isEmpty()) {
+            val matched = licenseResultDao.list(credentialsKey, sha256, scanner.name, arguments)
+                .map { Converter.convert(it) }
+                .filter { result ->
+                    val shouldIgnore = rule.shouldIgnore(result.licenseName)
+                    shouldIgnore && arguments.ignored || !shouldIgnore && !arguments.ignored
+                }
+            return toPage(matched, pageLimit)
+        }
+        if (arguments.ignored) {
+            return Page(pageLimit.pageNumber, pageLimit.pageSize, 0, emptyList())
+        }
         val page = licenseResultDao.pageBy(credentialsKey, sha256, scanner.name, pageLimit, arguments)
-        val records = page.records.map { it.data }
-        return Page(page.pageNumber, page.pageSize, page.totalRecords, records)
+        return Page(page.pageNumber, page.pageSize, page.totalRecords, page.records.map { Converter.convert(it) })
     }
 
     private fun loadSecurityItems(
@@ -133,17 +146,44 @@ class StandardResultManager(
         pageLimit: PageLimit,
         arguments: StandardLoadResultArguments
     ): Page<SecurityResult> {
-        val page = if (arguments.rule?.isEmpty() == false) {
+        val rule = arguments.rule
+        if (rule != null && !rule.isEmpty()) {
             // 由于组件版本范围查询较为复杂，无法在数据库查询语句中实现，因此将数据全部查出，在服务中过滤符合范围条件的组件漏洞
-            securityResultDao.list(credentialsKey, sha256, scanner.name, pageLimit, arguments)
-        } else if (arguments.ignored) {
-            Page(pageLimit.pageNumber, pageLimit.pageSize, 0, emptyList())
-        } else {
-            securityResultDao.pageBy(credentialsKey, sha256, scanner.name, pageLimit, arguments)
+            val matched = convertSecurityResults(
+                securityResultDao.list(credentialsKey, sha256, scanner.name, arguments)
+            ).filter { result ->
+                val shouldIgnore = rule.shouldIgnore(
+                    result.vulId, result.cveId, result.pkgName, result.pkgVersions, levelOf(result.severity)
+                )
+                shouldIgnore && arguments.ignored || !shouldIgnore && !arguments.ignored
+            }
+            return toPage(matched, pageLimit)
         }
-        val cveMap = page.records.map { it.data.vulId }.let { knowledgeBase.findByPocId(it) }.associateBy { it.pocId }
-        val records = page.records.map { Converter.convert(it, cveMap[it.data.vulId]) }
-        return Page(page.pageNumber, page.pageSize, page.totalRecords, records)
+        if (arguments.ignored) {
+            return Page(pageLimit.pageNumber, pageLimit.pageSize, 0, emptyList())
+        }
+        val page = securityResultDao.pageBy(credentialsKey, sha256, scanner.name, pageLimit, arguments)
+        return Page(
+            page.pageNumber,
+            page.pageSize,
+            page.totalRecords,
+            convertSecurityResults(page.records)
+        )
+    }
+
+    private fun convertSecurityResults(records: List<TSecurityResult>): List<SecurityResult> {
+        val cveMap = records.map { it.data.vulId }.let { knowledgeBase.findByPocId(it) }.associateBy { it.pocId }
+        return records.map { Converter.convert(it, cveMap[it.data.vulId]) }
+    }
+
+    private fun <T> toPage(records: List<T>, pageLimit: PageLimit): Page<T> {
+        val start = (pageLimit.pageNumber - 1) * pageLimit.pageSize
+        val paged = if (start >= records.size) {
+            emptyList()
+        } else {
+            records.subList(start, minOf(start + pageLimit.pageSize, records.size))
+        }
+        return Page(pageLimit.pageNumber, pageLimit.pageSize, records.size.toLong(), paged)
     }
 
     private fun replaceSecurityResult(

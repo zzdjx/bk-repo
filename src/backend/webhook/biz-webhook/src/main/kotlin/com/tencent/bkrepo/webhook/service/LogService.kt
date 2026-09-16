@@ -37,7 +37,8 @@ import com.tencent.bkrepo.webhook.pojo.WebHookLog
 interface LogService {
 
     /**
-     * 分页获取日志列表
+     * 分页获取日志列表。
+     * 调用方需对 WebHook 关联资源具备与创建、测试相同的管理权限。
      */
-    fun listLog(webHookId: String, option: ListWebHookLogOption): Page<WebHookLog>
+    fun listLog(userId: String, webHookId: String, option: ListWebHookLogOption): Page<WebHookLog>
 }

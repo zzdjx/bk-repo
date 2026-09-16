@@ -48,6 +48,7 @@ import com.tencent.bkrepo.common.security.permission.Permission
 import com.tencent.bkrepo.common.service.util.HeaderUtils
 import com.tencent.bkrepo.common.service.util.HttpContextHolder
 import com.tencent.bkrepo.npm.artifact.NpmArtifactInfo
+import com.tencent.bkrepo.npm.model.metadata.NpmAttachmentDeserializer
 import com.tencent.bkrepo.npm.model.metadata.NpmPackageMetaData
 import com.tencent.bkrepo.npm.model.metadata.NpmVersionMetadata
 import com.tencent.bkrepo.npm.pojo.NpmDeleteResponse
@@ -128,16 +129,18 @@ class NpmClientController(
         @PathVariable name: String,
         artifactFileMap: ArtifactFileMap,
     ): OhpmResponse {
-        val npmPackageMetadata = HttpContextHolder
-            .getRequest()
-            .getParameter("metadata")
-            .readJsonString<NpmPackageMetaData>()
-        return npmClientService.ohpmStreamPublishOrUpdatePackage(
-            userId,
-            artifactInfo,
-            npmPackageMetadata,
-            artifactFileMap["pkg_stream"]!!
-        )
+        return NpmAttachmentDeserializer.withCleanup(
+            parse = {
+                HttpContextHolder.getRequest().getParameter("metadata").readJsonString<NpmPackageMetaData>()
+            }
+        ) { npmPackageMetadata ->
+            npmClientService.ohpmStreamPublishOrUpdatePackage(
+                userId,
+                artifactInfo,
+                npmPackageMetadata,
+                artifactFileMap["pkg_stream"]!!
+            )
+        }
     }
 
     /**

@@ -31,33 +31,90 @@
 
 package com.tencent.bkrepo.preview.utils
 
+import com.tencent.bkrepo.preview.constant.PreviewMessageCode
+import com.tencent.bkrepo.preview.exception.PreviewInvalidException
 import org.apache.commons.codec.digest.DigestUtils
 import org.slf4j.LoggerFactory
 import org.springframework.util.ObjectUtils
 import org.springframework.util.StringUtils
 import org.springframework.web.util.HtmlUtils
+import org.springframework.web.util.UriUtils
 import java.io.File
 import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 object FileUtils {
     private val logger = LoggerFactory.getLogger(FileUtils::class.java)
     const val DEFAULT_FILE_ENCODING = "UTF-8"
-    private val illegalFileStrList: MutableList<String> = ArrayList()
+    private const val MAX_FILE_NAME_LENGTH = 255
+    private val ILLEGAL_FILE_NAME_CHARS = charArrayOf('/', '\\', ':', '*', '?', '"', '<', '>', '|', '\u0000')
 
     /**
-     * 检查文件名是否合规
+     * 检查文件名是否合规。
+     * 只允许单个文件名，禁止路径分隔符、上级目录、绝对路径和控制字符。
      *
      * @param fileName 文件名
      * @return 合规结果, true:不合规，false:合规
      */
     fun isIllegalFileName(fileName: String): Boolean {
-        for (str in illegalFileStrList) {
-            if (fileName.contains(str)) {
-                return true
-            }
+        if (containsIllegalFileName(fileName)) {
+            return true
         }
-        return false
+        val decoded = urlDecodeOnce(fileName)
+        return decoded != fileName && containsIllegalFileName(decoded)
+    }
+
+    private fun containsIllegalFileName(fileName: String): Boolean {
+        if (fileName.isBlank() || fileName.length > MAX_FILE_NAME_LENGTH) {
+            return true
+        }
+        if (fileName != fileName.trim()) {
+            return true
+        }
+        if (fileName == "." || fileName == ".." || fileName.contains("..")) {
+            return true
+        }
+        if (fileName.any { it in ILLEGAL_FILE_NAME_CHARS || it.isISOControl() }) {
+            return true
+        }
+        return File(fileName).isAbsolute
+    }
+
+    private fun urlDecodeOnce(value: String): String {
+        return try {
+            UriUtils.decode(value, StandardCharsets.UTF_8)
+        } catch (_: Exception) {
+            value
+        }
+    }
+
+    /**
+     * 校验文件名，不合规则抛出参数非法异常。
+     */
+    fun requireSafeFileName(fileName: String, paramName: String = "fileName") {
+        if (isIllegalFileName(fileName)) {
+            throw PreviewInvalidException(PreviewMessageCode.PREVIEW_PARAMETER_INVALID, paramName)
+        }
+    }
+
+    /**
+     * 将相对路径片段拼到根目录下，规范化后必须仍位于根目录内。
+     */
+    fun resolveUnderDirectory(rootDir: String, vararg relativeSegments: String): String {
+        relativeSegments.forEach { segment -> requireSafeFileName(segment) }
+        val root = File(rootDir).canonicalFile
+        var current = root
+        relativeSegments.forEach { segment ->
+            current = File(current, segment)
+        }
+        val canonical = current.canonicalFile
+        val rootPath = root.toPath()
+        val targetPath = canonical.toPath()
+        if (targetPath != rootPath && !targetPath.startsWith(rootPath)) {
+            throw PreviewInvalidException(PreviewMessageCode.PREVIEW_PARAMETER_INVALID, "fileName")
+        }
+        return canonical.path
     }
 
     /**
@@ -254,16 +311,5 @@ object FileUtils {
         }
         val md5Hex = file.inputStream().use { DigestUtils.md5Hex(it) }
         return md5Hex to file.length()
-    }
-
-    init {
-        illegalFileStrList.add("../")
-        illegalFileStrList.add("./")
-        illegalFileStrList.add("..\\")
-        illegalFileStrList.add(".\\")
-        illegalFileStrList.add("\\..")
-        illegalFileStrList.add("\\.")
-        illegalFileStrList.add("..")
-        illegalFileStrList.add("...")
     }
 }

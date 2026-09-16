@@ -31,10 +31,28 @@
 
 package com.tencent.bkrepo.common.security.service
 
+import org.springframework.beans.factory.InitializingBean
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 @ConfigurationProperties("security.service")
 data class ServiceAuthProperties(
     var enabled: Boolean = true,
-    var secretKey: String = "secret@key"
-)
+    /**
+     * 当前签发+校验密钥。enabled 时必须由部署注入，不做强度校验。
+     */
+    var secretKey: String = "",
+    /**
+     * 上一把密钥，仅验签。当前钥验签失败时才用，不签发。
+     */
+    var previousSecretKey: String = "",
+) : InitializingBean {
+    override fun afterPropertiesSet() {
+        if (!enabled) {
+            return
+        }
+        require(secretKey.isNotBlank()) {
+            "security.service.secretKey must be configured when enabled; " +
+                "set BK_REPO_SERVICE_SECRET_KEY or security.service.secretKey"
+        }
+    }
+}

@@ -36,6 +36,7 @@ import com.tencent.bkrepo.common.api.constant.CharPool.SLASH
 import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.api.util.UrlFormatter
 import com.tencent.bkrepo.common.artifact.api.ArtifactInfo
+import com.tencent.bkrepo.common.artifact.path.PathUtils
 import com.tencent.bkrepo.common.artifact.pojo.RepositoryType
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactContextHolder
 import com.tencent.bkrepo.common.artifact.util.PackageKeys
@@ -49,6 +50,7 @@ import com.tencent.bkrepo.npm.constants.NPM_PKG_TGZ_FULL_PATH
 import com.tencent.bkrepo.npm.constants.NPM_PKG_TGZ_WITH_DOWNLOAD_FULL_PATH
 import com.tencent.bkrepo.npm.constants.NPM_PKG_VERSION_METADATA_FULL_PATH
 import com.tencent.bkrepo.npm.constants.NPM_TGZ_TARBALL_PREFIX
+import com.tencent.bkrepo.npm.exception.NpmBadRequestException
 import com.tencent.bkrepo.npm.model.metadata.NpmPackageMetaData
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
@@ -58,6 +60,38 @@ import java.io.InputStream
 object NpmUtils {
 
     private val logger = LoggerFactory.getLogger(NpmUtils::class.java)
+
+    /**
+     * 校验请求体中的包名、版本号与tarball文件名
+     *
+     * 这些字段会被直接拼接成制品fullPath，必须是合法的单层路径片段，
+     * 否则其中的路径分隔符或..会使节点写入到npm布局之外的位置
+     */
+    fun checkPackageMetaData(npmPackageMetaData: NpmPackageMetaData) {
+        val name = npmPackageMetaData.name
+        checkPathFragment(name)
+        npmPackageMetaData.versions.map.forEach { (version, versionMetadata) ->
+            if (versionMetadata.name != name) {
+                throw NpmBadRequestException("Package name [${versionMetadata.name}] mismatch with [$name].")
+            }
+            PathUtils.validateFileName(version)
+            PathUtils.validateFileName(versionMetadata.version.orEmpty())
+        }
+        // scope包的tarball文件名带scope前缀，如 @scope/demo-1.0.0.tgz
+        npmPackageMetaData.attachments?.getMap()?.keys?.forEach { checkPathFragment(it) }
+    }
+
+    /**
+     * 校验[fragment]为合法的单层路径片段，scope包允许 @scope/xxx 两层
+     */
+    private fun checkPathFragment(fragment: String?) {
+        val segments = fragment?.split(SLASH).orEmpty()
+        val scoped = segments.size == 2 && segments.first().startsWith('@')
+        if (segments.size != 1 && !scoped) {
+            throw NpmBadRequestException("Invalid npm path fragment [$fragment].")
+        }
+        segments.forEach { PathUtils.validateFileName(it) }
+    }
 
     fun getPackageMetadataPath(packageName: String): String {
         return NPM_PKG_METADATA_FULL_PATH.format(packageName)

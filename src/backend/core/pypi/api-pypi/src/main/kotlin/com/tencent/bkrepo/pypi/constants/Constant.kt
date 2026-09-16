@@ -40,8 +40,6 @@ const val REQUIRES_PYTHON = "requires_python"
 
 const val LINE_BREAK = "<br />"
 const val INDENT = "    "
-const val HTML_ENCODED_LESS_THAN = "&lt;"
-const val HTML_ENCODED_GREATER_THAN = "&gt;"
 const val REQUIRES_PYTHON_ATTR = "data-requires-python"
 
 const val NON_ALPHANUMERIC_SEQ_REGEX = "[-_.]+"

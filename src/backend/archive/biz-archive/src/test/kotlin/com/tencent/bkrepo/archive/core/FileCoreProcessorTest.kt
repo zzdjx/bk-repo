@@ -45,10 +45,7 @@ class FileCoreProcessorTest @Autowired constructor(
     fun pushTest() {
         val file = createTempCompressFile()
         fileCoreProcessor.listen(FileEntityEvent(file.sha256, file))
-        Thread.sleep(1000)
-        val cf = compressFileRepository.findBySha256AndStorageCredentialsKey(file.sha256, null)
-        Assertions.assertNotNull(cf)
-        Assertions.assertEquals(CompressStatus.COMPRESSED, cf!!.status)
+        awaitStatus(file.sha256, CompressStatus.COMPRESSED)
     }
 
     @Test
@@ -73,11 +70,22 @@ class FileCoreProcessorTest @Autowired constructor(
         storageService.store(artifactFile2.getFileSha256(), artifactFile2, null)
         compressFileRepository.save(file)
         fileCoreProcessor.listen(FileEntityEvent(file.sha256, file))
-        Thread.sleep(3000)
-        val cf = compressFileRepository.findBySha256AndStorageCredentialsKey(file.sha256, null)
-        Assertions.assertNotNull(cf)
-        Assertions.assertEquals(CompressStatus.COMPRESS_FAILED, cf!!.status)
+        awaitStatus(file.sha256, CompressStatus.COMPRESS_FAILED)
         pushTest()
+    }
+
+    private fun awaitStatus(sha256: String, expected: CompressStatus) {
+        val deadline = System.currentTimeMillis() + STATUS_WAIT_MS
+        var status: CompressStatus? = null
+        while (System.currentTimeMillis() < deadline) {
+            status = compressFileRepository
+                .findBySha256AndStorageCredentialsKey(sha256, null)?.status
+            if (status == expected) {
+                return
+            }
+            Thread.sleep(100)
+        }
+        Assertions.assertEquals(expected, status)
     }
 
     private fun createTempCompressFile(): TCompressFile {
@@ -108,5 +116,9 @@ class FileCoreProcessorTest @Autowired constructor(
         val tempFile = createTempFile()
         tempFile.writeBytes(data)
         return FileSystemArtifactFile(tempFile)
+    }
+
+    companion object {
+        private const val STATUS_WAIT_MS = 20_000L
     }
 }

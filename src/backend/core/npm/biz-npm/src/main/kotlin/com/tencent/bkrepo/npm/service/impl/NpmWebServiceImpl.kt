@@ -202,6 +202,7 @@ class NpmWebServiceImpl : NpmWebService, AbstractNpmService() {
     }
 
     fun reUploadPackageJsonFile(artifactInfo: NpmArtifactInfo, packageMetaData: NpmPackageMetaData) {
+        NpmUtils.checkPackageMetaData(packageMetaData)
         with(artifactInfo) {
             val fullPath = NpmUtils.getPackageMetadataPath(packageMetaData.name!!)
             val inputStream = JsonUtils.objectMapper.writeValueAsString(packageMetaData).byteInputStream()

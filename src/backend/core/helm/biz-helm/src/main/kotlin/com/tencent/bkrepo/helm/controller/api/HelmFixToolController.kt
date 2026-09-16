@@ -31,8 +31,13 @@
 
 package com.tencent.bkrepo.helm.controller.api
 
+import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.auth.pojo.enums.ResourceType
 import com.tencent.bkrepo.common.api.pojo.Response
 import com.tencent.bkrepo.common.artifact.api.ArtifactPathVariable
+import com.tencent.bkrepo.common.security.permission.Permission
+import com.tencent.bkrepo.common.security.permission.Principal
+import com.tencent.bkrepo.common.security.permission.PrincipalType
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.helm.pojo.artifact.HelmArtifactInfo
 import com.tencent.bkrepo.helm.pojo.fixtool.DateTimeRepairResponse
@@ -50,12 +55,14 @@ class HelmFixToolController(
 ) {
     @Operation(summary = "修复package管理功能")
     @GetMapping("/ext/package/populate")
+    @Principal(PrincipalType.ADMIN)
     fun fixPackageVersion(): List<PackageManagerResponse> {
         return fixToolService.fixPackageVersion()
     }
 
     @Operation(summary = "修复index.yaml文件中的制品包创建时间问题")
     @GetMapping("/ext/repairDateFormat")
+    @Principal(PrincipalType.ADMIN)
     fun repairPackageCreatedDate(): Response<List<DateTimeRepairResponse>> {
         return ResponseBuilder.success(fixToolService.repairPackageCreatedDate())
     }
@@ -64,6 +71,7 @@ class HelmFixToolController(
      * regenerate meta data from Chart.yaml
      */
     @PostMapping("/{projectId}/{repoName}/metaDate/regenerate")
+    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun regenerateMetaData(
         @RequestAttribute userId: String,
         @ArtifactPathVariable artifactInfo: HelmArtifactInfo

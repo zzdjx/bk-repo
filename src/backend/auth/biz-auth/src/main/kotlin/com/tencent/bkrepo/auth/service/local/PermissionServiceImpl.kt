@@ -220,7 +220,11 @@ open class PermissionServiceImpl constructor(
                 }
 
                 else -> {
-                    permHelper.checkPermissionExist(permissionId)
+                    if (projectId != null) {
+                        permHelper.checkPermissionBelongToProject(permissionId, projectId)
+                    } else {
+                        permHelper.checkPermissionExist(permissionId)
+                    }
                     return permHelper.updatePermissionById(permissionId, TPermission::users.name, userId)
                 }
             }
@@ -622,7 +626,7 @@ open class PermissionServiceImpl constructor(
 
     override fun updatePermissionDeployInRepo(request: UpdatePermissionDeployInRepoRequest): Boolean {
         logger.info("update permission deploy in repo, create [$request]")
-        permHelper.checkPermissionExist(request.permissionId)
+        permHelper.checkPermissionBelongToProject(request.permissionId, request.projectId)
         return permHelper.updatePermissionById(request.permissionId, TPermission::includePattern.name, request.path)
                 && permHelper.updatePermissionById(request.permissionId, TPermission::users.name, request.users)
                 && permHelper.updatePermissionById(request.permissionId, TPermission::permName.name, request.name)

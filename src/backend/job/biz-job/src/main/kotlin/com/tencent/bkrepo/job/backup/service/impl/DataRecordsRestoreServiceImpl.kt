@@ -170,6 +170,9 @@ class DataRecordsRestoreServiceImpl(
                 processFiles(context, it)
             } catch (e: Exception) {
                 logger.error("restore common data ${it.collectionName} error $e")
+                if (e is BadRequestException) {
+                    throw e
+                }
             }
             logger.info("common data ${it.collectionName} has been restored!")
         }

@@ -42,6 +42,8 @@ import com.tencent.bkrepo.common.security.http.credentials.HttpAuthCredentials
 import com.tencent.bkrepo.common.security.manager.AuthenticationManager
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * 临时token账号认证
@@ -67,10 +69,35 @@ open class TemporaryTokenAuthHandler(
         require(authCredentials is TemporaryTokenAuthCredentials)
         val token = authCredentials.token
         val tokenInfo = authenticationManager.getTokenInfo(token) ?: return ANONYMOUS_USER
+        checkExpireTime(tokenInfo.expireDate)
+        checkAccessPermits(tokenInfo.permits)
         val userId = tokenInfo.createdBy
         checkUserId(userId)
         request.setAttribute(USER_KEY, userId)
         return userId
+    }
+
+    /**
+     * 检查 token 是否过期。expireDate 为空表示永不过期。
+     */
+    private fun checkExpireTime(expireDateString: String?) {
+        expireDateString?.let {
+            val expireDate = LocalDateTime.parse(it, DateTimeFormatter.ISO_DATE_TIME)
+            if (expireDate.isBefore(LocalDateTime.now())) {
+                throw AuthenticationException("Expired token")
+            }
+        }
+    }
+
+    /**
+     * 检查 token 剩余访问次数。permits 为空表示不限制次数。
+     */
+    private fun checkAccessPermits(permits: Int?) {
+        permits?.let {
+            if (it <= 0) {
+                throw AuthenticationException("Expired token")
+            }
+        }
     }
 
     private fun checkUserId(userId: String) {

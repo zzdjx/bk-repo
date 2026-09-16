@@ -72,19 +72,16 @@ class ClientService(
 
     suspend fun createClient(request: ClientCreateRequest): ClientDetail {
         with(request) {
-            val ip = if (this.ip.isNullOrBlank()) ReactiveRequestContextHolder.getClientAddress() else this.ip
-            val query = Query(
-                Criteria.where(TClient::projectId.name).isEqualTo(projectId)
-                    .and(TClient::repoName.name).isEqualTo(repoName)
-                    .and(TClient::mountPoint.name).isEqualTo(mountPoint)
-                    .and(TClient::ip.name).isEqualTo(ip)
-            )
-            val client = clientRepository.findOne(query)
             recordDairyClient(request, "start")
-            val newClient = if (client == null) {
+            val newClient = if (forceNew) {
                 insertClient(request)
             } else {
-                updateClient(request, client)
+                val existing = findReusableClient(request)
+                if (existing == null) {
+                    insertClient(request)
+                } else {
+                    updateClient(request, existing)
+                }
             }
             pushHeartbeatMetrics(newClient)
             return newClient.convert()
@@ -175,13 +172,36 @@ class ClientService(
         }
     }
 
+    private suspend fun findReusableClient(request: ClientCreateRequest): TClient? {
+        val query = Query(
+            Criteria.where(TClient::projectId.name).isEqualTo(request.projectId)
+                .and(TClient::repoName.name).isEqualTo(request.repoName)
+                .and(TClient::mountPoint.name).isEqualTo(request.mountPoint)
+                .and(TClient::ip.name).isEqualTo(resolveClientIp(request))
+                .and(TClient::userId.name).isEqualTo(ReactiveSecurityUtils.getUser())
+        )
+        return selectPreferredClient(clientRepository.find(query))
+    }
+
+    private suspend fun resolveClientIp(request: ClientCreateRequest): String {
+        return if (request.ip.isNullOrBlank()) {
+            ReactiveRequestContextHolder.getClientAddress()
+        } else {
+            request.ip
+        }
+    }
+
+    private fun selectPreferredClient(clients: List<TClient>): TClient? {
+        return clients.maxWithOrNull(compareBy({ it.online }, { it.heartbeatTime }))
+    }
+
     private suspend fun insertClient(request: ClientCreateRequest): TClient {
         val client = TClient(
             projectId = request.projectId,
             repoName = request.repoName,
             mountPoint = request.mountPoint,
             userId = ReactiveSecurityUtils.getUser(),
-            ip = if (request.ip.isNullOrBlank()) ReactiveRequestContextHolder.getClientAddress() else request.ip,
+            ip = resolveClientIp(request),
             version = request.version,
             os = request.os,
             arch = request.arch,

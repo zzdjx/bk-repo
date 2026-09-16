@@ -33,4 +33,5 @@ dependencies {
     api(project(":auth:api-auth"))
     api(project(":repository:api-repository"))
     api(project(":common:common-service:service-servlet"))
+    testImplementation("io.mockk:mockk")
 }

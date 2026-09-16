@@ -18,15 +18,15 @@ class CompositeVersionRange(
     /**
      * 只要在[ranges]中的r任意区间就符合要求
      */
-    override fun contains(versionNumber: VersionNumber): Boolean {
+    override fun contains(version: String): Boolean {
         if (ranges.isEmpty()) {
             return false
         }
 
         return if (operator == Operator.AND) {
-            ranges.all { it.contains(versionNumber) }
+            ranges.all { it.contains(version) }
         } else {
-            ranges.any { it.contains(versionNumber) }
+            ranges.any { it.contains(version) }
         }
     }
 

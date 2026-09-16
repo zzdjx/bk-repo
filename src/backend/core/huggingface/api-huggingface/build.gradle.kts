@@ -30,4 +30,5 @@ dependencies {
     implementation(project(":common:common-artifact:artifact-api"))
     compileOnly("org.springframework:spring-web")
     compileOnly("org.springframework.cloud:spring-cloud-openfeign-core")
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
 }

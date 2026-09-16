@@ -53,7 +53,7 @@
 | name                         | string  | 是    | 无            | 扫描器名                                           | scanner name                         |
 | image                        | string  | 是    | 无            | 扫描器镜像                                          | scanner image                        |
 | dockerRegistryUsername       | string  | 否    | 无            | 扫描器镜像所在仓库用户名                                   | scanner image                        |
-| dockerRegistryPassword       | string  | 否    | 无            | 扫描器镜像所在仓库密码                                    | scanner image                        |
+| dockerRegistryPassword       | string  | 否    | 无            | 扫描器镜像所在仓库密码。查询/创建/更新响应中掩码为 `*`；更新时传空或连续 `*` 表示不修改 | scanner image password, masked as `*` in responses; empty or all-`*` on update keeps the stored value |
 | cmd                          | string  | 是    | 无            | 扫描器启动命令，扫描器镜像不需要设置entrypoint，而是制品库启动扫描器时候设置cmd | scanner cmd                          |
 | version                      | string  | 是    | 无            | 扫描器版本                                          | scanner version                      |
 | type                         | string  | 是    | 无            | 扫描器类型，固定为standard                              | scanner type                         |
@@ -83,7 +83,7 @@
     "name": "arrowhead",
     "image": "example.com/example/scanner:1.0",
     "dockerRegistryUsername": "xxx",
-    "dockerRegistryPassword": "xxx",
+    "dockerRegistryPassword": "*",
     "cmd": "scan",
     "version": "1.0",
     "args": [
@@ -139,7 +139,7 @@
     "name": "arrowhead",
     "image": "example.com/example/scanner:1.0",
     "dockerRegistryUsername": "xxx",
-    "dockerRegistryPassword": "xxx",
+    "dockerRegistryPassword": "*",
     "cmd": "scan",
     "version": "1.0",
     "args": [
@@ -223,7 +223,7 @@
         "name": "arrowhead",
         "image": "example.com/example/scanner:1.0",
         "dockerRegistryUsername": "xxx",
-        "dockerRegistryPassword": "xxx",
+        "dockerRegistryPassword": "*",
         "cmd": "scan",
         "version": "1.0",
         "args": [

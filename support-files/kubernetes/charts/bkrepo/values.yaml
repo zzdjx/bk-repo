@@ -103,7 +103,8 @@ mongodb:
     enabled: true
     database: bkrepo
     username: bkrepo
-    password: bkrepo
+    ## 必须通过 --set / 自定义 values 显式指定，禁止使用默认口令 bkrepo
+    password: ""
   persistence:
     subPath: mongodb
     size: 20Gi
@@ -153,8 +154,8 @@ tls:
 
 ## 如果mongodb.enabled为false，bkrepo将使用下面的参数连接外部mongodb
 externalMongodb:
-  ## mongodb 标准连接字符串
-  uri: mongodb://bkrepo:bkrepo@localhost:27017/bkrepo
+  ## mongodb 标准连接字符串（mongodb.enabled=false 时必填，禁止使用默认凭据 bkrepo/bkrepo）
+  uri: ""
 
 ## 数据持久化配置, 当使用filesystem方式存储时需要配置
 ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
@@ -242,11 +243,45 @@ common:
   springProfile: dev
   ## 初始用户名
   username: admin
-  ## 初始用户密码
-  password: password
+  ## 初始用户密码（必须通过 --set / 自定义 values 显式指定，禁止使用 password、blueking 等公开默认口令）
+  password: ""
   ## pod volume 挂载路径
   mountPath: /data/storage
   config:
+    ## 备份敏感字段 AES 密钥，16/24/32 字节，按需配置，不配不影响其它功能
+    backup:
+      encryptKey: ""
+    ## 与 Java 配置项相同。空则 lookup 已有配置，没有则随机生成。
+    security:
+      auth:
+        jwt:
+          secretKey: ""
+      service:
+        secretKey: ""
+        ## 仅校验、不签发。换钥时填写；空升级不自动填。
+        previousSecretKey: ""
+      ## 空则渲染时随机生成并写入 common ConfigMap，升级时从该 ConfigMap 读回，不轮钥。
+      ## 公钥留空即可，服务启动时从私钥推导；要固定密钥用 scripts/gen-crypto-keys.sh 生成后填入。
+      ## 升级前若 ConfigMap 已被删除或改名（换 release 名、跨集群重建等），lookup 读不回旧值，
+      ## 这里留空就会生成新钥，此时务必把旧值显式填进来：
+      ##   privateKeyStr 换钥后存量密文由代码兜底解密，并由 LegacyCryptoRewriteJob 重加密，不会丢；
+      ##   其余四把（2048PKCS8/2048PKCS1/aesKey/aesIv）没有兜底，换钥后对应密文一律解不开：
+      ##     OAuth token 重新授权即可，制品传输 crypt key 下次请求自愈，
+      ##     但 aesKey 换掉后存量 proxy 的 secretKey 解不开且没有重置接口，只能删除代理节点重建。
+      ## 旧值可从升级前的 ConfigMap 取：kubectl get cm <release>-common -o yaml
+      ## 从没配过这几项的老集群升级，旧值就是升级前代码里的硬编码默认值，可从上一个 release 的
+      ## CryptoProperties.kt 抄进来先保证平滑，之后再择期换钥（换钥影响见上）。
+      ## privateKeyStr 用 genCA 借壳生成 2048 位私钥后丢掉证书，因为 helm 的 genPrivateKey
+      ## 固定 4096 位且两者都不接收位数参数，看到 chart 生成 CA 不必困惑。
+      crypto:
+        privateKeyStr: ""
+        publicKeyStr: ""
+        privateKeyStr2048PKCS8: ""
+        publicKeyStr2048PKCS8: ""
+        privateKeyStr2048PKCS1: ""
+        publicKeyStr2048PKCS1: ""
+        aesKey: ""
+        aesIv: ""
     ## bkrepo存储配置
     storage:
       ## bkrepo receive默认配置
@@ -304,11 +339,11 @@ gateway:
   helmHost: helm.bkrepo.example.com
   ## dns服务器地址，用于配置nginx resolver。local=on为openrestry语法，取本机/etc/resolv.conf配置
   dnsServer: local=on
-  ## 网关访问微服务认证信息 ,authorization配置即将被废弃，建议使用accessKey/secretKey配置
+  ## 网关访问微服务认证信息。新安装请改用 accessKey/secretKey；升级时可继续使用已有且格式正确的 authorization。
   authorization: "Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="
-  ## authorization配置独立出accessKey
+  ## 网关平台账号 accessKey（新安装必填，禁止使用仓库内公开默认值）
   accessKey: ""
-  ## authorization配置独立出secretKey
+  ## 网关平台账号 secretKey（新安装必填，禁止使用仓库内公开默认值）
   secretKey: ""
   ## 部署模式，standalone: 独立模式，ci: 与ci搭配模式 , saas模式: 蓝鲸saas部署模式
   deployMode: standalone
@@ -410,6 +445,8 @@ gateway:
 ## replication fdtp服务配置
 replicationUDP:
   enabled: true
+  ## FDTP 连接认证密钥，至少 64 字节，启用 fdtp.server.enabled 时必须显式配置
+  secretKey: ""
   ## bkrepo replication-udp service配置
   service:
     type: LoadBalancer
@@ -464,7 +501,8 @@ repository:
 ## 认证服务配置
 auth:
   config:
-    allowDefaultPwd: true
+    ## 是否允许使用内置默认口令 password 登录。生产环境必须为 false
+    allowDefaultPwd: false
     ## 指定realm类型，支持local/devops
     realm: local
     ## realm 指定为devops或者bkiamv3配置

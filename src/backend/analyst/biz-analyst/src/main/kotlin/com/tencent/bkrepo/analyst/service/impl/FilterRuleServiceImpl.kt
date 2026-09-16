@@ -99,15 +99,15 @@ class FilterRuleServiceImpl(private val filterRuleDao: FilterRuleDao) : FilterRu
             for (rule in rules) {
                 var matched = true
                 if (rule.fullPath?.isNotEmpty() == true) {
-                    matched = matched && Regex(rule.fullPath).matches(fullPath ?: "")
+                    matched = matched && matchesFilterPattern(rule.fullPath, fullPath)
                 }
 
                 if (rule.packageKey?.isNotEmpty() == true) {
-                    matched = matched && Regex(rule.packageKey).matches(packageKey ?: "")
+                    matched = matched && matchesFilterPattern(rule.packageKey, packageKey)
                 }
 
                 if (rule.packageVersion?.isNotEmpty() == true) {
-                    matched = matched && Regex(rule.packageVersion).matches(packageVersion ?: "")
+                    matched = matched && matchesFilterPattern(rule.packageVersion, packageVersion)
                 }
 
                 if (matched) {
@@ -188,4 +188,12 @@ class FilterRuleServiceImpl(private val filterRuleDao: FilterRuleDao) : FilterRu
     companion object {
         private val logger = LoggerFactory.getLogger(FilterRuleServiceImpl::class.java)
     }
+}
+
+/**
+ * 路径/包名/版本支持原样填写（含括号等正则元字符），也支持正则。
+ */
+internal fun matchesFilterPattern(pattern: String, value: String?): Boolean {
+    val target = value ?: ""
+    return pattern == target || runCatching { Regex(pattern).matches(target) }.getOrDefault(false)
 }

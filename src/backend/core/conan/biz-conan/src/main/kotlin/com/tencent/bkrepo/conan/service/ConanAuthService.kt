@@ -37,7 +37,7 @@ interface ConanAuthService {
     fun checkCredentials(token: String): String
 
     /**
-     * 根据basic token生成对应token
+     * 校验请求并返回访问凭证
      */
     fun authenticate(content: String): String
 }

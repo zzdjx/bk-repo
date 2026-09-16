@@ -108,6 +108,20 @@ class MediaTranscodeJobDao : SimpleMongoDao<TMediaTranscodeJob>() {
         return updateMulti(query, update)
     }
 
+    fun resetStuckJobsToWaiting(): UpdateResult {
+        val query = Query(
+            where(TMediaTranscodeJob::status).`in`(
+                MediaTranscodeJobStatus.QUEUE,
+                MediaTranscodeJobStatus.INIT,
+                MediaTranscodeJobStatus.RUNNING
+            )
+        )
+        val update = Update()
+            .set(TMediaTranscodeJob::status.name, MediaTranscodeJobStatus.WAITING)
+            .currentDate(TMediaTranscodeJob::updateTime.name)
+        return updateMulti(query, update)
+    }
+
     /**
      * 删除一周前更新且状态为 SUCCESS 的作业。
      */

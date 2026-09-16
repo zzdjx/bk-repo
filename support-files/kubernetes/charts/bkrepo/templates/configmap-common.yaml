@@ -91,7 +91,15 @@ data:
         url: http://{{ .Values.gateway.host }}
         {{- end }}
         username: {{ .Values.common.username }}
-        password: {{ .Values.common.password }}
+        password: {{ include "bkrepo.admin.password" . | quote }}
+    {{- $_ := include "bkrepo.jwtSecretKey" . -}}
+    {{- $_ := include "bkrepo.servicePreviousSecretKey" . -}}
+    {{- $_ := include "bkrepo.serviceSecretKey" . -}}
+    {{- $_ := include "bkrepo.crypto.material" . -}}
+    {{- if .Values.replicationUDP.secretKey }}
+    fdtp.server.secretKey: {{ include "bkrepo.fdtpSecretKey" . | quote }}
+    {{- end }}
+    {{- include "bkrepo.backupEncryptKey" . }}
     {{- toYaml .Values.common.config | nindent 4 }}
     {{- if .Values.tls.mongodb.enabled }}
     tls:

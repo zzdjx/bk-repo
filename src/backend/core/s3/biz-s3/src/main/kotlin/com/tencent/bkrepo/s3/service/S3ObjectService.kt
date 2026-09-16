@@ -66,13 +66,17 @@ import com.tencent.bkrepo.repository.pojo.node.service.NodeDeleteRequest
 import com.tencent.bkrepo.repository.pojo.node.service.NodeMoveCopyRequest
 import com.tencent.bkrepo.repository.pojo.search.NodeQueryBuilder
 import com.tencent.bkrepo.s3.artifact.S3ArtifactInfo
+import com.tencent.bkrepo.s3.artifact.utils.AWS4AuthUtil
+import com.tencent.bkrepo.s3.constant.CONTENT_SHA256_MISMATCH
 import com.tencent.bkrepo.s3.constant.NO_SUCH_ACCESS
 import com.tencent.bkrepo.s3.constant.NO_SUCH_KEY
+import com.tencent.bkrepo.s3.constant.S3HttpHeaders
 import com.tencent.bkrepo.s3.constant.S3HttpHeaders.X_AMZ_COPY_SOURCE
 import com.tencent.bkrepo.s3.constant.S3HttpHeaders.X_AMZ_METADATA_DIRECTIVE
 import com.tencent.bkrepo.s3.constant.S3HttpHeaders.X_AMZ_META_PREFIX
 import com.tencent.bkrepo.s3.constant.S3MessageCode
 import com.tencent.bkrepo.s3.exception.S3AccessDeniedException
+import com.tencent.bkrepo.s3.exception.S3BadRequestException
 import com.tencent.bkrepo.s3.exception.S3NotFoundException
 import com.tencent.bkrepo.s3.pojo.CopyObjectResult
 import com.tencent.bkrepo.s3.pojo.ListBucketResult
@@ -149,6 +153,13 @@ class S3ObjectService(
         content = ActionAuditContent.NODE_UPLOAD_CONTENT
     )
     fun putObject(artifactInfo: S3ArtifactInfo, file: ArtifactFile) {
+        val contentHash = HeaderUtils.getHeader(S3HttpHeaders.X_AMZ_CONTENT_SHA256)
+        if (!AWS4AuthUtil.payloadHashMatches(contentHash, file.getFileSha256())) {
+            throw S3BadRequestException(
+                code = S3MessageCode.S3_CONTENT_SHA256_MISMATCH,
+                params = arrayOf(CONTENT_SHA256_MISMATCH, artifactInfo.getArtifactFullPath())
+            )
+        }
         val context = ArtifactUploadContext(file)
         repository.upload(context)
     }

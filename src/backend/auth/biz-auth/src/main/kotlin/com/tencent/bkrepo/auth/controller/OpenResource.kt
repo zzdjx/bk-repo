@@ -160,6 +160,19 @@ open class OpenResource(private val permissionService: PermissionService) {
     }
 
     /**
+     * 检查当前用户是否有权限管理指定角色
+     * - projectId 为 null 时，要求系统管理员（SERVICE 角色）
+     * - projectId 不为 null 时，要求对应项目的项目管理员
+     */
+    fun preCheckRoleAdmin(projectId: String?) {
+        if (projectId == null) {
+            preCheckUserAdmin()
+        } else {
+            preCheckProjectAdmin(projectId)
+        }
+    }
+
+    /**
      * 判断当前用户是否为项目管理员
      */
     fun isContextUserProjectAdmin(projectId: String): Boolean {

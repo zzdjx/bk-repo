@@ -14,7 +14,7 @@
       </el-form-item>
       <!-- wework-bot -->
       <el-form-item v-if="credential.type === CREDENTIAL_TYPE_WEWORK_BOT" label="key" prop="key" required>
-        <el-input v-model="credential.key" placeholder="请输入Key，可从企业微信机器人Webhook中获取" />
+        <el-input v-model="credential.key" placeholder="请输入Key；更新时 * 表示不修改" />
       </el-form-item>
     </el-form>
     <div slot="footer">
@@ -73,6 +73,10 @@ export default {
   },
   methods: {
     validateUuid(rule, value, callback) {
+      if (!this.createMode && /^\*+$/.test(value || '')) {
+        callback()
+        return
+      }
       if (UUID_REGEX.test(value)) {
         callback()
       } else {

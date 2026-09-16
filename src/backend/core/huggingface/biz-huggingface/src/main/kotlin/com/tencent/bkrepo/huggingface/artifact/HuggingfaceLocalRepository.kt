@@ -27,6 +27,7 @@
 
 package com.tencent.bkrepo.huggingface.artifact
 
+import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.artifact.api.ArtifactInfo
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactContext
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactDownloadContext
@@ -40,12 +41,11 @@ import com.tencent.bkrepo.common.service.util.HttpContextHolder
 import com.tencent.bkrepo.huggingface.constants.REPO_TYPE_MODEL
 import com.tencent.bkrepo.huggingface.constants.REVISION_KEY
 import com.tencent.bkrepo.huggingface.constants.REVISION_MAIN
+import com.tencent.bkrepo.huggingface.exception.EntryNotFoundException
 import com.tencent.bkrepo.huggingface.exception.HfRepoNotFoundException
 import com.tencent.bkrepo.huggingface.exception.RevisionNotFoundException
 import com.tencent.bkrepo.huggingface.pojo.DatasetInfo
 import com.tencent.bkrepo.huggingface.pojo.ModelInfo
-import com.tencent.bkrepo.huggingface.pojo.RepoFile
-import com.tencent.bkrepo.huggingface.pojo.RepoFolder
 import com.tencent.bkrepo.huggingface.pojo.RepoSibling
 import com.tencent.bkrepo.huggingface.service.HfCommonService
 import com.tencent.bkrepo.repository.pojo.node.NodeInfo
@@ -176,20 +176,24 @@ class HuggingfaceLocalRepository(
         with(context.artifactInfo) {
             require(this is HuggingfaceArtifactInfo)
             transferRevision(this)
-            packageService.findVersionByName(projectId, repoName, getPackageKey(), getRevision()!!)
-                ?: throw RevisionNotFoundException(getRevision()!!)
-            this.setArtifactMappingUri("/${getRepoId()}/resolve/${getRevision()}")
-            val nodes = nodeService.listNode(this, NodeListOption(deep = context.recursive))
-            return nodes.map { node ->
-                if (node.folder) {
-                    RepoFolder(path = node.fullPath, treeId = node.sha256.orEmpty(), lastCommit = null)
-                } else {
-                    RepoFile(
-                        path = node.fullPath, size = node.size, blobId = node.sha256.orEmpty(),
-                        lastCommit = null, lfs = null, security = null
+            val revision = getRevision().orEmpty()
+            packageService.findVersionByName(projectId, repoName, getPackageKey(), revision)
+                ?: throw RevisionNotFoundException(revision)
+            val pathInRepo = getArtifactName()
+            val revisionRoot = "/${getRepoId()}/resolve/$revision"
+            if (pathInRepo != StringPool.ROOT) {
+                val detail = nodeService.getNodeDetail(this) ?: throw EntryNotFoundException(pathInRepo)
+                if (!detail.folder) {
+                    return HfTreeConverter.convertFile(
+                        fullPath = detail.fullPath,
+                        size = detail.size,
+                        oid = detail.sha256.orEmpty(),
+                        revisionRoot = revisionRoot,
                     )
                 }
             }
+            val nodes = nodeService.listNode(this, NodeListOption(deep = context.recursive))
+            return HfTreeConverter.convert(nodes, revisionRoot)
         }
     }
 

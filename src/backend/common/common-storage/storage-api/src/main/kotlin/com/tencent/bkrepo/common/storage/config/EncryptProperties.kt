@@ -27,21 +27,41 @@
 
 package com.tencent.bkrepo.common.storage.config
 
+import com.tencent.bkrepo.common.api.exception.ErrorCodeException
+import com.tencent.bkrepo.common.api.message.CommonMessageCode
+
 /**
  * 加密配置，默认使用国密SM4
- * */
+ */
 data class EncryptProperties(
     /**
      * 是否开启加密
-     * */
+     */
     var enabled: Boolean = false,
     /**
-     * 加密密钥
-     * */
-    var key: String = "secret@key",
+     * 加密密钥，开启加密时必填，无默认值
+     */
+    var key: String = "",
     /**
      * 加密算法
      * 支持SM4/AES
-     * */
+     */
     var algorithm: String = "SM4"
-)
+) {
+    /**
+     * 开启加密时必须显式配置密钥
+     */
+    fun requireKeyIfEnabled() {
+        if (enabled && key.isBlank()) {
+            throw ErrorCodeException(CommonMessageCode.PARAMETER_MISSING, "encrypt.key")
+        }
+    }
+
+    /**
+     * 返回已校验的加密密钥
+     */
+    fun requiredKey(): String {
+        requireKeyIfEnabled()
+        return key
+    }
+}

@@ -47,6 +47,9 @@ const val REPO_MANAGE_ID = "repo_manage"
 
 const val REPO_MANAGE_NAME = "仓库管理员"
 
+/**
+ * 弱口令明文。仅用于登录拦截（`allowDefaultPwd=false` 时拒绝用该口令登录），不再作为重置目标。
+ */
 const val DEFAULT_PASSWORD = "password"
 
 const val AUTHORIZATION = "Authorization"

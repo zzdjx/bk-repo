@@ -39,7 +39,7 @@ data class BackupRole(
     val roleId: String,
     val type: BackupRoleType,
     var name: String,
-    val projectId: String,
+    val projectId: String? = null,
     val repoName: String? = null,
     val admin: Boolean = false,
     var description: String? = null,

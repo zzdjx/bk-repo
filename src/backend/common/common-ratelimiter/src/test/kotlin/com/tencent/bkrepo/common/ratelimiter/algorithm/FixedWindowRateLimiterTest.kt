@@ -38,7 +38,6 @@ import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
-import kotlin.random.Random
 import kotlin.system.measureTimeMillis
 
 class FixedWindowRateLimiterTest {
@@ -73,19 +72,17 @@ class FixedWindowRateLimiterTest {
 
     @Test
     fun testTryAcquireOnMultiThreads() {
-        val ticker = Mockito.mock(Ticker::class.java)
-        Mockito.`when`(ticker.read()).thenReturn(0 * 1000 * 1000L)
-        val ratelimiter: RateLimiter = FixedWindowRateLimiter(5, Duration.ofSeconds(1), Stopwatch.createStarted(ticker))
+        // Mockito Ticker 非线程安全；真实时钟需长窗口，避免跨窗口和 10ms tryLock 超时
+        val ratelimiter: RateLimiter = FixedWindowRateLimiter(5, Duration.ofMinutes(1))
         val successNum = java.util.concurrent.atomic.AtomicInteger(0)
         val failedNum = java.util.concurrent.atomic.AtomicInteger(0)
         val errorNum = java.util.concurrent.atomic.AtomicInteger(0)
-        val readers = Runtime.getRuntime().availableProcessors()
+        val readers = 8
         val countDownLatch = CountDownLatch(readers)
         val elapsedTime = measureTimeMillis {
             repeat(readers) {
                 thread {
                     try {
-                        Thread.sleep((Random.nextInt(5) * 2).toLong())
                         val passed = ratelimiter.tryAcquire(1)
                         if (passed) {
                             successNum.incrementAndGet()

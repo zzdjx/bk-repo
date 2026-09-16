@@ -55,6 +55,7 @@ import com.tencent.bkrepo.common.metadata.pojo.router.RemoveRouterNodeRequest
 import com.tencent.bkrepo.common.metadata.service.router.RouterAdminService
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Instant
 import java.time.LocalDateTime
@@ -170,7 +171,10 @@ class ProxyServiceImpl(
                 name = TProxy::ticket.name
             )
             Preconditions.checkArgument(
-                expression = AESUtils.encrypt("$name:$STARTUP_OPERATION:${tProxy.ticket}", secretKey) == message,
+                expression = MessageDigest.isEqual(
+                    AESUtils.encrypt("$name:$STARTUP_OPERATION:${tProxy.ticket}", secretKey).toByteArray(),
+                    message.toByteArray()
+                ),
                 name = message
             )
             val sessionKey = AESUtils.encrypt(randomString(PROXY_KEY_LEN), secretKey)
@@ -206,7 +210,10 @@ class ProxyServiceImpl(
                 name = TProxy::ticket.name
             )
             Preconditions.checkArgument(
-                expression = AESUtils.encrypt("$name:$SHUTDOWN_OPERATION:${tProxy.ticket}", secretKey) == message,
+                expression = MessageDigest.isEqual(
+                    AESUtils.encrypt("$name:$SHUTDOWN_OPERATION:${tProxy.ticket}", secretKey).toByteArray(),
+                    message.toByteArray()
+                ),
                 name = ProxyStatusRequest::message.name
             )
             tProxy.status = ProxyStatus.OFFLINE

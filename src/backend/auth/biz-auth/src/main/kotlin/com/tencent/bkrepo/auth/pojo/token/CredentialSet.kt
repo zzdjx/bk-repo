@@ -43,5 +43,11 @@ data class CredentialSet(
     @get:Schema(title = "状态")
     val status: CredentialStatus,
     @get:Schema(title = "认证授权方式")
-    val authorizationGrantType: AuthorizationGrantType? = AuthorizationGrantType.PLATFORM
+    val authorizationGrantType: AuthorizationGrantType? = AuthorizationGrantType.PLATFORM,
+    /**
+     * 是否为公开 OAuth 客户端。
+     * 公开客户端换授权码需 PKCE、refresh 可不带 secret；存量凭证缺该字段时视为公开。
+     */
+    @get:Schema(title = "是否为公开 OAuth 客户端")
+    val publicClient: Boolean = true
 )

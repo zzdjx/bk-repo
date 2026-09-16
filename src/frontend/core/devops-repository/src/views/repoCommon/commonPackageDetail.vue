@@ -81,7 +81,7 @@
                                                     label: $t('upgrade'), clickEvent: () => changeStageTagHandler($version),
                                                     disabled: ($version.stageTag || '').includes('@release')
                                                 },
-                                                repoType !== 'docker' && { label: $t('download'), clickEvent: () => downloadPackageHandler($version) },
+                                                repoType !== 'docker' && repoType !== 'huggingface' && { label: $t('download'), clickEvent: () => downloadPackageHandler($version) },
                                                 showRepoScan && { label: $t('scanArtifact'), clickEvent: () => scanPackageHandler($version) }
                                             ] : []),
                                             { clickEvent: () => changeForbidStatusHandler($version), label: $version.metadata.forbidStatus ? $t('liftBan') : $t('forbiddenUse') },
@@ -468,7 +468,7 @@
                 })
             },
             downloadPackageHandler (row = this.currentVersion) {
-                if (this.repoType === 'docker') return
+                if (this.repoType === 'docker' || this.repoType === 'huggingface') return
                 const url = `/repository/api/version/download/${this.projectId}/${this.repoName}?packageKey=${this.packageKey}&version=${encodeURIComponent(row.name)}&download=true`
                 this.$ajax.head(url).then(() => {
                     window.open(

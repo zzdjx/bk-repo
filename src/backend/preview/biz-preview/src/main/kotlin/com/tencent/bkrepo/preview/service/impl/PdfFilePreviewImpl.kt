@@ -33,22 +33,31 @@ package com.tencent.bkrepo.preview.service.impl
 
 import com.tencent.bkrepo.common.metadata.service.node.NodeService
 import com.tencent.bkrepo.preview.config.configuration.PreviewConfig
+import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.service.FileTransferService
 import com.tencent.bkrepo.preview.service.cache.impl.PreviewFileCacheServiceImpl
 import org.springframework.stereotype.Service
 
 /**
- * pdf文件
+ * 本地 PDF 按 Range 原样流出，供浏览器内置阅读器内联预览；远程 PDF 仍走转换缓存链路。
  */
 @Service
 class PdfFilePreviewImpl(
-    private val config: PreviewConfig,
+    config: PreviewConfig,
     private val fileTransferService: FileTransferService,
-    private val previewFileCacheService: PreviewFileCacheServiceImpl,
-    private val nodeService: NodeService
+    previewFileCacheService: PreviewFileCacheServiceImpl,
+    nodeService: NodeService
 ) : AbstractFilePreview(
     config,
     fileTransferService,
     previewFileCacheService,
     nodeService
-)
+) {
+    override fun filePreviewHandle(fileAttribute: FileAttribute) {
+        if (fileAttribute.storageType == 0) {
+            fileTransferService.sendOriginalFileAsResponse(fileAttribute)
+        } else {
+            super.filePreviewHandle(fileAttribute)
+        }
+    }
+}

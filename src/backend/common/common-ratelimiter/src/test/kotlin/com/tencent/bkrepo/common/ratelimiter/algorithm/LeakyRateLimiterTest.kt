@@ -62,11 +62,11 @@ class LeakyRateLimiterTest {
 
     @Test
     fun testTryAcquireOnMultiThreads() {
-        val ratelimiter = LeakyRateLimiter(5.0, 5)
+        val ratelimiter = LeakyRateLimiter(0.001, 5)
         val successNum = java.util.concurrent.atomic.AtomicInteger(0)
         val failedNum = java.util.concurrent.atomic.AtomicInteger(0)
         val errorNun = java.util.concurrent.atomic.AtomicInteger(0)
-        val readers = Runtime.getRuntime().availableProcessors()
+        val readers = 8
         val countDownLatch = CountDownLatch(readers)
         val elapsedTime = measureTimeMillis {
             repeat(readers) {

@@ -42,6 +42,8 @@ import com.tencent.bkrepo.common.artifact.stream.ArtifactInputStream
 import com.tencent.bkrepo.common.artifact.stream.Range
 import com.tencent.bkrepo.common.metadata.service.node.NodeService
 import com.tencent.bkrepo.preview.config.configuration.PreviewConfig
+import com.tencent.bkrepo.preview.constant.PreviewMessageCode
+import com.tencent.bkrepo.preview.exception.PreviewSystemException
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.service.FileTransferService
 import com.tencent.bkrepo.preview.service.cache.impl.PreviewFileCacheServiceImpl
@@ -52,7 +54,6 @@ import org.apache.commons.compress.archivers.ArchiveException
 import org.apache.commons.compress.archivers.ArchiveInputStream
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
-import org.apache.commons.compress.utils.IOUtils
 import org.springframework.stereotype.Service
 import org.springframework.util.unit.DataSize
 
@@ -77,23 +78,25 @@ class CompressFilePreviewImpl(
             fileAttribute.repoName.orEmpty(),
             fileAttribute.artifactUri.orEmpty()
         )
-        val inputStream = getArchiveInputStream(artifactInfo)
-        var entry: ArchiveEntry?
-        val artifactResource: ArtifactResource
-        val maxSize = DataSize.ofMegabytes(config.maxFileSize).toBytes().toInt()
-        while (inputStream.nextEntry.also { entry = it } != null) {
-            if (entry!!.name == fileAttribute.zipEntryPath) {
-                var byteArray = ByteArray(maxSize)
-                val size = inputStream.use { IOUtils.readFully(it, byteArray) }
-                if (size < maxSize) {
-                    byteArray = byteArray.sliceArray(IntRange(0, size - 1))
+        val maxSizeBytes = DataSize.ofMegabytes(config.maxFileSize).toBytes()
+        val maxSizeInt = maxSizeBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        getArchiveInputStream(artifactInfo).use { inputStream ->
+            var entry = inputStream.nextEntry
+            while (entry != null) {
+                if (entry.name == fileAttribute.zipEntryPath) {
+                    rejectIfDeclaredSizeTooLarge(entry, maxSizeBytes)
+                    val byteArray = readBoundedEntryBytes(inputStream, maxSizeInt)
+                    val artifactResource = ArtifactResource(
+                        inputStream = ArtifactInputStream(
+                            byteArray.inputStream(),
+                            Range.full(byteArray.size.toLong())
+                        ),
+                        artifactName = entry.name
+                    )
+                    artifactResourceWriter.write(artifactResource)
+                    return
                 }
-                artifactResource = ArtifactResource(
-                    inputStream = ArtifactInputStream(byteArray.inputStream(), Range.full(byteArray.size.toLong())),
-                    artifactName = entry!!.name
-                )
-                artifactResourceWriter.write(artifactResource)
-                return
+                entry = inputStream.nextEntry
             }
         }
         throw NodeNotFoundException(fileAttribute.zipEntryPath.orEmpty())
@@ -102,7 +105,7 @@ class CompressFilePreviewImpl(
     private fun getArchiveInputStream(artifactInfo: ArtifactInfo): ArchiveInputStream {
         with(artifactInfo) {
             val fileExtension = PathUtils.resolveExtension(getArtifactName())
-            if (!Regex(COMPRESSED_FILE_TYPE_PATTERN).matches(fileExtension)) {
+            if (!Regex(COMPRESSED_FILE_TYPE_PATTERN, RegexOption.IGNORE_CASE).matches(fileExtension)) {
                 throw ErrorCodeException(ArtifactMessageCode.ARTIFACT_TYPE_UNSUPPORTED, fileExtension)
             }
             val node = nodeService.getNodeDetail(artifactInfo)
@@ -113,7 +116,9 @@ class CompressFilePreviewImpl(
             val context = ArtifactDownloadContext()
             var inputStream: InputStream = storageManager.loadArtifactInputStream(node, context.storageCredentials)
                 ?: throw ArtifactNotFoundException(getArtifactFullPath())
-            if (fileExtension == GZ_FILE_TYPE || fileExtension == TGZ_FILE_TYPE) {
+            if (fileExtension.equals(GZ_FILE_TYPE, ignoreCase = true) ||
+                fileExtension.equals(TGZ_FILE_TYPE, ignoreCase = true)
+            ) {
                 inputStream = GzipCompressorInputStream(inputStream)
             }
             return try {
@@ -130,5 +135,31 @@ class CompressFilePreviewImpl(
         private const val COMPRESSED_FILE_SIZE_LIMIT_DESC = "1GB"
         private const val GZ_FILE_TYPE = "gz"
         private const val TGZ_FILE_TYPE = "tgz"
+
+        fun rejectIfDeclaredSizeTooLarge(entry: ArchiveEntry, maxSizeBytes: Long) {
+            if (entry.size >= 0 && entry.size > maxSizeBytes) {
+                throw fileSizeLimitException(maxSizeBytes)
+            }
+        }
+
+        /**
+         * 按实际上界读取条目内容，避免按 maxFileSize 预分配堆数组。
+         * 超出上限时拒绝，防止压缩包条目把堆打满。
+         */
+        fun readBoundedEntryBytes(input: InputStream, maxSizeBytes: Int): ByteArray {
+            val bytes = input.readNBytes(maxSizeBytes)
+            if (bytes.size == maxSizeBytes && input.read() != -1) {
+                throw fileSizeLimitException(maxSizeBytes.toLong())
+            }
+            return bytes
+        }
+
+        private fun fileSizeLimitException(maxSizeBytes: Long): PreviewSystemException {
+            val maxSizeInMb = maxSizeBytes / (1024 * 1024)
+            return PreviewSystemException(
+                PreviewMessageCode.PREVIEW_FILE_SIZE_LIMIT_ERROR,
+                "${maxSizeInMb}M"
+            )
+        }
     }
 }

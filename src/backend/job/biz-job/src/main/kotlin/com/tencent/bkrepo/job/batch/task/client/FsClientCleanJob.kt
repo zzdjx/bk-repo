@@ -99,6 +99,7 @@ class FsClientCleanJob(
                 .and(DailyClient::repoName).isEqualTo(row.repoName)
                 .and(DailyClient::mountPoint).isEqualTo(row.mountPoint)
                 .and(DailyClient::ip).isEqualTo(row.ip)
+                .and(DailyClient::userId).isEqualTo(row.userId)
         )
         mongoTemplate.remove(dailyClientQuery, DAILY_CLIENT_COLLECTION)
         context.success.incrementAndGet()

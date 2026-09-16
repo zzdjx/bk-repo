@@ -6,6 +6,7 @@ import com.tencent.bkrepo.common.api.util.JsonUtils
 import com.tencent.bkrepo.common.api.util.UrlFormatter
 import com.tencent.bkrepo.common.api.util.readJsonString
 import com.tencent.bkrepo.common.artifact.api.ArtifactInfo
+import com.tencent.bkrepo.common.artifact.path.PathUtils
 import com.tencent.bkrepo.common.service.util.SpringContextUtils
 import com.tencent.bkrepo.nuget.constant.INDEX
 import com.tencent.bkrepo.nuget.constant.NugetProperties
@@ -30,12 +31,28 @@ object NugetUtils {
     private val nugetProperties = SpringContextUtils.getBean(NugetProperties::class.java)
     private val logger = LoggerFactory.getLogger(NugetUtils::class.java)
 
+    fun normalizePackageId(id: String): String {
+        return PathUtils.normalizeFullPath("/$id").trimStart('/')
+    }
+
+    fun isSafePathSegment(value: String): Boolean {
+        if (value.isBlank() || value.contains("..")) {
+            return false
+        }
+        if (value.contains('/') || value.contains('\\')) {
+            return false
+        }
+        return normalizePackageId(value).isNotBlank()
+    }
+
     fun getNupkgFullPath(id: String, version: String): String {
-        return String.format(NUGET_FULL_PATH, id, id, version).toLowerCase()
+        val packageId = normalizePackageId(id)
+        return String.format(NUGET_FULL_PATH, packageId, packageId, version).toLowerCase()
     }
 
     fun getNuspecFullPath(id: String, version: String): String {
-        return String.format(NUGET_MANIFEST_FULL_PATH, id, id, version).toLowerCase()
+        val packageId = normalizePackageId(id)
+        return String.format(NUGET_MANIFEST_FULL_PATH, packageId, packageId, version).toLowerCase()
     }
 
     fun getServiceIndexFullPath(remoteUrl: String): String {

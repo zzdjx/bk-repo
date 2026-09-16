@@ -48,7 +48,8 @@ class MirrorsAuthHandler(
 
     override fun onAuthenticate(request: HttpServletRequest, authCredentials: HttpAuthCredentials): String {
         with(authCredentials as BasicAuthCredentials) {
-            if (mirrorsAuthProperties.password != password) {
+            val configuredPassword = mirrorsAuthProperties.password
+            if (configuredPassword.isBlank() || configuredPassword != password) {
                 throw AuthenticationException("Authorization value check failed")
             }
             return username

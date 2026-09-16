@@ -118,6 +118,20 @@ open class HttpAuthSecurity {
     }
 
     /**
+     * 用配置作为各内置 Handler 是否注册的默认值。
+     * 必须在 Customizer / [disableBasicAuth] 等代码禁用之前调用，代码只能再关不能再开。
+     */
+    fun applyConfig(properties: HttpAuthProperties): HttpAuthSecurity {
+        basicAuthEnabled = properties.basicEnabled
+        platformAuthEnabled = properties.platformEnabled
+        jwtAuthEnabled = properties.jwtEnabled
+        oauthEnabled = properties.oauthEnabled
+        temporaryTokenEnabled = properties.temporaryTokenEnabled
+        signAuthEnabled = properties.signEnabled
+        return this
+    }
+
+    /**
      * 添加自定义配置器[customizer]
      */
     fun addCustomizer(customizer: HttpAuthSecurityCustomizer): HttpAuthSecurity {

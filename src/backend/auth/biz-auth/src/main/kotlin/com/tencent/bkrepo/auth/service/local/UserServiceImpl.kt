@@ -60,6 +60,7 @@ import com.tencent.bkrepo.common.mongo.dao.util.Pages
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DuplicateKeyException
+import java.security.SecureRandom
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -398,10 +399,11 @@ class UserServiceImpl constructor(
         throw ErrorCodeException(CommonMessageCode.MODIFY_PASSWORD_FAILED, "modify password failed!")
     }
 
-    override fun resetPassword(userId: String): Boolean {
-        // todo 鉴权
-        val newHashPwd = DataDigestUtils.md5FromStr(DEFAULT_PASSWORD)
-        return userDao.updatePasswordByUserId(userId, newHashPwd)
+    override fun resetPassword(userId: String): String {
+        userHelper.checkUserExist(userId)
+        val newPassword = generateRandomPassword()
+        userDao.updatePasswordByUserId(userId, DataDigestUtils.md5FromStr(newPassword))
+        return newPassword
     }
 
     override fun repeatUid(userId: String): Boolean {
@@ -446,7 +448,19 @@ class UserServiceImpl constructor(
     }
 
     companion object {
+        private const val RANDOM_PASSWORD_LENGTH = 16
+        private val randomPasswordChars = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+        private val secureRandom = SecureRandom()
         private val logger = LoggerFactory.getLogger(UserServiceImpl::class.java)
+
+        private fun generateRandomPassword(length: Int = RANDOM_PASSWORD_LENGTH): String {
+            require(length > 0)
+            return buildString(length) {
+                repeat(length) {
+                    append(randomPasswordChars[secureRandom.nextInt(randomPasswordChars.size)])
+                }
+            }
+        }
     }
 }
 

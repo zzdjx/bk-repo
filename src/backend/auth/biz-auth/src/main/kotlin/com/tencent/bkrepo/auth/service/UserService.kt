@@ -89,7 +89,7 @@ interface UserService {
 
     fun updatePassword(userId: String, oldPwd: String, newPwd: String): Boolean
 
-    fun resetPassword(userId: String): Boolean
+    fun resetPassword(userId: String): String
 
     fun repeatUid(userId: String): Boolean
 

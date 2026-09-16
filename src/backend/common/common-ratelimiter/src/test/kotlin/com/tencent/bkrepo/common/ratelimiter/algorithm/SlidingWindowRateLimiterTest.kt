@@ -62,11 +62,11 @@ class SlidingWindowRateLimiterTest {
 
     @Test
     fun testTryAcquireOnMultiThreads() {
-        val ratelimiter = SlidingWindowRateLimiter(5, Duration.ofMillis(100))
+        val ratelimiter = SlidingWindowRateLimiter(5, Duration.ofMinutes(1))
         val successNum = java.util.concurrent.atomic.AtomicInteger(0)
         val failedNum = java.util.concurrent.atomic.AtomicInteger(0)
         val errorNum = java.util.concurrent.atomic.AtomicInteger(0)
-        val readers = Runtime.getRuntime().availableProcessors()
+        val readers = 8
         val countDownLatch = CountDownLatch(readers)
         val elapsedTime = measureTimeMillis {
             repeat(readers) {

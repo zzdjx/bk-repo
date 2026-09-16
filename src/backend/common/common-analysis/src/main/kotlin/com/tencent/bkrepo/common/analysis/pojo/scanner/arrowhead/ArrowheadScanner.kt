@@ -66,7 +66,7 @@ data class ArrowheadDockerImage(
     @get:Schema(title = "docker仓库用户")
     val dockerRegistryUsername: String?,
     @get:Schema(title = "docker仓库密码")
-    val dockerRegistryPassword: String?,
+    var dockerRegistryPassword: String?,
     @get:Schema(title = "容器启动参数")
     val args: String = "/data/standalone.toml",
     @get:Schema(title = "容器内的工作目录")
@@ -83,8 +83,8 @@ data class KnowledgeBase(
     val endpoint: String,
     @get:Schema(title = "漏洞知识库认证id")
     @Sensitive(handler = MaskPartString::class)
-    val secretId: String = "",
+    var secretId: String = "",
     @get:Schema(title = "漏洞知识库认证密钥")
     @Sensitive(handler = MaskPartString::class)
-    val secretKey: String = ""
+    var secretKey: String = ""
 )

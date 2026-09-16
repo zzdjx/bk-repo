@@ -80,6 +80,7 @@ class StorageAutoConfiguration {
         properties: StorageProperties,
         executor: ThreadPoolTaskExecutor,
     ): FileStorage {
+        properties.validate()
         val fileStorage = when (properties.type) {
             StorageType.FILESYSTEM -> FileSystemStorage()
             StorageType.INNERCOS -> InnerCosFileStorage()

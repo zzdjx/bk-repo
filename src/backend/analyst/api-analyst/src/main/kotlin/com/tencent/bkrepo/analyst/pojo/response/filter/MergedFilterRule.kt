@@ -67,7 +67,7 @@ data class MergedFilterRule(
             // 只要有一个版本被包含，就包含该组件
             included = riskyPackageVersions.isNullOrEmpty() || riskyPackageVersions.any {
                 try {
-                    versionRange.contains(VersionNumber(it))
+                    versionRange.contains(it)
                 } catch (e: VersionNumber.UnsupportedVersionException) {
                     // 不支持的版本格式不忽略，避免漏报
                     logger.warn("unsupported pkg[$riskyPackageKey] version[$it]")
@@ -99,7 +99,7 @@ data class MergedFilterRule(
             // 全部版本都被忽略时才忽略该组件
             ignored = riskyPackageVersions.all {
                 try {
-                    ignoreVersionRange.contains(VersionNumber(it))
+                    ignoreVersionRange.contains(it)
                 } catch (e: VersionNumber.UnsupportedVersionException) {
                     // 不支持的版本格式不忽略，避免漏报
                     logger.warn("unsupported pkg[$riskyPackageKey] version[$it]")

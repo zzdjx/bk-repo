@@ -27,7 +27,9 @@
 
 package com.tencent.bkrepo.conan.controller.service
 
+import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.pojo.Response
+import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.conan.api.ConanMetadataClient
 import com.tencent.bkrepo.conan.pojo.metadata.ConanMetadataRequest
@@ -35,13 +37,20 @@ import com.tencent.bkrepo.conan.service.ConanMetadataService
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
-class ConanMetadataController(private val conanMetadataService: ConanMetadataService) : ConanMetadataClient {
+class ConanMetadataController(
+    private val conanMetadataService: ConanMetadataService,
+    private val permissionManager: PermissionManager
+) : ConanMetadataClient {
     override fun storeMetadata(request: ConanMetadataRequest): Response<Void> {
+        with(request) {
+            permissionManager.checkRepoPermission(PermissionAction.WRITE, projectId, repoName)
+        }
         conanMetadataService.storeMetadata(request)
         return ResponseBuilder.success()
     }
 
     override fun delete(projectId: String, repoName: String, recipe: String): Response<Void> {
+        permissionManager.checkRepoPermission(PermissionAction.DELETE, projectId, repoName)
         conanMetadataService.delete(projectId, repoName, recipe)
         return ResponseBuilder.success()
     }

@@ -43,5 +43,15 @@ data class BackupCredentialSet(
     @get:Schema(title = "状态")
     val status: BackupCredentialStatus,
     @get:Schema(title = "认证授权方式")
-    val authorizationGrantType: AuthorizationGrantType? = AuthorizationGrantType.PLATFORM
-)
+    val authorizationGrantType: AuthorizationGrantType? = AuthorizationGrantType.PLATFORM,
+    /**
+     * 是否为公开 OAuth 客户端。
+     * 存量凭证缺该字段时视为公开。
+     */
+    @get:Schema(title = "是否为公开 OAuth 客户端")
+    val publicClient: Boolean = true
+) {
+    override fun toString(): String {
+        return "BackupCredentialSet(accessKey=$accessKey, status=$status)"
+    }
+}

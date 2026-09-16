@@ -39,6 +39,7 @@ import io.jsonwebtoken.JwtException
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.stereotype.Component
+import java.security.Key
 import java.time.Duration
 import kotlin.concurrent.thread
 
@@ -48,11 +49,16 @@ class ServiceAuthManager(
     properties: ServiceAuthProperties,
 ) {
 
-    private val signingKey = JwtUtils.createSigningKey(properties.secretKey)
-
-    private var token: String = generateSecurityToken()
+    private val signingKey: Key
+    private val previousSigningKey: Key?
+    private var token: String
 
     init {
+        properties.afterPropertiesSet()
+        signingKey = JwtUtils.createSigningKey(properties.secretKey)
+        previousSigningKey = properties.previousSecretKey.takeIf { it.isNotBlank() }
+            ?.let { JwtUtils.createSigningKey(it) }
+        token = generateSecurityToken()
         // 使用单独的一个线程刷新token，防止被其他业务影响。
         thread(isDaemon = true, name = REFRESH_THREAD_NAME) {
             while (true) {
@@ -76,12 +82,29 @@ class ServiceAuthManager(
         try {
             JwtUtils.validateToken(signingKey, token)
         } catch (exception: ExpiredJwtException) {
-            throw SystemErrorException(CommonMessageCode.SERVICE_UNAUTHENTICATED, "Expired token")
+            throw unauthenticated("Expired token")
         } catch (exception: JwtException) {
-            throw SystemErrorException(CommonMessageCode.SERVICE_UNAUTHENTICATED, "Invalid token")
+            verifyWithPrevious(token)
         } catch (exception: IllegalArgumentException) {
-            throw SystemErrorException(CommonMessageCode.SERVICE_UNAUTHENTICATED, "Empty token")
+            throw unauthenticated("Empty token")
         }
+    }
+
+    private fun verifyWithPrevious(token: String) {
+        val previous = previousSigningKey ?: throw unauthenticated("Invalid token")
+        try {
+            JwtUtils.validateToken(previous, token)
+        } catch (exception: ExpiredJwtException) {
+            throw unauthenticated("Expired token")
+        } catch (exception: JwtException) {
+            throw unauthenticated("Invalid token")
+        } catch (exception: IllegalArgumentException) {
+            throw unauthenticated("Empty token")
+        }
+    }
+
+    private fun unauthenticated(reason: String): SystemErrorException {
+        return SystemErrorException(CommonMessageCode.SERVICE_UNAUTHENTICATED, reason)
     }
 
     fun refreshSecurityToken() {

@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Import
 import org.springframework.data.mongodb.core.query.Query
 import org.springframework.test.context.TestPropertySource
 import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 
 @DataMongoTest
 @Import(FederatedRepositoryDao::class)
@@ -155,7 +156,8 @@ class FederatedRepositoryDaoTest {
 
     @Test
     fun `test full sync lifecycle`() {
-        val startTime = LocalDateTime.now()
+        // Mongo Date 只有毫秒精度，先截断再比，避免纳秒被截掉后小于 startTime
+        val startTime = LocalDateTime.now().truncatedTo(ChronoUnit.MILLIS)
 
         // 1. 初始状态：未同步
         assertFalse(federatedRepositoryDao.isFullSyncing(projectId, repoName, federationId))
@@ -167,20 +169,17 @@ class FederatedRepositoryDaoTest {
         // 3. 验证开始时间
         val repository1 = federatedRepositoryDao.findByProjectIdAndRepoName(projectId, repoName, federationId).first()
         assertNotNull(repository1.lastFullSyncStartTime)
-        assertTrue(
-            repository1.lastFullSyncStartTime!!.isAfter(startTime)
-                || repository1.lastFullSyncStartTime!!.isEqual(startTime)
-        )
+        assertFalse(repository1.lastFullSyncStartTime!!.isBefore(startTime))
         assertNull(repository1.lastFullSyncEndTime)
 
         // 4. 结束同步
         federatedRepositoryDao.updateFullSyncEnd(projectId, repoName, federationId)
         assertFalse(federatedRepositoryDao.isFullSyncing(projectId, repoName, federationId))
 
-        // 5. 验证结束时间
+        // 5. 验证结束时间（同一毫秒内起止合法，不能要求严格 isAfter）
         val repository2 = federatedRepositoryDao.findByProjectIdAndRepoName(projectId, repoName, federationId).first()
         assertNotNull(repository2.lastFullSyncEndTime)
-        assertTrue(repository2.lastFullSyncEndTime!!.isAfter(repository2.lastFullSyncStartTime!!))
+        assertFalse(repository2.lastFullSyncEndTime!!.isBefore(repository2.lastFullSyncStartTime!!))
     }
 
     @Test

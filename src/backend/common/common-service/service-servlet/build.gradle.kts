@@ -25,9 +25,6 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import com.tencent.devops.utils.findPropertyOrNull
-import java.util.Locale.getDefault
-
 dependencies {
     api("com.tencent.devops:devops-boot-starter-service")
     api("com.tencent.devops:devops-boot-starter-circuitbreaker")
@@ -39,11 +36,6 @@ dependencies {
     api("commons-codec:commons-codec")
     compileOnly(project(":common:common-mongo"))
 
-    val assemblyMode = project.findPropertyOrNull("devops.assemblyMode")
-    if (assemblyMode == null || assemblyMode.uppercase(getDefault()) == "CONSUL") {
-        api("org.springframework.cloud:spring-cloud-starter-config")
-    }
-    api("org.springframework.retry:spring-retry")
     api("com.github.ulisesbocchio:jasypt-spring-boot-starter:${Versions.Jasypt}")
 
     api(project(":common:common-service:service-base"))

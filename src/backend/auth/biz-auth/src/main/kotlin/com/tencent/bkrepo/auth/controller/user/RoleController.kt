@@ -70,7 +70,7 @@ class RoleController @Autowired constructor(
     @PostMapping("/create")
     fun createRole(@RequestBody request: CreateRoleRequest): Response<String?> {
         validateParams(request)
-        checkRolePermission(request.projectId)
+        preCheckRoleAdmin(request.projectId)
         val id = roleService.createRole(request)
         return ResponseBuilder.success(id)
     }
@@ -106,7 +106,7 @@ class RoleController @Autowired constructor(
     @DeleteMapping("/delete/{id}")
     fun deleteRole(@PathVariable id: String): Response<Boolean> {
         val role = roleService.detail(id) ?: return ResponseBuilder.success(false)
-        checkRolePermission(role.projectId)
+        preCheckRoleAdmin(role.projectId)
         roleService.deleteRoleById(id)
         return ResponseBuilder.success(true)
     }
@@ -115,7 +115,7 @@ class RoleController @Autowired constructor(
     @GetMapping("/detail/{id}")
     fun detail(@PathVariable id: String): Response<Role?> {
         val role = roleService.detail(id) ?: return ResponseBuilder.success(null)
-        checkRolePermission(role.projectId)
+        preCheckRoleAdmin(role.projectId)
         return ResponseBuilder.success(role)
     }
 
@@ -143,7 +143,7 @@ class RoleController @Autowired constructor(
     @GetMapping("/users/{id}")
     fun listUserByRole(@PathVariable id: String): Response<Set<UserResult>> {
         val role = roleService.detail(id) ?: return ResponseBuilder.success(emptySet())
-        checkRolePermission(role.projectId)
+        preCheckRoleAdmin(role.projectId)
         return ResponseBuilder.success(roleService.listUserByRoleId(id))
     }
 
@@ -155,7 +155,7 @@ class RoleController @Autowired constructor(
         @RequestBody updateRoleRequest: UpdateRoleRequest
     ): Response<Boolean> {
         val role = roleService.detail(id) ?: return ResponseBuilder.success(false)
-        checkRolePermission(role.projectId)
+        preCheckRoleAdmin(role.projectId)
         return ResponseBuilder.success(roleService.updateRoleInfo(id, updateRoleRequest))
     }
 
@@ -179,19 +179,6 @@ class RoleController @Autowired constructor(
             if (request.type == RoleType.SERVICE) {
                 throw ErrorCodeException(AuthMessageCode.AUTH_CREATE_SERVICE_ROLE_WITH_PROJECT)
             }
-        }
-    }
-
-    /**
-     * 根据projectId检查权限
-     * - projectId为null时，检查是否为系统管理员
-     * - projectId不为null时，检查是否为项目管理员
-     */
-    private fun checkRolePermission(projectId: String?) {
-        if (projectId == null) {
-            preCheckUserAdmin()
-        } else {
-            preCheckProjectAdmin(projectId)
         }
     }
 }

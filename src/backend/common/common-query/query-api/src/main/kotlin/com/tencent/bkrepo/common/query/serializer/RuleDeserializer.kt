@@ -37,7 +37,6 @@ import com.fasterxml.jackson.databind.DeserializationContext
 import com.fasterxml.jackson.databind.JsonDeserializer
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
 import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.query.enums.OperationType
 import com.tencent.bkrepo.common.query.exception.QueryModelException
@@ -55,23 +54,30 @@ class RuleDeserializer : JsonDeserializer<Rule>() {
         require(mapper is ObjectMapper)
         val node = mapper.readTree<JsonNode>(parser)
         try {
-            return if (node["relation"] != null) {
-                val relation = Rule.NestedRule.RelationType.lookup(node["relation"].asText())
-                val rules = mapper.readValue<MutableList<Rule>>(node["rules"].toString())
-
-                Rule.NestedRule(rules, relation)
-            } else {
-                val operation = OperationType.lookup(node["operation"].asText())
-                val field = node["field"].asText()
-
-                val value = if (operation.valueType != Void::class) {
-                    mapper.readValue(node["value"].toString(), operation.valueType.java)
-                } else StringPool.EMPTY
-
-                Rule.QueryRule(field, value, operation)
-            }
+            return parse(node, mapper)
         } catch (exception: IOException) {
             throw QueryModelException("Failed to resolve rule.", exception)
+        }
+    }
+
+    /**
+     * 在已解析的语法树上递归，避免逐层 toString 后再解析导致内存随嵌套深度成倍放大
+     */
+    private fun parse(node: JsonNode, mapper: ObjectMapper): Rule {
+        return if (node["relation"] != null) {
+            val relation = Rule.NestedRule.RelationType.lookup(node["relation"].asText())
+            val rulesNode = node["rules"]
+            if (rulesNode == null || !rulesNode.isArray) {
+                throw QueryModelException("Failed to resolve rule.")
+            }
+            Rule.NestedRule(rulesNode.mapTo(mutableListOf()) { parse(it, mapper) }, relation)
+        } else {
+            val operation = OperationType.lookup(node["operation"].asText())
+            val field = node["field"].asText()
+            val value = if (operation.valueType != Void::class) {
+                mapper.readValue(node["value"].toString(), operation.valueType.java)
+            } else StringPool.EMPTY
+            Rule.QueryRule(field, value, operation)
         }
     }
 }

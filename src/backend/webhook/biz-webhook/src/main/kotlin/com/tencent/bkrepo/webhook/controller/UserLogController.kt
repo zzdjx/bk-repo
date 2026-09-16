@@ -38,6 +38,7 @@ import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.RequestAttribute
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
@@ -52,9 +53,10 @@ class UserLogController(
     @GetMapping("/list/{webHookId}")
     @LogOperate(type = "WEBHOOK_LOG_LIST")
     fun listWebHookLog(
+        @RequestAttribute userId: String,
         @PathVariable webHookId: String,
         option: ListWebHookLogOption
     ): Response<Page<WebHookLog>> {
-        return ResponseBuilder.success(logService.listLog(webHookId, option))
+        return ResponseBuilder.success(logService.listLog(userId, webHookId, option))
     }
 }

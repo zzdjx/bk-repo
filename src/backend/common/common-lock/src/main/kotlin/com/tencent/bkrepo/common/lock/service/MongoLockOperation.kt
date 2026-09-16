@@ -29,25 +29,28 @@ package com.tencent.bkrepo.common.lock.service
 
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import java.util.UUID
 
 class MongoLockOperation(
     private val mongoDistributedLock: MongoDistributedLock
 ) : LockOperation {
     override fun getLock(lockKey: String): Any {
         logger.info("Will use mongodb to lock the key $lockKey")
-        return mongoDistributedLock
+        return MongoLockSession(mongoDistributedLock)
     }
 
     /**
      * mongodb实现的锁不支持重入
      */
     override fun acquireLock(lockKey: String, lock: Any): Boolean {
-        return (lock as MongoDistributedLock).acquireLock(lockKey, EXPIRED_TIME_IN_MILLIS_SECONDS)
+        val session = lock as MongoLockSession
+        return session.lock.acquireLock(lockKey, EXPIRED_TIME_IN_MILLIS_SECONDS, session.owner)
     }
 
     override fun close(lockKey: String, lock: Any) {
         logger.info("Will try to close mongodb lock for $lockKey")
-        return (lock as MongoDistributedLock).releaseLock(lockKey)
+        val session = lock as MongoLockSession
+        return session.lock.releaseLock(lockKey, session.owner)
     }
 
     companion object {
@@ -55,3 +58,8 @@ class MongoLockOperation(
         const val EXPIRED_TIME_IN_MILLIS_SECONDS: Long = 60 * 60 * 1000
     }
 }
+
+private class MongoLockSession(
+    val lock: MongoDistributedLock,
+    val owner: String = UUID.randomUUID().toString()
+)

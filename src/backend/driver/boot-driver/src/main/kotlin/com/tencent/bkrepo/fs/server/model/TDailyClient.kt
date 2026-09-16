@@ -57,7 +57,7 @@ data class TDailyClient(
     val time: LocalDateTime
 ) {
     companion object {
-        const val DAILY_CLIENT_IDX = "daily_client_idx"
-        const val DAILY_CLIENT_IDX_DEF = "{'projectId': 1, 'repoName': 1,'mountPoint':1, 'ip': 1}"
+        const val DAILY_CLIENT_IDX = "daily_client_user_idx"
+        const val DAILY_CLIENT_IDX_DEF = "{'projectId': 1, 'repoName': 1,'mountPoint':1, 'ip': 1, 'userId': 1}"
     }
 }

@@ -38,8 +38,8 @@ class MongoDistributedLock(
     /**
      * mongodb实现的锁不支持重入
      */
-    fun acquireLock(key: String, expireTime: Long): Boolean {
-        if (key.isBlank()) return false
+    fun acquireLock(key: String, expireTime: Long, owner: String): Boolean {
+        if (key.isBlank() || owner.isBlank()) return false
         val lockInfo = lockDao.findByKey(key)
         lockInfo?.let {
             if (it.expireTime >= System.currentTimeMillis()) {
@@ -52,7 +52,9 @@ class MongoDistributedLock(
         }
         try {
             // 新生成key
-            val newLockInfo = lockDao.incrByKeyWithExpire(key, VALUE, System.currentTimeMillis() + expireTime)
+            val newLockInfo = lockDao.incrByKeyWithExpire(
+                key, VALUE, System.currentTimeMillis() + expireTime, owner
+            )
             newLockInfo?.let {
                 if (newLockInfo.value == VALUE) {
                     return true
@@ -67,9 +69,9 @@ class MongoDistributedLock(
         return false
     }
 
-    fun releaseLock(key: String) {
-        if (key.isNotBlank()) {
-            lockDao.deleteByKey(key)
+    fun releaseLock(key: String, owner: String) {
+        if (key.isNotBlank() && owner.isNotBlank()) {
+            lockDao.deleteByKeyAndOwner(key, owner)
         }
     }
 

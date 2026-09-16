@@ -49,6 +49,7 @@ import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import com.tencent.bkrepo.common.metadata.service.node.NodeService
 import com.tencent.bkrepo.common.metadata.service.repo.QuotaService
 import com.tencent.bkrepo.common.metadata.service.repo.RepositoryService
+import com.tencent.bkrepo.common.metadata.util.RepositoryServiceHelper.Companion.maskConfigurationPwd
 import com.tencent.bkrepo.common.security.permission.Permission
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.repository.pojo.repo.ArchiveInfo
@@ -181,7 +182,9 @@ class UserRepositoryController(
             )
         }
         ActionAuditContext.current().setInstance(createRequest)
-        return ResponseBuilder.success(repositoryService.createRepo(createRequest))
+        val detail = repositoryService.createRepo(createRequest)
+        maskConfigurationPwd(detail.configuration)
+        return ResponseBuilder.success(detail)
     }
 
     @AuditEntry(

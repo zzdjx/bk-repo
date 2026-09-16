@@ -80,7 +80,9 @@ object JsonUtils {
         disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
         factory.setStreamReadConstraints(
             StreamReadConstraints.builder()
-                .maxStringLength(Int.MAX_VALUE)
+                // npm tarball 由自定义 Deserializer 流式解码，不占用此限额。
+                // 100MB 只约束 readme 等普通字符串字段，避免单字段打满堆。
+                .maxStringLength(DataSize.ofMegabytes(100).toBytes().toInt())
                 .build()
         )
     }

@@ -28,6 +28,7 @@
 package com.tencent.bkrepo.huggingface.service
 
 import com.mongodb.DuplicateKeyException
+import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.artifact.exception.VersionNotFoundException
 import com.tencent.bkrepo.common.artifact.pojo.RepositoryCategory
 import com.tencent.bkrepo.common.artifact.util.PackageKeys
@@ -44,6 +45,7 @@ import com.tencent.bkrepo.huggingface.pojo.RepoDeleteRequest
 import com.tencent.bkrepo.huggingface.pojo.RepoMoveRequest
 import com.tencent.bkrepo.huggingface.pojo.RepoUpdateRequest
 import com.tencent.bkrepo.huggingface.pojo.RepoUrl
+import com.tencent.bkrepo.huggingface.util.HfHubUrls
 import com.tencent.bkrepo.repository.pojo.node.service.NodeDeleteRequest
 import com.tencent.bkrepo.repository.pojo.node.service.NodeRenameRequest
 import com.tencent.bkrepo.repository.pojo.node.service.NodesDeleteRequest
@@ -177,6 +179,8 @@ class HfRepoService(
 
     private fun createPackage(request: RepoCreateRequest): RepoUrl {
         with(request) {
+            // space 等未支持 type 在此失败，避免先入库再抛出留下孤儿 package
+            val url = HfHubUrls.repoUrlPath(type, repoId)
             val packageCreateRequest = PackageCreateRequest(
                 projectId = projectId,
                 repoName = repoName,
@@ -187,10 +191,12 @@ class HfRepoService(
                 packageExtension = mapOf(RepoCreateRequest::private.name to private)
             )
             packageService.createPackage(packageCreateRequest)
+            val endpoint = huggingfaceProperties.domain.removeSuffix(StringPool.SLASH) +
+                "/$projectId/$repoName"
             return RepoUrl(
-                url = "$type/$repoId",
-                endpoint = "${huggingfaceProperties.domain}/$projectId/$repoName",
-                repoType = request.type,
+                url = url,
+                endpoint = endpoint,
+                repoType = type,
                 repoId = repoId
             )
         }

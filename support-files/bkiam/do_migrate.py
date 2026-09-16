@@ -633,8 +633,20 @@ if __name__ == "__main__":
         help="which migration file to execute, i.e: 00001_bk_cmdb_20190618100210.json",
         required=True,
     )
-    p.add_argument("-a", action="store", dest="app_code", help="app code", required=True)
-    p.add_argument("-s", action="store", dest="app_secret", help="app secret", required=True)
+    p.add_argument(
+        "-a",
+        action="store",
+        dest="app_code",
+        default=os.getenv("BK_APP_CODE"),
+        help="app code; prefer env BK_APP_CODE",
+    )
+    p.add_argument(
+        "-s",
+        action="store",
+        dest="app_secret",
+        default=os.getenv("BK_APP_SECRET"),
+        help="app secret; prefer env BK_APP_SECRET",
+    )
 
     p.add_argument(
         "--apigateway",
@@ -657,8 +669,10 @@ if __name__ == "__main__":
         BK_IAM_HOST = "http://%s" % BK_IAM_HOST
 
     data_file = args.json_data_file
-    APP_CODE = args.app_code
-    APP_SECRET = args.app_secret
+    APP_CODE = args.app_code or ""
+    APP_SECRET = args.app_secret or ""
+    if not APP_CODE or not APP_SECRET:
+        p.error("app code/secret required via BK_APP_CODE/BK_APP_SECRET or -a/-s")
 
     # test ping
     ok, _ = api_ping(BK_IAM_HOST)

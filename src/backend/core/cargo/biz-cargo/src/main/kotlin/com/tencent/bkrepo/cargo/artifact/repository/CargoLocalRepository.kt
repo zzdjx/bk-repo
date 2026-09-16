@@ -58,6 +58,7 @@ import com.tencent.bkrepo.cargo.utils.CargoUtils.getCargoFileFullPath
 import com.tencent.bkrepo.cargo.utils.CargoUtils.getCargoMetadataFullPath
 import com.tencent.bkrepo.cargo.utils.CargoUtils.getCargoJsonFullPath
 import com.tencent.bkrepo.cargo.utils.CargoUtils.isValidPackageName
+import com.tencent.bkrepo.cargo.utils.CargoUtils.isValidPackageVersion
 import com.tencent.bkrepo.cargo.utils.ObjectBuilderUtil
 import com.tencent.bkrepo.cargo.utils.ObjectBuilderUtil.buildCrateIndexData
 import com.tencent.bkrepo.cargo.utils.ObjectBuilderUtil.buildCrateJsonData
@@ -315,11 +316,12 @@ class CargoLocalRepository(
     private fun parseCargoUploadData(context: ArtifactUploadContext) {
         try {
             val artifactFile = context.getArtifactFile()
+            val remaining = longArrayOf(artifactFile.getSize())
             artifactFile.getInputStream().use { inputStream ->
                 DataInputStream(inputStream).use { dataInputStream ->
-                    val metadata = readCargoMetadata(dataInputStream)
+                    val metadata = readCargoMetadata(dataInputStream, remaining)
                     validatePackageVersion(context, metadata)
-                    val crateArtifactFile = readCargoArtifactFile(dataInputStream)
+                    val crateArtifactFile = readCargoArtifactFile(dataInputStream, remaining)
                     fillUploadContext(context, metadata, crateArtifactFile)
                 }
             }
@@ -331,16 +333,18 @@ class CargoLocalRepository(
         }
     }
 
-    private fun readCargoMetadata(dataInputStream: DataInputStream): CargoMetadata {
-        val jsonLength = Integer.toUnsignedLong(readLittleEndianInt(dataInputStream))
+    private fun readCargoMetadata(dataInputStream: DataInputStream, remaining: LongArray): CargoMetadata {
+        val jsonLength = readCheckedLength(dataInputStream, remaining)
         val jsonData = ByteArray(jsonLength.toInt())
         dataInputStream.readFully(jsonData)
+        remaining[0] -= jsonLength
         val jsonDataStr = jsonData.toString(StandardCharsets.UTF_8)
         return JsonUtils.objectMapper.readValue(jsonDataStr, CargoMetadata::class.java)
     }
 
     private fun validatePackageVersion(context: ArtifactUploadContext, metadata: CargoMetadata) {
         isValidPackageName(metadata.name)
+        isValidPackageVersion(metadata.vers)
         val packageKey = PackageKeys.ofCargo(metadata.name)
         if (!cargoCommonService.packageVersionExist(context.projectId, context.repoName, packageKey, metadata.vers)) {
             return
@@ -353,11 +357,27 @@ class CargoLocalRepository(
         )
     }
 
-    private fun readCargoArtifactFile(dataInputStream: DataInputStream): ArtifactFile {
-        val crateLength = Integer.toUnsignedLong(readLittleEndianInt(dataInputStream))
+    private fun readCargoArtifactFile(dataInputStream: DataInputStream, remaining: LongArray): ArtifactFile {
+        val crateLength = readCheckedLength(dataInputStream, remaining)
         val crateData = ByteArray(crateLength.toInt())
         dataInputStream.readFully(crateData)
+        remaining[0] -= crateLength
         return ArtifactFileFactory.build(crateData.inputStream())
+    }
+
+    /**
+     * 声明长度必须落在已接收包体内，避免按伪造的 32 位 length 分配堆内存
+     */
+    private fun readCheckedLength(dataInputStream: DataInputStream, remaining: LongArray): Long {
+        if (remaining[0] < 4L) {
+            throw CargoBadRequestException(CargoMessageCode.CARGO_UPLOAD_DATA_BROKEN)
+        }
+        val length = Integer.toUnsignedLong(readLittleEndianInt(dataInputStream))
+        remaining[0] -= 4L
+        if (length <= 0L || length > remaining[0] || length > Int.MAX_VALUE) {
+            throw CargoBadRequestException(CargoMessageCode.CARGO_UPLOAD_DATA_BROKEN)
+        }
+        return length
     }
 
     private fun fillUploadContext(

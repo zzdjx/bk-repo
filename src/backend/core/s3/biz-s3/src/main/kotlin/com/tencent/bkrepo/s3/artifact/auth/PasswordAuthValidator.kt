@@ -30,7 +30,11 @@ package com.tencent.bkrepo.s3.artifact.auth
 import com.tencent.bkrepo.common.security.manager.AuthenticationManager
 
 /**
- * 密码认证验证器
+ * 密码认证验证器。
+ *
+ * 使用库中存储的口令哈希（`TUser.pwd`，无盐 MD5）作为 AWS SecretAccessKey。
+ * 创建、改密、重置都写入同一字段，新用户与存量用户均可走这条认证。
+ * Access Token 由 [TokenAuthValidator] 校验，是并行选项，不是新用户的替代方案。
  */
 class PasswordAuthValidator(
     private val authenticationManager: AuthenticationManager

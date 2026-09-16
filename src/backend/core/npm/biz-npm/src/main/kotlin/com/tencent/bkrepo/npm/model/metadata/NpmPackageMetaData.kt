@@ -33,6 +33,7 @@ package com.tencent.bkrepo.npm.model.metadata
 
 import com.fasterxml.jackson.annotation.JsonAnyGetter
 import com.fasterxml.jackson.annotation.JsonAnySetter
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -40,6 +41,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.fasterxml.jackson.databind.annotation.JsonSerialize
+import com.tencent.bkrepo.common.artifact.api.ArtifactFile
 import java.io.Serializable
 
 /**
@@ -133,11 +135,28 @@ class NpmPackageMetaData : Serializable {
         }
     }
 
+    @JsonDeserialize(using = NpmAttachmentDeserializer::class)
     class Attachment : Serializable {
         @JsonProperty("content_type")
         var contentType: String? = null
-        var data: String? = null
         var length: Int? = null
+
+        /**
+         * tarball 二进制，由 [NpmAttachmentDeserializer] 从 `data` 字段流式解码得到。
+         * 序列化时忽略，避免把整包再写回 package metadata。
+         */
+        @JsonIgnore
+        @Transient
+        var artifactFile: ArtifactFile? = null
+
+        /**
+         * 删除流式落盘产生的临时文件。重复调用安全。
+         */
+        fun deleteArtifactFile() {
+            val file = artifactFile ?: return
+            artifactFile = null
+            file.delete()
+        }
     }
 
     class Attachments : Serializable {
@@ -151,6 +170,13 @@ class NpmPackageMetaData : Serializable {
         @JsonAnyGetter
         fun getMap(): Map<String, Attachment> {
             return this.tarballs
+        }
+
+        /**
+         * 清理所有附件临时文件，避免业务失败后占用共享上传目录。
+         */
+        fun deleteArtifactFiles() {
+            tarballs.values.forEach { it.deleteArtifactFile() }
         }
     }
 

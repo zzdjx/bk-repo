@@ -37,10 +37,15 @@ import com.tencent.bkrepo.common.security.http.credentials.AnonymousCredentials
 import com.tencent.bkrepo.common.security.http.credentials.HttpAuthCredentials
 import com.tencent.bkrepo.common.security.manager.AuthenticationManager
 import com.tencent.bkrepo.s3.artifact.utils.AWS4AuthUtil
+import com.tencent.bkrepo.s3.constant.AUTHORIZATION_HEADER_MALFORMED
 import com.tencent.bkrepo.s3.constant.AWS4_AUTH_PREFIX
+import com.tencent.bkrepo.s3.constant.REQUEST_TIME_TOO_SKEWED
 import com.tencent.bkrepo.s3.constant.S3HttpHeaders
+import com.tencent.bkrepo.s3.constant.S3MessageCode
 import com.tencent.bkrepo.s3.constant.SIGN_NOT_MATCH
+import com.tencent.bkrepo.s3.config.S3AuthProperties
 import com.tencent.bkrepo.s3.exception.AWS4AuthenticationException
+import com.tencent.bkrepo.s3.exception.S3BadRequestException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -49,7 +54,8 @@ import org.springframework.beans.factory.annotation.Value
  * AWS4 Http 认证方式
  */
 class AWS4AuthHandler(
-    authenticationManager: AuthenticationManager
+    authenticationManager: AuthenticationManager,
+    private val s3AuthProperties: S3AuthProperties
 ) : HttpAuthHandler {
 
     @Value("\${spring.application.name}")
@@ -77,11 +83,23 @@ class AWS4AuthHandler(
         } else AnonymousCredentials()
     }
 
-    @Throws(AWS4AuthenticationException::class)
+    @Throws(AWS4AuthenticationException::class, S3BadRequestException::class)
     override fun onAuthenticate(request: HttpServletRequest, authCredentials: HttpAuthCredentials): String {
         require(authCredentials is AWS4AuthCredentials)
+        if (!AWS4AuthUtil.isCredentialDateConsistent(authCredentials.authorization, authCredentials.requestDate)) {
+            throw S3BadRequestException(
+                code = S3MessageCode.S3_AUTHORIZATION_HEADER_MALFORMED,
+                params = arrayOf(AUTHORIZATION_HEADER_MALFORMED, getRequestResource(request))
+            )
+        }
         val pass = authValidator.validate(authCredentials)
         if (pass) {
+            if (!AWS4AuthUtil.isRequestDateFresh(authCredentials.requestDate, s3AuthProperties.maxClockSkewSeconds)) {
+                throw AWS4AuthenticationException(
+                    code = S3MessageCode.S3_REQUEST_TIME_TOO_SKEWED,
+                    params = arrayOf(REQUEST_TIME_TOO_SKEWED, getRequestResource(request))
+                )
+            }
             return authCredentials.accessKeyId
         }
         logger.warn("s3 auth fail, request data:$authCredentials")

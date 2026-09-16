@@ -109,6 +109,17 @@ internal class StorageCredentialServiceTest @Autowired constructor(
     }
 
     @Test
+    fun testCreateEncryptEnabledWithoutKey() {
+        val credential = FileSystemCredentials().apply {
+            encrypt.enabled = true
+        }
+        val createRequest = StorageCredentialsCreateRequest(UT_STORAGE_CREDENTIALS_KEY, credential, UT_REGION)
+        assertThrows<ErrorCodeException> {
+            storageCredentialService.create(UT_USER, createRequest)
+        }
+    }
+
+    @Test
     fun testUpdateCredential() {
         val storageCredentials = createCredential()
         assertEquals(true, storageCredentials.cache.loadCacheFirst)

@@ -78,7 +78,11 @@ class BackupRepositoryDataHandler(
     }
 
     private fun convert(credentials: BackupStorageCredentials): StorageCredentials {
-        return credentials.credentials.readJsonString<StorageCredentials>().apply { this.key = credentials.id }
+        return try {
+            credentials.credentials.readJsonString<StorageCredentials>().apply { this.key = credentials.id }
+        } finally {
+            credentials.credentials = ""
+        }
     }
 
     private fun findExistRepository(record: BackupRepositoryInfo): BackupRepositoryInfo? {

@@ -49,12 +49,15 @@ class MongoDistributedLockDao : SimpleMongoDao<TMongoDistributedLock>() {
     }
 
     /**
-     * 根据key释放对应锁
+     * 按 key + owner 释放，避免误删他人锁
      */
-    fun deleteByKey(key: String) {
-        if (key.isNotBlank()) {
-            this.remove(Query(TMongoDistributedLock::key.isEqualTo(key)))
+    fun deleteByKeyAndOwner(key: String, owner: String) {
+        if (key.isBlank() || owner.isBlank()) {
+            return
         }
+        val criteria = where(TMongoDistributedLock::key).isEqualTo(key)
+            .and(TMongoDistributedLock::owner.name).isEqualTo(owner)
+        this.remove(Query(criteria))
     }
 
     /**
@@ -69,11 +72,17 @@ class MongoDistributedLockDao : SimpleMongoDao<TMongoDistributedLock>() {
     /**
      * 指定key自增,并设置过期时间
      */
-    fun incrByKeyWithExpire(key: String, increase: Int, expireTime: Long): TMongoDistributedLock? {
+    fun incrByKeyWithExpire(
+        key: String,
+        increase: Int,
+        expireTime: Long,
+        owner: String,
+    ): TMongoDistributedLock? {
         val criteria = where(TMongoDistributedLock::key).isEqualTo(key)
         val query = Query(criteria)
         val update = Update().inc(TMongoDistributedLock::value.name, increase)
             .set(TMongoDistributedLock::expireTime.name, expireTime)
+            .setOnInsert(TMongoDistributedLock::owner.name, owner)
         val options = FindAndModifyOptions().apply { this.upsert(true).returnNew(true) }
         return determineMongoTemplate()
             .findAndModify(query, update, options, TMongoDistributedLock::class.java)

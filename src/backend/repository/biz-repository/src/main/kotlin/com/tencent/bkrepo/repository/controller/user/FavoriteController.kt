@@ -37,6 +37,7 @@ import com.tencent.bkrepo.common.api.constant.HttpStatus
 import com.tencent.bkrepo.common.api.pojo.Page
 import com.tencent.bkrepo.common.api.pojo.Response
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
+import com.tencent.bkrepo.common.security.exception.PermissionException
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.repository.pojo.favorite.FavoriteCreateRequest
 import com.tencent.bkrepo.repository.pojo.favorite.FavoriteQueryRequest
@@ -101,9 +102,12 @@ class FavoriteController(
             if (it.type == FavoriteType.PROJECT) {
                 permissionManager.checkProjectPermission(PermissionAction.MANAGE, it.projectId)
             } else {
+                if (it.userId != userId) {
+                    throw PermissionException()
+                }
                 permissionManager.checkNodePermission(PermissionAction.VIEW, it.projectId, it.repoName, it.path)
             }
-            favoriteService.removeFavorite(id)
+            favoriteService.removeFavorite(id, userId)
             return ResponseBuilder.success()
         }
         return ResponseBuilder.fail(HttpStatus.BAD_REQUEST.value, "id not existed")

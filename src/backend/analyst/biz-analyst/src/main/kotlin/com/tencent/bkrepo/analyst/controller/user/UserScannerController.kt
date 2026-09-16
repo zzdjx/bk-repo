@@ -30,6 +30,7 @@ package com.tencent.bkrepo.analyst.controller.user
 import com.tencent.bkrepo.analyst.pojo.response.ScannerBase
 import com.tencent.bkrepo.analyst.service.ScannerService
 import com.tencent.bkrepo.common.analysis.pojo.scanner.Scanner
+import com.tencent.bkrepo.common.analysis.pojo.scanner.ScannerSecrets
 import com.tencent.bkrepo.common.api.exception.BadRequestException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.api.pojo.Response
@@ -64,7 +65,7 @@ class UserScannerController @Autowired constructor(
     fun create(
         @RequestBody scanner: Scanner
     ): Response<Scanner> {
-        return ResponseBuilder.success(scannerService.create(scanner))
+        return ResponseBuilder.success(ScannerSecrets.mask(scannerService.create(scanner)))
     }
 
     @Operation(summary = "获取扫描器列表")
@@ -72,7 +73,7 @@ class UserScannerController @Autowired constructor(
     @Principal(PrincipalType.ADMIN)
     @LogOperate(type = "SCANNER_LIST")
     fun list(): Response<List<Scanner>> {
-        return ResponseBuilder.success(scannerService.list())
+        return ResponseBuilder.success(scannerService.list().map { ScannerSecrets.mask(it) })
     }
 
     @Operation(summary = "获取扫描器基本信息列表")
@@ -106,7 +107,7 @@ class UserScannerController @Autowired constructor(
     @Principal(PrincipalType.ADMIN)
     @LogOperate(type = "SCANNER_GET")
     fun get(@PathVariable("name") name: String): Response<Scanner> {
-        return ResponseBuilder.success(scannerService.get(name))
+        return ResponseBuilder.success(ScannerSecrets.mask(scannerService.get(name)))
     }
 
     @Operation(summary = "删除扫描器")
@@ -129,6 +130,6 @@ class UserScannerController @Autowired constructor(
         if (name != scanner.name) {
             throw BadRequestException(CommonMessageCode.PARAMETER_INVALID)
         }
-        return ResponseBuilder.success(scannerService.update(scanner))
+        return ResponseBuilder.success(ScannerSecrets.mask(scannerService.update(scanner)))
     }
 }

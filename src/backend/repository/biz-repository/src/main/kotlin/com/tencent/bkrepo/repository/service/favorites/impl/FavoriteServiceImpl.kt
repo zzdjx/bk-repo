@@ -94,8 +94,18 @@ class FavoriteServiceImpl(
         }
     }
 
-    override fun removeFavorite(id: String) {
-        favoriteDao.remove(Query.query(Criteria.where("_id").`is`(id)))
+    override fun removeFavorite(id: String, userId: String) {
+        val query = Query.query(
+            Criteria().andOperator(
+                Criteria.where("_id").`is`(id),
+                Criteria().orOperator(
+                    Criteria.where(TFavorites::type.name).`is`(FavoriteType.PROJECT),
+                    Criteria.where(TFavorites::type.name).`is`(FavoriteType.USER)
+                        .and(TFavorites::userId.name).`is`(userId)
+                )
+            )
+        )
+        favoriteDao.remove(query)
     }
 
     override fun getFavoriteById(id: String): TFavorites? {

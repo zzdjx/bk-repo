@@ -54,7 +54,12 @@ class RedirectInterceptor : Interceptor {
         // location可能是相对路径
         val redirectUrl = request.url.resolve(location)
             ?: throw IllegalArgumentException("Invalid redirect location: $location")
-        val newRequest: Request = request.newBuilder().url(redirectUrl).build()
+        val newRequestBuilder = request.newBuilder().url(redirectUrl)
+        // 仅同 host 转发 Authorization；用户可能配置 mirror，不能用官方 Hub 白名单
+        if (!HfRedirectAuth.shouldForwardAuthorization(request.url.host, redirectUrl.host)) {
+            newRequestBuilder.removeHeader(HttpHeaders.AUTHORIZATION)
+        }
+        val newRequest = newRequestBuilder.build()
         val newResponse: Response = chain.proceed(newRequest)
 
         val responseBuilder = newResponse.newBuilder()

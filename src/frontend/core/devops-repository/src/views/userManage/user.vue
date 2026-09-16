@@ -136,13 +136,34 @@
             </template>
         </canway-dialog>
         <create-token-dialog ref="createToken"></create-token-dialog>
+        <canway-dialog
+            v-model="resetPwdResult.show"
+            width="540"
+            height-num="245"
+            :title="$t('resetPassword')"
+            @cancel="closeResetPwdResult">
+            <div class="flex-align-center">
+                <i class="flex-center devops-icon icon-check-1 reset-pwd-success-icon"></i>
+                <div style="width: 400px">
+                    <span class="reset-pwd-title">{{ $t('resetPassword') + $t('space') + $t('success') }}</span>
+                    <div @click="copyResetPassword" class="mt10 mb10 hover-btn flex-align-center">
+                        {{ $t('newPasswordIs') + resetPwdResult.password }}
+                        <i class="ml10 devops-icon icon-clipboard"></i>
+                    </div>
+                    <span class="reset-pwd-tip">{{ $t('resetPasswordCopyTip') }}</span>
+                </div>
+            </div>
+            <template #footer>
+                <bk-button theme="primary" @click="closeResetPwdResult">{{ $t('confirm') }}</bk-button>
+            </template>
+        </canway-dialog>
     </div>
 </template>
 <script>
     import OperationList from '@repository/components/OperationList'
     import createTokenDialog from '@repository/views/repoToken/createTokenDialog'
     import { mapState, mapActions } from 'vuex'
-    import { formatDate } from '@repository/utils'
+    import { formatDate, copyToClipboard } from '@repository/utils'
     import { transformEmail, transformPhone, checkPhone } from '@repository/utils/privacy'
     export default {
         name: 'user',
@@ -170,6 +191,10 @@
                     phone: '',
                     group: false,
                     asstUsers: []
+                },
+                resetPwdResult: {
+                    show: false,
+                    password: ''
                 },
                 rules: {
                     userId: [
@@ -449,11 +474,11 @@
                     theme: 'danger',
                     message: this.$t('resetUserMsg', { 0: displayName }),
                     confirmFn: () => {
-                        return this.resetPwd(row.userId).then(() => {
-                            this.$bkMessage({
-                                theme: 'success',
-                                message: this.$t('resetPassword') + this.$t('space') + this.$t('success')
-                            })
+                        return this.resetPwd(row.userId).then((newPwd) => {
+                            this.resetPwdResult = {
+                                show: true,
+                                password: newPwd
+                            }
                         })
                     }
                 })
@@ -505,6 +530,25 @@
             createAccessToken (row) {
                 this.$refs.createToken.userName = row.userId
                 this.$refs.createToken.showDialogHandler()
+            },
+            copyResetPassword () {
+                copyToClipboard(this.resetPwdResult.password).then(() => {
+                    this.$bkMessage({
+                        theme: 'success',
+                        message: this.$t('copy') + this.$t('space') + this.$t('success')
+                    })
+                }).catch(() => {
+                    this.$bkMessage({
+                        theme: 'error',
+                        message: this.$t('copy') + this.$t('space') + this.$t('fail')
+                    })
+                })
+            },
+            closeResetPwdResult () {
+                this.resetPwdResult = {
+                    show: false,
+                    password: ''
+                }
             }
         }
     }
@@ -513,5 +557,23 @@
 .user-container {
     height: 100%;
     overflow: hidden;
+}
+.reset-pwd-success-icon {
+    width: 58px !important;
+    height: 58px;
+    line-height: 58px;
+    font-size: 30px;
+    color: white;
+    border-radius: 50%;
+    background-color: var(--successColor);
+    margin-left: 10px;
+    margin-right: 10px;
+}
+.reset-pwd-title {
+    font-size: 17px;
+    font-weight: bold;
+}
+.reset-pwd-tip {
+    color: var(--warningColor);
 }
 </style>

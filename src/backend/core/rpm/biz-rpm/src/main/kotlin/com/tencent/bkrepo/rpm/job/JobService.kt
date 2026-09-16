@@ -89,6 +89,7 @@ import java.io.RandomAccessFile
 import java.time.LocalDateTime
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import javax.xml.XMLConstants
 import javax.xml.parsers.SAXParserFactory
 
 @Component
@@ -732,7 +733,15 @@ class JobService(
     fun checkValid(xmlFile: File) {
         val start = System.currentTimeMillis()
         val factory = SAXParserFactory.newInstance()
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+        factory.setXIncludeAware(false)
         val saxParser = factory.newSAXParser()
+        saxParser.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+        saxParser.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         saxParser.parse(xmlFile, DefaultHandler())
         logger.debug("checkValid, cost: ${System.currentTimeMillis() - start} ms")
     }

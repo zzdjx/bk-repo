@@ -46,7 +46,9 @@ import com.tencent.bkrepo.common.service.util.HttpSigner.TIME_SPLIT
 import com.tencent.bkrepo.repository.constant.SYSTEM_USER
 import jakarta.servlet.http.HttpServletRequest
 import org.apache.commons.codec.digest.HmacAlgorithms
+import org.slf4j.LoggerFactory
 import org.springframework.web.servlet.HandlerMapping
+import java.security.MessageDigest
 
 /**
  * 检查签名
@@ -78,10 +80,10 @@ class SignAuthHandler(
         val uri = getUrlPath(request)
         val bodyHash = request.getAttribute(SIGN_BODY).toString()
         val sig = HttpSigner.sign(request, uri, bodyHash, secretKey, HmacAlgorithms.HMAC_SHA_1.getName())
-        if (sig != authCredentials.sig) {
-            // 签名未通过
+        if (!MessageDigest.isEqual(sig.toByteArray(), authCredentials.sig.toByteArray())) {
             val signatureStr = HttpSigner.getSignatureStr(request, uri, bodyHash)
-            throw AuthenticationException("Invalid signature, server signature string: $signatureStr")
+            logger.warn("Invalid signature, server signature string: [$signatureStr]")
+            throw AuthenticationException("Invalid signature")
         }
         val signTime = request.getParameter(SIGN_TIME)
         val expiredTime = signTime.split(TIME_SPLIT).last().toLong()
@@ -106,4 +108,8 @@ class SignAuthHandler(
         val accessKey: String,
         val sig: String
     ) : HttpAuthCredentials
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(SignAuthHandler::class.java)
+    }
 }

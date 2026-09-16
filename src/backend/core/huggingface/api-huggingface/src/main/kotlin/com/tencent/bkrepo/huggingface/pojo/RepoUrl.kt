@@ -30,6 +30,10 @@ package com.tencent.bkrepo.huggingface.pojo
 import com.fasterxml.jackson.annotation.JsonProperty
 
 data class RepoUrl(
+    /**
+     * 仓库路径，供 huggingface_hub `RepoUrl`/`parse_hf_uri` 解析。
+     * model 为 `{repoId}`，dataset 为 `datasets/{repoId}`，不能使用单数 `model/`。
+     */
     val url: String,
     val endpoint: String,
     @JsonProperty("repo_type")

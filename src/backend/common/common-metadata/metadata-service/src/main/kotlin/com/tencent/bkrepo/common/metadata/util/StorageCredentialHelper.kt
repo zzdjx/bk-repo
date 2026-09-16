@@ -108,6 +108,7 @@ class StorageCredentialHelper(
             if (storageProperties.defaultStorageCredentials()::class != request.credentials::class) {
                 throw throw ErrorCodeException(CommonMessageCode.PARAMETER_INVALID, "type")
             }
+            request.credentials.encrypt.requireKeyIfEnabled()
         }
     }
 }

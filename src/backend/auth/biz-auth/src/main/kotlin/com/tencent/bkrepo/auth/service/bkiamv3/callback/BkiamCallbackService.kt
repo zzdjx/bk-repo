@@ -36,6 +36,7 @@ import com.tencent.bkrepo.auth.message.AuthMessageCode
 import com.tencent.bkrepo.auth.pojo.enums.ResourceType
 import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
+import com.tencent.bkrepo.common.api.util.MaskPartStringUtil
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
@@ -54,19 +55,19 @@ class BkiamCallbackService @Autowired constructor(
     private var bufferedToken = ""
 
     fun queryProject(token: String, request: CallbackRequestDTO): CallbackBaseResponseDTO? {
-        logger.info("v3 queryProject, token: $token, request: $request")
+        logger.info("v3 queryProject, token: ${MaskPartStringUtil.maskPartString(token)}, request: $request")
         checkToken(token)
         return ResourceMappings.functionMap(ResourceType.PROJECT, request)
     }
 
     fun queryRepo(token: String, request: CallbackRequestDTO): CallbackBaseResponseDTO? {
-        logger.info("v3 queryRepo, token: $token, request: $request")
+        logger.info("v3 queryRepo, token: ${MaskPartStringUtil.maskPartString(token)}, request: $request")
         checkToken(token)
         return ResourceMappings.functionMap(ResourceType.REPO, request)
     }
 
     fun queryNode(token: String, request: CallbackRequestDTO): CallbackBaseResponseDTO? {
-        logger.info("v3 queryNode, token: $token, request: $request")
+        logger.info("v3 queryNode, token: ${MaskPartStringUtil.maskPartString(token)}, request: $request")
         checkToken(token)
         return ResourceMappings.functionMap(ResourceType.NODE, request)
     }
@@ -90,7 +91,7 @@ class BkiamCallbackService @Autowired constructor(
             throw ErrorCodeException(AuthMessageCode.AUTH_IAM_TOKEN_CHECK_FAILED)
         }
         if (bufferedToken != tokenToCheck) {
-            logger.warn("$tokenToCheck is not a valid credentials")
+            logger.warn("${MaskPartStringUtil.maskPartString(tokenToCheck)} is not a valid credentials")
             throw ErrorCodeException(AuthMessageCode.AUTH_IAM_TOKEN_CHECK_FAILED)
         }
     }
@@ -102,7 +103,7 @@ class BkiamCallbackService @Autowired constructor(
             val parts = decodedToken.split(StringPool.COLON)
             Pair(parts[0], parts[1])
         } catch (exception: IllegalArgumentException) {
-            logger.warn("$token is not a valid token")
+            logger.warn("${MaskPartStringUtil.maskPartString(token)} is not a valid token")
             throw ErrorCodeException(AuthMessageCode.AUTH_IAM_TOKEN_CHECK_FAILED)
         }
     }

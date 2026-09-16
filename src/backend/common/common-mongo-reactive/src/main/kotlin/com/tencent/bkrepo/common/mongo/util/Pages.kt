@@ -41,13 +41,13 @@ object Pages {
      * 根据页码[page]和分页大小[size]构造[PageRequest]
      *
      * [page]从1开始，如果传入值小于1则置为1
-     * [size]如果小于0则置为默认分页大小20
+     * [size]如果小于等于0则置为默认分页大小20
      *
      * [PageRequest]要求页码从0开始
      */
     fun ofRequest(page: Int, size: Int): PageRequest {
         val pageNumber = if (page <= 0) DEFAULT_PAGE_NUMBER else page
-        val pageSize = if (page < 0) DEFAULT_PAGE_SIZE else size
+        val pageSize = if (size <= 0) DEFAULT_PAGE_SIZE else size
         return PageRequest.of(pageNumber - 1, pageSize)
     }
 
@@ -56,11 +56,11 @@ object Pages {
      *
      * @param total 所有数据
      * @param page 页码，从1开始，如果传入值小于1则置为1
-     * @param size 分页大小，如果小于0则置为默认分页大小20
+     * @param size 分页大小，如果小于等于0则置为默认分页大小20
      */
     inline fun <reified T> buildPage(total: List<T>, page: Int, size: Int): Page<T> {
         val pageNumber = if (page <= 0) DEFAULT_PAGE_NUMBER else page
-        val pageSize = if (page < 0) DEFAULT_PAGE_SIZE else size
+        val pageSize = if (size <= 0) DEFAULT_PAGE_SIZE else size
         val totalRecords = total.size
         val offset = (pageNumber - 1) * pageSize
         val records = if (offset > totalRecords) {

@@ -34,6 +34,7 @@ package com.tencent.bkrepo.common.metadata.search.common
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.query.builder.MongoQueryInterpreter
+import com.tencent.bkrepo.common.query.enums.OperationType
 import com.tencent.bkrepo.common.query.interceptor.QueryContext
 import com.tencent.bkrepo.common.query.model.QueryModel
 import com.tencent.bkrepo.common.query.model.Rule
@@ -64,9 +65,21 @@ open class CommonQueryContext(
         throw ErrorCodeException(CommonMessageCode.PARAMETER_MISSING, "projectId")
     }
 
+    /**
+     * 查找projectId查询条件，仅EQ操作有效。
+     *
+     * 其它操作的查询语义与鉴权使用的projectId不一致，会导致越权读取其它项目的数据，
+     * 例如NE、NOT_NULL查询的是除该项目外的所有项目，PREFIX查询的是所有以该值为前缀的项目。
+     *
+     * 目前只支持单项目查询。IN操作虽然也将查询限定在指定项目内，但其value为列表，
+     * 无法用于鉴权，因此一并拒绝，代价是多项目查询（如全局扫描的依赖包筛选）不可用。
+     * 支持多项目需要让调用方对每个projectId分别鉴权。
+     */
     private fun findProjectIdRule(rules: List<Rule>): Rule.QueryRule? {
         for (rule in rules) {
-            if (rule is Rule.QueryRule && rule.field == TNode::projectId.name) {
+            if (rule is Rule.QueryRule && rule.field == TNode::projectId.name &&
+                rule.operation == OperationType.EQ
+            ) {
                 return rule
             }
         }

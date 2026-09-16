@@ -46,6 +46,7 @@ import com.tencent.bkrepo.preview.artifact.PreviewArtifactInfo.Companion.PREVIEW
 import com.tencent.bkrepo.preview.artifact.PreviewArtifactInfo.Companion.PREVIEW_REMOTE_MAPPING_URI
 import com.tencent.bkrepo.preview.constant.PreviewMessageCode
 import com.tencent.bkrepo.preview.exception.PreviewInvalidException
+import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.pojo.PreviewInfo
 import com.tencent.bkrepo.preview.service.CommonResourceService
 import com.tencent.bkrepo.preview.service.FileHandlerService
@@ -104,10 +105,13 @@ class FilePreviewController(
     @CrossOrigin
     fun onlinePreview(
         @ArtifactPathVariable artifactInfo: PreviewArtifactInfo,
-        @RequestParam(name = "extraParam", required = false) extraParam: String?
+        @RequestParam(name = "extraParam", required = false) extraParam: String?,
+        @RequestParam(name = "convert", required = false) convert: String?,
+        @RequestParam(name = "part", required = false) part: String?
     ) {
         val decodedParams = decodeParams(extraParam)
         val fileAttribute = fileHandlerService.getFileAttribute(artifactInfo, decodedParams)
+        applyPreviewQuery(fileAttribute, convert, part)
         val filePreview = previewFactory.get(fileAttribute)
         logger.info("preview file from bkrepo, projectId：{},repoName:{},artifactUri:{}, previewType：{}",
             artifactInfo.projectId,
@@ -125,13 +129,21 @@ class FilePreviewController(
     @Principal(PrincipalType.GENERAL)
     @CrossOrigin
     fun onlinePreview(
-        @RequestParam("extraParam") extraParam: String
+        @RequestParam("extraParam") extraParam: String,
+        @RequestParam(name = "convert", required = false) convert: String?,
+        @RequestParam(name = "part", required = false) part: String?
     ) {
         val decodedParams = decodeParams(extraParam)
         val fileAttribute = fileHandlerService.getFileAttribute(decodedParams!!)
+        applyPreviewQuery(fileAttribute, convert, part)
         val filePreview = previewFactory.get(fileAttribute)
         logger.info("preview file from remote, url：{}, previewType：{}", fileAttribute.url, fileAttribute.type)
         filePreview.filePreviewHandle(fileAttribute)
+    }
+
+    private fun applyPreviewQuery(fileAttribute: FileAttribute, convert: String?, part: String?) {
+        fileHandlerService.applyConvertQuery(fileAttribute, convert)
+        fileHandlerService.applyEmbeddedPartQuery(fileAttribute, part)
     }
 
     private fun decodeParams(extraParam: String?): String? {

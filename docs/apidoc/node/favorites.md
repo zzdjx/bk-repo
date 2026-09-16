@@ -112,8 +112,8 @@
 - API 名称: delete favorite
 - 功能说明：
 
-    - 中文：删除收藏
-    - English：delete favorite
+    - 中文：删除收藏。USER 类型仅允许创建者删除，且需对 path 有 VIEW；PROJECT 类型需项目 MANAGE。
+    - English：delete favorite. USER favorites can only be deleted by the owner (plus node VIEW); PROJECT favorites require project MANAGE.
 - 请求体
   此接口请求体为空
 - 请求字段说明

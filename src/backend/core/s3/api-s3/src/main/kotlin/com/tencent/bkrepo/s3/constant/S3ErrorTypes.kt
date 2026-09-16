@@ -55,3 +55,18 @@ const val NO_SUCH_ACCESS = "AccessDenied"
  * 系统内部错误
  */
 const val INTERNAL_ERROR = "InternalError"
+
+/**
+ * 请求时间超出允许的时钟偏差
+ */
+const val REQUEST_TIME_TOO_SKEWED = "RequestTimeTooSkewed"
+
+/**
+ * x-amz-content-sha256 与实际 body 不匹配
+ */
+const val CONTENT_SHA256_MISMATCH = "XAmzContentSHA256Mismatch"
+
+/**
+ * Authorization 头格式无效（含 Credential 日期与 x-amz-date 不一致）
+ */
+const val AUTHORIZATION_HEADER_MALFORMED = "AuthorizationHeaderMalformed"

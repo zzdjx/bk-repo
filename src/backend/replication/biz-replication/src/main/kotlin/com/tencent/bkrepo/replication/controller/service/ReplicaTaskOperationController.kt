@@ -27,7 +27,10 @@
 
 package com.tencent.bkrepo.replication.controller.service
 
+import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.auth.pojo.enums.ResourceType
 import com.tencent.bkrepo.common.api.pojo.Response
+import com.tencent.bkrepo.common.security.permission.Permission
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.replication.api.ReplicaTaskOperationClient
 import com.tencent.bkrepo.replication.pojo.remote.request.RemoteRunOnceTaskCreateRequest
@@ -38,6 +41,7 @@ import org.springframework.web.bind.annotation.RestController
 class ReplicaTaskOperationController(
     private val remoteNodeService: RemoteNodeService
     ) : ReplicaTaskOperationClient {
+    @Permission(ResourceType.REPO, PermissionAction.WRITE)
     override fun createRunOnceTask(
         projectId: String, repoName: String, requests: RemoteRunOnceTaskCreateRequest
     ): Response<Void> {
@@ -45,6 +49,7 @@ class ReplicaTaskOperationController(
         return ResponseBuilder.success()
     }
 
+    @Permission(ResourceType.REPO, PermissionAction.WRITE)
     override fun executeRunOnceTask(projectId: String, repoName: String, name: String): Response<Void> {
         remoteNodeService.executeRunOnceTask(projectId, repoName, name, false)
         return ResponseBuilder.success()

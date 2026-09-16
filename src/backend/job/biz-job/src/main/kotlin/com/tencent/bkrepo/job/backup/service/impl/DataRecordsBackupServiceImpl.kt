@@ -1,6 +1,7 @@
 package com.tencent.bkrepo.job.backup.service.impl
 
 import com.tencent.bkrepo.common.api.constant.StringPool
+import com.tencent.bkrepo.common.api.exception.BadRequestException
 import com.tencent.bkrepo.common.api.util.EscapeUtils
 import com.tencent.bkrepo.common.mongo.constant.ID
 import com.tencent.bkrepo.common.mongo.constant.MIN_OBJECT_ID
@@ -254,8 +255,11 @@ class DataRecordsBackupServiceImpl(
                     "Failed to process record $record with " +
                         "data of ${backupDataEnum.collectionName}, error is ${e.message}"
                 )
-                if (context.task.backupSetting.errorStrategy == BackupErrorStrategy.FAST_FAIL) {
-                    throw StorageErrorException(StorageMessageCode.STORE_ERROR)
+                // 缺 key / 非法 key 不能按 CONTINUE 跳过，否则备份“成功”但密文缺失
+                if (e is BadRequestException ||
+                    context.task.backupSetting.errorStrategy == BackupErrorStrategy.FAST_FAIL
+                ) {
+                    throw e
                 }
             }
         }

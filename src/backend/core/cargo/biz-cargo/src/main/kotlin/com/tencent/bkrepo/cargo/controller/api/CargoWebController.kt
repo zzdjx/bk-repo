@@ -115,6 +115,7 @@ class CargoWebController(
 
 
     @DeleteMapping(YANK)
+    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun yank(@ArtifactPathVariable artifactInfo: CargoArtifactInfo): ResponseEntity<Any> {
         cargoService.yank(artifactInfo)
         TraceHeaderUtils.setResponseHeader()
@@ -122,6 +123,7 @@ class CargoWebController(
     }
 
     @PutMapping(UNYANK)
+    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun unYank(@ArtifactPathVariable artifactInfo: CargoArtifactInfo): ResponseEntity<Any> {
         cargoService.unYank(artifactInfo)
         TraceHeaderUtils.setResponseHeader()
@@ -141,6 +143,7 @@ class CargoWebController(
     }
 
     @PutMapping(OWNERS)
+    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun addOwners(
         @ArtifactPathVariable artifactInfo: CargoArtifactInfo,
         @RequestBody users: OwnerUserAddRequest,
@@ -151,6 +154,7 @@ class CargoWebController(
     }
 
     @DeleteMapping(OWNERS)
+    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun removeOwners(
         @ArtifactPathVariable artifactInfo: CargoArtifactInfo,
         @RequestBody users: OwnerUserAddRequest,

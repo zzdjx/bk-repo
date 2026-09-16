@@ -48,6 +48,9 @@ class MirrorsAuthConfiguration {
 
     @Bean
     fun mirrorsAuthSecurityCustomizer(mirrorsAuthProperties: MirrorsAuthProperties): HttpAuthSecurityCustomizer {
+        require(mirrorsAuthProperties.password.isNotBlank()) {
+            "security.auth.mirrors.password must not be blank when security.auth.mirrors.enabled=true"
+        }
         return object : HttpAuthSecurityCustomizer {
             override fun customize(httpAuthSecurity: HttpAuthSecurity) {
                 val mirrorsAuthHandler = MirrorsAuthHandler(

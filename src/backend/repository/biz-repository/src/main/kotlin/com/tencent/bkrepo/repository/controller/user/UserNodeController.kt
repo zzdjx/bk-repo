@@ -327,7 +327,7 @@ class UserNodeController(
                 targetRepoName = targetRepoName,
                 targetFullPath = targetFullPath,
                 overwrite = overwrite,
-                nodeMetadata = nodeMetadata,
+                nodeMetadata = nodeMetadata?.map { it.copy(system = false) },
                 operator = userId,
             )
             // 校验源仓库与目标节点权限
@@ -664,6 +664,11 @@ class UserNodeController(
         @RequestBody request: UserNodeArchiveRestoreRequest,
     ): Response<List<String>> {
         with(request) {
+            if (path.isNullOrEmpty()) {
+                permissionManager.checkRepoPermission(PermissionAction.WRITE, projectId, repoName)
+            } else {
+                permissionManager.checkNodePermission(PermissionAction.WRITE, projectId, repoName, path!!)
+            }
             val restoreRequest = NodeArchiveRestoreRequest(
                 projectId = projectId,
                 repoName = repoName,

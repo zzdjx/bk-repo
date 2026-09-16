@@ -42,11 +42,26 @@ class CommitRequestHttpMessageConverter(
 ) : AbstractHttpMessageConverter<List<UserCommitRequest>>() {
 
     init {
-        this.supportedMediaTypes = mutableListOf<MediaType>(MediaType("application", "x-ndjson"))
+        this.supportedMediaTypes = mutableListOf(NDJSON)
     }
 
     override fun supports(clazz: Class<*>): Boolean {
         return MutableList::class.java.isAssignableFrom(clazz)
+    }
+
+    /**
+     * 仅在明确指定 ndjson 时参与写出。父类对 null 或通配 media type 会返回 true，
+     * 导致 tree 等返回 List 的 JSON 接口被本转换器抢走并发生 ClassCastException。
+     */
+    override fun canWrite(clazz: Class<*>, mediaType: MediaType?): Boolean {
+        if (!supports(clazz) || mediaType == null || MediaType.ALL.equalsTypeAndSubtype(mediaType)) {
+            return false
+        }
+        return NDJSON.isCompatibleWith(mediaType)
+    }
+
+    override fun canRead(clazz: Class<*>, mediaType: MediaType?): Boolean {
+        return supports(clazz) && (mediaType == null || NDJSON.includes(mediaType))
     }
 
     override fun readInternal(
@@ -73,5 +88,9 @@ class CommitRequestHttpMessageConverter(
                 writer.write("\n")
             }
         }
+    }
+
+    companion object {
+        val NDJSON = MediaType("application", "x-ndjson")
     }
 }

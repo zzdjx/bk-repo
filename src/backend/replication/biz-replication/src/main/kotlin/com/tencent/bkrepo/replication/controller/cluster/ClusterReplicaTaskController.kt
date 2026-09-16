@@ -48,6 +48,7 @@ class ClusterReplicaTaskController(
     private val replicaTaskService: ReplicaTaskService,
     private val edgeReplicaTaskRecordService: EdgeReplicaTaskRecordService
 ) : ClusterReplicaTaskClient {
+    @Permission(ResourceType.REPLICATION, PermissionAction.VIEW)
     override fun info(taskId: String): Response<ReplicaTaskInfo?> {
         return ResponseBuilder.success(replicaTaskService.getByTaskId(taskId))
     }

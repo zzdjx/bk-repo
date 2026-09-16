@@ -41,8 +41,8 @@ interface FavoriteService {
     // 创建收藏
     fun createFavorite(request: FavoriteCreateRequest)
 
-    // 删除收藏
-    fun removeFavorite(id: String)
+    // 删除收藏。USER 类型必须匹配 userId，PROJECT 类型仅按 id 删除（调用方需先校验项目 MANAGE）
+    fun removeFavorite(id: String, userId: String)
 
     // 获取收藏文件列表
     fun queryFavorite(userId: String, request: FavoriteQueryRequest): Page<FavoriteResult>

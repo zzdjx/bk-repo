@@ -49,7 +49,7 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/grafana")
-@Principal(PrincipalType.GENERAL)
+@Principal(PrincipalType.ADMIN)
 class GrafanaController @Autowired constructor(
     private val grafanaService: GrafanaService
 ) {

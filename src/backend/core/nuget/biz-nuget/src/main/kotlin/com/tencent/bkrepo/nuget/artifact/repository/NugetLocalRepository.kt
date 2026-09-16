@@ -178,8 +178,9 @@ class NugetLocalRepository(
         super.onUploadBefore(context)
         // 校验版本是否存在，存在则冲突
         with(context.artifactInfo as NugetPublishArtifactInfo) {
+            val packageId = NugetUtils.normalizePackageId(packageName).toLowerCase()
             packageService.findVersionByName(
-                projectId, repoName, PackageKeys.ofNuget(packageName.toLowerCase()), version
+                projectId, repoName, PackageKeys.ofNuget(packageId), version
             )?.let {
                 throw ErrorCodeException(
                     messageCode = NugetMessageCode.VERSION_EXISTED,

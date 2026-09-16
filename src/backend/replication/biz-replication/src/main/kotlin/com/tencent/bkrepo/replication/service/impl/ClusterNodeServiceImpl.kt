@@ -175,11 +175,12 @@ class ClusterNodeServiceImpl(
             tClusterNode.url = url!!
             tClusterNode.apply {
                 username = request.username
-                password = crypto(request.password, false)
-                certificate = request.certificate
+                // 未提供时保留原值
+                request.password?.takeIf { it.isNotBlank() }?.let { password = crypto(it, false) }
+                request.certificate?.takeIf { it.isNotBlank() }?.let { certificate = it }
                 appId = request.appId
-                accessKey = request.accessKey
-                secretKey = request.secretKey
+                request.accessKey?.takeIf { it.isNotBlank() }?.let { accessKey = it }
+                request.secretKey?.takeIf { it.isNotBlank() }?.let { secretKey = it }
                 udpPort = request.udpPort
                 lastModifiedBy = SecurityUtils.getUserId()
                 lastModifiedDate = LocalDateTime.now()

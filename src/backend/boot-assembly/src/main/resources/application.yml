@@ -56,7 +56,27 @@ security:
   auth:
     enabled: true
     jwt:
-      secretKey: bkrepo@secret
+      secretKey: ${BK_REPO_JWT_SECRET_KEY:}
+  service:
+    # required when enabled; no strength check
+    secretKey: ${BK_REPO_SERVICE_SECRET_KEY:}
+  # generate: bash scripts/gen-crypto-keys.sh
+  crypto:
+    privateKeyStr: ${BK_REPO_CRYPTO_PRIVATE_KEY_STR:}
+    publicKeyStr: ${BK_REPO_CRYPTO_PUBLIC_KEY_STR:}
+    privateKeyStr2048PKCS8: ${BK_REPO_CRYPTO_PRIVATE_KEY_STR_2048_PKCS8:}
+    publicKeyStr2048PKCS8: ${BK_REPO_CRYPTO_PUBLIC_KEY_STR_2048_PKCS8:}
+    privateKeyStr2048PKCS1: ${BK_REPO_CRYPTO_PRIVATE_KEY_STR_2048_PKCS1:}
+    publicKeyStr2048PKCS1: ${BK_REPO_CRYPTO_PUBLIC_KEY_STR_2048_PKCS1:}
+    aesKey: ${BK_REPO_CRYPTO_AES_KEY:}
+    aesIv: ${BK_REPO_CRYPTO_AES_IV:}
+
+fdtp:
+  server:
+    secretKey: ${BK_REPO_FDTP_SECRET_KEY:}
+
+backup:
+  encryptKey: ${BK_REPO_BACKUP_ENCRYPT_KEY:}
 
 auth:
   security:

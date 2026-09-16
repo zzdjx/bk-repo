@@ -277,7 +277,8 @@ setup_repo_gateway (){
 MS_NAME=$1
 shift
 # 检查环境变量
-check_empty_var BK_REPO_HOME BK_REPO_DATA_DIR BK_REPO_LOGS_DIR BK_REPO_CONSUL_DISCOVERY_TAG
+check_empty_var BK_REPO_HOME BK_REPO_DATA_DIR BK_REPO_LOGS_DIR \
+    BK_REPO_CONSUL_DISCOVERY_TAG BK_REPO_SERVICE_SECRET_KEY
 
 # 本脚本设计为快速滚动更新. 故不会主动新增部署, 仅处理已有的proj.
 # 判断服务是否启用.

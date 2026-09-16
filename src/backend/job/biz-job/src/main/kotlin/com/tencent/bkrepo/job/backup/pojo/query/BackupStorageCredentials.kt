@@ -42,4 +42,8 @@ data class BackupStorageCredentials(
 
     var credentials: String,
     var region: String? = null
-)
+) {
+    override fun toString(): String {
+        return "BackupStorageCredentials(id=$id, region=$region)"
+    }
+}

@@ -1,6 +1,7 @@
 package com.tencent.bkrepo.analyst.controller.user
 
 import com.tencent.bkrepo.analyst.pojo.execution.ExecutionCluster
+import com.tencent.bkrepo.analyst.pojo.execution.ExecutionClusterSecrets
 import com.tencent.bkrepo.analyst.service.ExecutionClusterService
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
@@ -31,14 +32,14 @@ class UserExecutionClusterController(private val executionClusterService: Execut
     fun create(
         @RequestBody executionCluster: ExecutionCluster
     ): Response<ExecutionCluster> {
-        return ResponseBuilder.success(executionClusterService.create(executionCluster))
+        return ResponseBuilder.success(ExecutionClusterSecrets.mask(executionClusterService.create(executionCluster)))
     }
 
     @Operation(summary = "获取执行集群列表")
     @GetMapping
     @LogOperate(type = "EXECUTION_CLUSTER_LIST")
     fun list(): Response<List<ExecutionCluster>> {
-        return ResponseBuilder.success(executionClusterService.list())
+        return ResponseBuilder.success(executionClusterService.list().map { ExecutionClusterSecrets.mask(it) })
     }
 
     @Operation(summary = "删除执行集群")
@@ -59,6 +60,6 @@ class UserExecutionClusterController(private val executionClusterService: Execut
         if (name != executionCluster.name) {
             throw ErrorCodeException(CommonMessageCode.PARAMETER_INVALID, name)
         }
-        return ResponseBuilder.success(executionClusterService.update(executionCluster))
+        return ResponseBuilder.success(ExecutionClusterSecrets.mask(executionClusterService.update(executionCluster)))
     }
 }

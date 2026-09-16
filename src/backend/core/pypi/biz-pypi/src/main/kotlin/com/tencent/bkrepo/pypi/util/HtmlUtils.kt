@@ -31,9 +31,9 @@
 
 package com.tencent.bkrepo.pypi.util
 
-import com.tencent.bkrepo.pypi.constants.HTML_ENCODED_GREATER_THAN
-import com.tencent.bkrepo.pypi.constants.HTML_ENCODED_LESS_THAN
+import org.springframework.web.util.HtmlUtils as SpringHtmlUtils
+import java.nio.charset.StandardCharsets
 
 object HtmlUtils {
-    fun partialEncode(s: String) = s.replace("<", HTML_ENCODED_LESS_THAN).replace(">", HTML_ENCODED_GREATER_THAN)
+    fun escape(s: String) = SpringHtmlUtils.htmlEscape(s, StandardCharsets.UTF_8.name())
 }

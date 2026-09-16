@@ -32,8 +32,6 @@ import com.tencent.bkrepo.analyst.component.manager.standard.model.TSecurityResu
 import com.tencent.bkrepo.analyst.component.manager.standard.model.TSecurityResultData
 import com.tencent.bkrepo.analyst.pojo.request.LoadResultArguments
 import com.tencent.bkrepo.analyst.pojo.request.standard.StandardLoadResultArguments
-import com.tencent.bkrepo.common.api.pojo.Page
-import com.tencent.bkrepo.common.query.model.PageLimit
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
@@ -73,22 +71,5 @@ class SecurityResultDao : ResultItemDao<TSecurityResult>() {
                 Sort.Order(Sort.Direction.ASC, TSecurityResult::id.name)
             )
         )
-    }
-
-    override fun toPage(
-        records: List<TSecurityResult>,
-        pageLimit: PageLimit,
-        arguments: LoadResultArguments
-    ): Page<TSecurityResult> {
-        arguments as StandardLoadResultArguments
-        val matchedData = records.filter {
-            val shouldIgnore = arguments.rule!!.shouldIgnore(
-                it.data.vulId, it.data.cveId, it.data.pkgName, it.data.pkgVersions, it.data.severityLevel
-            )
-            // 根据参数返回被忽略，或者未被忽略的漏洞
-            shouldIgnore && arguments.ignored || !shouldIgnore && !arguments.ignored
-        }
-        // 获取分页数据
-        return super.toPage(matchedData, pageLimit, arguments)
     }
 }

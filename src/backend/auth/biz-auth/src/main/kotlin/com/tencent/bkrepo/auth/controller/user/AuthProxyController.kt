@@ -34,6 +34,8 @@ import com.tencent.bkrepo.auth.pojo.proxy.ProxyUpdateRequest
 import com.tencent.bkrepo.auth.service.ProxyService
 import com.tencent.bkrepo.common.api.pojo.Page
 import com.tencent.bkrepo.common.api.pojo.Response
+import com.tencent.bkrepo.common.security.permission.Principal
+import com.tencent.bkrepo.common.security.permission.PrincipalType
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
@@ -48,6 +50,7 @@ import org.springframework.web.bind.annotation.RestController
 @Tag(name = "Proxy管理接口")
 @RestController
 @RequestMapping("/api/proxy")
+@Principal(PrincipalType.ADMIN)
 class AuthProxyController(
     private val proxyService: ProxyService
 ) {

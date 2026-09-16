@@ -32,6 +32,7 @@ import com.tencent.bkrepo.analyst.exception.ScannerNotFoundException
 import com.tencent.bkrepo.analyst.model.TScanner
 import com.tencent.bkrepo.analyst.service.ScannerService
 import com.tencent.bkrepo.common.analysis.pojo.scanner.Scanner
+import com.tencent.bkrepo.common.analysis.pojo.scanner.ScannerSecrets
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.api.util.readJsonString
@@ -76,16 +77,17 @@ class ScannerServiceImpl @Autowired constructor(
         with(scanner) {
             val userId = SecurityUtils.getUserId()
             val savedScanner = scannerDao.findByName(name) ?: throw ScannerNotFoundException(name)
+            val merged = ScannerSecrets.keepExisting(scanner, convert(savedScanner))
             return scannerDao.save(
                 savedScanner.copy(
                     lastModifiedBy = userId,
                     lastModifiedDate = LocalDateTime.now(),
-                    version = version,
-                    description = description,
-                    config = scanner.toJsonString(),
-                    supportFileNameExt = supportFileNameExt,
-                    supportPackageTypes = supportPackageTypes,
-                    supportScanTypes = supportScanTypes
+                    version = merged.version,
+                    description = merged.description,
+                    config = merged.toJsonString(),
+                    supportFileNameExt = merged.supportFileNameExt,
+                    supportPackageTypes = merged.supportPackageTypes,
+                    supportScanTypes = merged.supportScanTypes
                 )
             ).run { convert(this) }
         }

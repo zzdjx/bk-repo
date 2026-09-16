@@ -282,12 +282,20 @@ class TemporaryAccessService(
     /**
      * 合并
      * */
-    fun patch(artifactInfo: GenericArtifactInfo, oldFilePath: String, deltaFile: ArtifactFile): SseEmitter {
+    fun patch(
+        artifactInfo: GenericArtifactInfo,
+        oldFilePath: String,
+        deltaFile: ArtifactFile,
+        tokenInfo: TemporaryTokenInfo,
+    ): SseEmitter {
+        val normalizedOldPath = normalizeOldFilePath(oldFilePath)
+        checkAccessPath(tokenInfo, normalizedOldPath)
         with(artifactInfo) {
             val repo = repositoryService.getRepoDetail(projectId, repoName)
                 ?: throw ErrorCodeException(ArtifactMessageCode.REPOSITORY_NOT_FOUND, repoName)
             val request = HttpContextHolder.getRequest()
             request.setAttribute(REPO_KEY, repo)
+            // 原始 header 交给 DeltaSyncService，避免二次 URLDecoder.decode
             return deltaSyncService.patch(oldFilePath, deltaFile)
         }
     }
@@ -426,10 +434,7 @@ class TemporaryAccessService(
                 "${artifactInfo.projectId}/${artifactInfo.repoName}"
             )
         }
-        // 校验路径
-        if (!PathUtils.isSubPath(artifactInfo.getArtifactFullPath(), tokenInfo.fullPath)) {
-            throw ErrorCodeException(ArtifactMessageCode.TEMPORARY_TOKEN_INVALID, artifactInfo.getArtifactFullPath())
-        }
+        checkAccessPath(tokenInfo, artifactInfo.getArtifactFullPath())
         // 校验创建人权限
         permissionManager.checkNodePermission(
             if (tokenInfo.type == TokenType.DOWNLOAD) PermissionAction.READ else PermissionAction.WRITE,
@@ -438,6 +443,25 @@ class TemporaryAccessService(
             artifactInfo.getArtifactFullPath(),
             userId = tokenInfo.createdBy,
         )
+    }
+
+    /**
+     * 与 [DeltaSyncService.patch] 共用 [DeltaSyncService.decodeOldFilePath]，再 normalize。
+     * 解码结果只用于授权；原始 header 原样下传，避免二次解码。
+     */
+    private fun normalizeOldFilePath(oldFilePath: String): String {
+        val decoded = try {
+            DeltaSyncService.decodeOldFilePath(oldFilePath)
+        } catch (_: IllegalArgumentException) {
+            throw ErrorCodeException(ArtifactMessageCode.TEMPORARY_TOKEN_INVALID, oldFilePath)
+        }
+        return PathUtils.normalizeFullPath(decoded)
+    }
+
+    private fun checkAccessPath(tokenInfo: TemporaryTokenInfo, fullPath: String) {
+        if (!PathUtils.isSubPath(fullPath, tokenInfo.fullPath)) {
+            throw ErrorCodeException(ArtifactMessageCode.TEMPORARY_TOKEN_INVALID, fullPath)
+        }
     }
 
     /**

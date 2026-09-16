@@ -36,6 +36,11 @@ spec:
               cpu: "0.5"
               memory: "500Mi"
           workingDir: /data/workspace/support-files/bkiam
+          env:
+            - name: BK_APP_CODE
+              value: {{ .Values.auth.config.iam.appCode | quote }}
+            - name: BK_APP_SECRET
+              value: {{ .Values.auth.config.iam.appSecret | quote }}
           command:
             - "/bin/bash"
             - "-c"
@@ -46,7 +51,7 @@ spec:
               # 导入模型
               for i in $(find . -name '*.json'|sort)
               do
-               python3 do_migrate.py -t {{ .Values.auth.config.iam.apigwBaseUrl }} -a "{{ .Values.auth.config.iam.appCode }}" -s "{{ .Values.auth.config.iam.appSecret }}" -f  $i --apigateway
+               python3 do_migrate.py -t {{ .Values.auth.config.iam.apigwBaseUrl }} -f $i --apigateway
               done
               echo "do_migrate finished";
       restartPolicy: OnFailure

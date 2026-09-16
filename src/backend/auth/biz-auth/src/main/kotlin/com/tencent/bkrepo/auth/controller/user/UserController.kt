@@ -53,6 +53,7 @@ import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.pojo.Page
 import com.tencent.bkrepo.common.api.pojo.Response
 import com.tencent.bkrepo.common.metadata.service.project.ProjectService
+import com.tencent.bkrepo.common.mongo.i18n.ZoneIdContext.TIME_ZONE_HEADER
 import com.tencent.bkrepo.common.security.exception.AuthenticationException
 import com.tencent.bkrepo.common.security.http.jwt.JwtAuthProperties
 import com.tencent.bkrepo.common.security.util.JwtUtils
@@ -182,6 +183,7 @@ class UserController @Autowired constructor(
     @PostMapping("/role/{uid}/{rid}")
     fun addUserRole(@PathVariable uid: String, @PathVariable rid: String): Response<User?> {
         preCheckContextUser(uid)
+        preCheckRoleAssignPermission(rid)
         val result = userService.addUserToRole(uid, rid)
         return ResponseBuilder.success(result)
     }
@@ -190,6 +192,7 @@ class UserController @Autowired constructor(
     @DeleteMapping("/role/{uid}/{rid}")
     fun removeUserRole(@PathVariable uid: String, @PathVariable rid: String): Response<User?> {
         preCheckContextUser(uid)
+        preCheckRoleAssignPermission(rid)
         val result = userService.removeUserFromRole(uid, rid)
         return ResponseBuilder.success(result)
     }
@@ -278,21 +281,34 @@ class UserController @Autowired constructor(
         return ResponseBuilder.success(true)
     }
 
+    /**
+     * 独立部署模式下获取当前用户信息。
+     *
+     * 本接口被 AuthInterceptor 排除，身份依赖网关 `/web/` 的 `auth_request`：
+     * nginx 校验登录态后强制覆盖 `X-BKREPO-API-TYPE=web` 与 `X-BKREPO-UID`。
+     * 未走该入口的请求（如 `/auth/api/...`，API-TYPE 被覆盖为 api）不得根据客户端请求头写用户。
+     */
     @Operation(summary = "独立部署模式下，获取用户信息")
     @GetMapping("/info")
     fun userInfo(
         @RequestHeader("x-bkrepo-uid") bkUserId: String?,
         @RequestHeader("x-bkrepo-display-name") displayName: String?,
         @RequestHeader("x-bk-tenant-id") tenantId: String?,
+        @RequestHeader(TIME_ZONE_HEADER, required = false) timeZone: String?,
     ): Response<Map<String, Any>> {
-        val name = if (displayName == null) "" else String(Base64.getDecoder().decode(displayName))
+        val name = decodeDisplayName(displayName)
         val result = mapOf(
             "userId" to bkUserId.orEmpty(),
             "displayName" to name,
-            "tenantId" to tenantId.orEmpty()
+            "tenantId" to tenantId.orEmpty(),
+            "timeZone" to timeZone.orEmpty()
         )
-        bkUserId?.let {
-            userService.createOrUpdateUser(bkUserId, name, tenantId)
+        if (!bkUserId.isNullOrEmpty()) {
+            if (isTrustedWebGatewayRequest()) {
+                userService.createOrUpdateUser(bkUserId, name, tenantId)
+            } else {
+                logger.warn("skip createOrUpdateUser from untrusted entry, userId [$bkUserId]")
+            }
         }
         return ResponseBuilder.success(result)
     }
@@ -347,9 +363,9 @@ class UserController @Autowired constructor(
         return ResponseBuilder.success(userService.updatePassword(uid, decryptOldPwd, decryptNewPwd))
     }
 
-    @Operation(summary = "用户info ")
+    @Operation(summary = "重置用户密码，返回一次性明文新密码")
     @PostMapping("/reset/{uid}")
-    fun resetPassword(@PathVariable uid: String): Response<Boolean> {
+    fun resetPassword(@PathVariable uid: String): Response<String> {
         preCheckContextUser(uid)
         return ResponseBuilder.success(userService.resetPassword(uid))
     }
@@ -385,7 +401,33 @@ class UserController @Autowired constructor(
         return ResponseBuilder.success(result)
     }
 
+    /**
+     * 校验当前用户是否有权限将目标角色分配给用户：
+     * SERVICE 角色需系统管理员，项目/仓库角色需对应项目管理员。
+     */
+    private fun preCheckRoleAssignPermission(rid: String) {
+        val role = roleService.detail(rid) ?: throw ErrorCodeException(AuthMessageCode.AUTH_ROLE_NOT_EXIST)
+        preCheckRoleAdmin(role.projectId)
+    }
+
+    /**
+     * 仅采信网关 web 入口：该入口已 cookie 鉴权，并强制覆盖 API-TYPE 与 UID，外部无法伪造。
+     */
+    private fun isTrustedWebGatewayRequest(): Boolean {
+        val apiType = HttpContextHolder.getRequestOrNull()?.getHeader(HEADER_API_TYPE).orEmpty()
+        return apiType.equals(API_TYPE_WEB, ignoreCase = true)
+    }
+
+    private fun decodeDisplayName(displayName: String?): String {
+        if (displayName.isNullOrEmpty()) {
+            return ""
+        }
+        return runCatching { String(Base64.getDecoder().decode(displayName)) }.getOrDefault("")
+    }
+
     companion object {
         private val logger = LoggerFactory.getLogger(UserController::class.java)
+        private const val HEADER_API_TYPE = "X-BKREPO-API-TYPE"
+        private const val API_TYPE_WEB = "web"
     }
 }

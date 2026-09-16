@@ -49,6 +49,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.stereotype.Service
 import java.io.IOException
 import java.net.InetAddress
+import java.security.MessageDigest
 import java.util.Base64
 
 @Service
@@ -106,7 +107,7 @@ class StreamService(
                 category = RepositoryCategory.LOCAL,
                 public = false,
                 display = display,
-                storageCredentialsKey = mediaProperties.storageCredentialsKey
+                storageCredentialsKey = mediaProperties.getStorageCredentialsKey(projectId)
             )
             repositoryService.createRepo(createRepoRequest)
             val nodeCreateRequest = NodeCreateRequest(
@@ -539,7 +540,8 @@ class StreamService(
         val payload = "$requestedStream|$expireAt"
         val hmacBytes = HmacUtils(HmacAlgorithms.HMAC_SHA_256, mediaProperties.rtcSecret).hmac(payload)
         val expected = Base64.getUrlEncoder().withoutPadding().encodeToString(hmacBytes)
-        return expected == signature && System.currentTimeMillis() <= expireAt
+        return MessageDigest.isEqual(expected.toByteArray(), signature.toByteArray()) &&
+            System.currentTimeMillis() <= expireAt
     }
 
     private fun verifyLegacyToken(token: String, requestedStream: String): Boolean {
@@ -552,9 +554,9 @@ class StreamService(
         val fields = payload.split("\\|".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
         val streamPattern = fields[0]
         val expireAt = fields[1].toLong()
-        return expected == signature
-                && System.currentTimeMillis() <= expireAt
-                && requestedStream == streamPattern
+        return MessageDigest.isEqual(expected.toByteArray(), signature.toByteArray()) &&
+            System.currentTimeMillis() <= expireAt &&
+            requestedStream == streamPattern
     }
 
     fun saveActiveStream(

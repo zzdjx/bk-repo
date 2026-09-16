@@ -36,15 +36,16 @@ import com.tencent.bkrepo.common.artifact.api.ArtifactInfo
 import com.tencent.bkrepo.preview.config.configuration.PreviewConfig
 import com.tencent.bkrepo.preview.constant.PreviewMessageCode
 import com.tencent.bkrepo.preview.exception.PreviewInvalidException
+import com.tencent.bkrepo.preview.exception.PreviewNotFoundException
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.pojo.FileType
 import com.tencent.bkrepo.preview.pojo.PreviewInfo
+import com.tencent.bkrepo.preview.pojo.Watermark
 import com.tencent.bkrepo.preview.utils.FileUtils
 import com.tencent.bkrepo.preview.utils.UrlEncoderUtils
 import com.tencent.bkrepo.preview.utils.WebUtils
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
-import java.io.File
 import java.io.UnsupportedEncodingException
 import java.net.URLDecoder
 import java.util.UUID
@@ -52,7 +53,8 @@ import java.util.UUID
 @Component
 class FileHandlerService(
     private val config: PreviewConfig,
-    private val resourceService: CommonResourceService
+    private val resourceService: CommonResourceService,
+    private val fileTransferService: FileTransferService
 ) {
 
     companion object {
@@ -69,13 +71,7 @@ class FileHandlerService(
         val watermark = resourceService.getWatermark(decodedParams)
         logger.info("Preview info, url：{}, previewType：{}, fileTemplate: {}",
             fileAttribute.url, fileAttribute.type, fileTemplate)
-        return PreviewInfo(
-            fileName = fileAttribute.fileName,
-            fileType = fileAttribute.type!!.name,
-            suffix = fileAttribute.suffix,
-            fileTemplate = fileTemplate,
-            watermark = watermark
-        )
+        return toPreviewInfo(fileAttribute, fileTemplate, watermark)
     }
 
     /**
@@ -87,13 +83,7 @@ class FileHandlerService(
         val watermark = resourceService.getWatermark(decodedParams)
         logger.info("Preview info, url：{}, previewType：{}, fileTemplate: {}",
             fileAttribute.url, fileAttribute.type, fileTemplate)
-        return PreviewInfo(
-            fileName = fileAttribute.fileName,
-            fileType = fileAttribute.type!!.name,
-            suffix = fileAttribute.suffix,
-            fileTemplate = fileTemplate,
-            watermark = watermark
-        )
+        return toPreviewInfo(fileAttribute, fileTemplate, watermark)
     }
 
     /**
@@ -105,9 +95,10 @@ class FileHandlerService(
     fun getFileTemplate(fileAttribute: FileAttribute): String = with(fileAttribute) {
         when {
             isHtmlView -> FilePreview.EXEL_FILE_PREVIEW_PAGE
-            type?.name == FileType.OFFICE.name -> when (suffix!!.lowercase()) {
-                "xlsx", "xls", "csv" -> FilePreview.XLSX_FILE_PREVIEW_PAGE
-                else   -> FilePreview.PDF_FILE_PREVIEW_PAGE
+            type?.name == FileType.OFFICE.name -> when {
+                suffix?.lowercase() in setOf("xlsx", "xls", "csv") -> FilePreview.XLSX_FILE_PREVIEW_PAGE
+                LivePptxPreview.shouldSkipOfficeConvert(this) -> FilePreview.PPTX_FILE_PREVIEW_PAGE
+                else -> FilePreview.PDF_FILE_PREVIEW_PAGE
             }
             type?.name == FileType.PDF.name -> FilePreview.PDF_FILE_PREVIEW_PAGE
             type?.name == FileType.SIMTEXT.name -> FilePreview.TXT_FILE_PREVIEW_PAGE
@@ -119,20 +110,57 @@ class FileHandlerService(
             type?.name == FileType.MEDIA.name -> FilePreview.MEDIA_FILE_PREVIEW_PAGE
             type?.name == FileType.SVG.name -> FilePreview.SVG_FILE_PREVIEW_PAGE
             type?.name == FileType.JSX.name -> FilePreview.JSX_FILE_PREVIEW_PAGE
+            type?.name == FileType.ONLINE3D.name && storageType == 0 && Online3dPreview.isGlb(suffix) ->
+                FilePreview.ONLINE3D_PREVIEW_PAGE
             else -> FilePreview.NOT_SUPPORTED_FILE_PAGE
         }
     }
 
+    private fun toPreviewInfo(
+        fileAttribute: FileAttribute,
+        fileTemplate: String,
+        watermark: Watermark?
+    ): PreviewInfo {
+        val isOnline3dPreview = fileTemplate == FilePreview.ONLINE3D_PREVIEW_PAGE
+        return PreviewInfo(
+            fileName = fileAttribute.fileName,
+            fileType = fileAttribute.type?.name,
+            suffix = fileAttribute.suffix,
+            fileTemplate = fileTemplate,
+            watermark = watermark,
+            warnFileSize = config.online3dWarnFileSize.takeIf { isOnline3dPreview },
+            maxFileSize = config.online3dMaxFileSize.takeIf { isOnline3dPreview },
+            size = resolveOnline3dSourceSize(fileAttribute, fileTemplate)
+        )
+    }
+
+    private fun resolveOnline3dSourceSize(fileAttribute: FileAttribute, fileTemplate: String): Long? {
+        if (fileTemplate != FilePreview.ONLINE3D_PREVIEW_PAGE || fileAttribute.storageType != 0) {
+            return null
+        }
+        return try {
+            fileTransferService.originalFileSize(fileAttribute)
+        } catch (e: PreviewNotFoundException) {
+            logger.warn(
+                "Resolve glb size failed, project [${fileAttribute.projectId}], " +
+                    "repo [${fileAttribute.repoName}], path [${fileAttribute.artifactUri}]",
+                e
+            )
+            null
+        }
+    }
+
     /**
-     * 获取文件属性
-     *
-     * @param params 原始参数
-     * @return 文件属性
+     * 远程预览入口：只按 URL 拉文件。extraParam 里的仓库坐标一律丢掉，避免走到 bkrepo 读节点。
      */
     fun getFileAttribute(params: String): FileAttribute {
         val attribute = params.readJsonString<FileAttribute>()
+        attribute.projectId = null
+        attribute.repoName = null
+        attribute.artifactUri = null
         checkRequest(attribute)
         adjustProperties(attribute)
+        attribute.storageType = 1
         return attribute
     }
 
@@ -166,14 +194,11 @@ class FileHandlerService(
         isCompressFile: Boolean
     ): String {
         var convertFileName = when (type) {
-            FileType.OFFICE -> {
-                if (suffix.equals("xlsx", ignoreCase = true)) {
-                    originFileName
-                } else if (suffix.equals("xls", ignoreCase = true) || suffix.equals("csv", ignoreCase = true)) {
+            FileType.OFFICE -> when {
+                suffix.equals("xlsx", ignoreCase = true) || LivePptxPreview.isSupported(suffix) -> originFileName
+                suffix.equals("xls", ignoreCase = true) || suffix.equals("csv", ignoreCase = true) ->
                     convertFilePrefixName + "xlsx"
-                } else {
-                    convertFilePrefixName + if (isHtmlView) "html" else "pdf"
-                }
+                else -> convertFilePrefixName + if (isHtmlView) "html" else "pdf"
             }
             FileType.PDF -> originFileName
             FileType.MEDIACONVERT -> convertFilePrefixName + "mp4"
@@ -243,8 +268,9 @@ class FileHandlerService(
             url = url?.let { WebUtils.encodeUrlFileName(it) } // 对未转义的url进行转义
         }
 
-        // 文件名处理
+        // 文件名处理：HTML 转义后必须再校验，禁止路径分隔符和上级目录
         originFileName = FileUtils.htmlEscape(originFileName)
+        FileUtils.requireSafeFileName(originFileName)
 
         // 转换后的文件名前缀
         var convertFilePrefixName: String? = null
@@ -277,10 +303,52 @@ class FileHandlerService(
         }
     }
 
-    // 生成输出文件路径
+    /**
+     * `convert=pdf` 时强制 LibreOffice 转 PDF，并把输出名改回 .pdf。
+     */
+    fun applyConvertQuery(fileAttribute: FileAttribute, convert: String?) {
+        if (!convert.equals("pdf", ignoreCase = true)) {
+            return
+        }
+        fileAttribute.forcePdfConvert = true
+        val suffix = fileAttribute.suffix ?: return
+        if (!LivePptxPreview.isSupported(suffix)) {
+            return
+        }
+        val originFileName = fileAttribute.fileName ?: return
+        val dot = originFileName.lastIndexOf('.')
+        if (dot <= 0) {
+            return
+        }
+        val prefix = originFileName.substring(0, dot) + suffix + "."
+        fileAttribute.convertFileName = prefix + "pdf"
+        fileAttribute.outFilePath = generateOutputFilePath(fileAttribute.convertFileName)
+    }
+
+    /**
+     * `part=ppt/media/...` 时只流出 OOXML 包内音视频，供 `<video>` / `<audio>` Range 加载。
+     */
+    fun applyEmbeddedPartQuery(fileAttribute: FileAttribute, part: String?) {
+        if (part.isNullOrBlank()) {
+            return
+        }
+        if (fileAttribute.storageType != 0 || !LivePptxPreview.isOoxml(fileAttribute.suffix)) {
+            throw PreviewInvalidException(PreviewMessageCode.PREVIEW_PARAMETER_INVALID, "part")
+        }
+        val normalized = PptxZipMedia.normalizePartPath(part)
+            ?: throw PreviewInvalidException(PreviewMessageCode.PREVIEW_PARAMETER_INVALID, "part")
+        fileAttribute.embeddedPartPath = normalized
+    }
+
+    // 生成输出文件路径，规范化后限制在预览根目录内
     private fun generateOutputFilePath(convertFileName: String?): String {
-        return "${config.fileDir}${File.separator}convert${File.separator}" +
-                "${UUID.randomUUID()}${File.separator}$convertFileName"
+        val outputName = convertFileName ?: UUID.randomUUID().toString()
+        return FileUtils.resolveUnderDirectory(
+            config.fileDir,
+            "convert",
+            UUID.randomUUID().toString(),
+            outputName
+        )
     }
 
     // 解析 storageType

@@ -32,6 +32,7 @@
 package com.tencent.bkrepo.auth.config
 
 import com.tencent.bkrepo.auth.interceptor.AuthInterceptor
+import com.tencent.bkrepo.common.security.http.core.HttpAuthProperties
 import com.tencent.bkrepo.common.security.http.core.HttpAuthSecurity
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration
@@ -39,8 +40,10 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 
 @Configuration
-@EnableConfigurationProperties(OauthProperties::class)
-class AuthConfig : WebMvcConfigurer {
+@EnableConfigurationProperties(OauthProperties::class, TofProperties::class)
+class AuthConfig(
+    private val httpAuthProperties: HttpAuthProperties
+) : WebMvcConfigurer {
 
     var prefixEnabled = true
 
@@ -51,11 +54,13 @@ class AuthConfig : WebMvcConfigurer {
             .includePattern("/cluster/**")
             .excludePattern("/external/**")
             .excludePattern("/api/user/login")
+            // /info 由网关 /web/ 的 auth_request 鉴权；Controller 仅在 X-BKREPO-API-TYPE=web 时写用户
             .excludePattern("/api/user/info")
             .excludePattern("/api/user/verify")
             .excludePattern("/api/user/rsa")
             .excludePattern("/api/oauth/*/token")
             .excludePattern("/api/oauth/*/.well-known/**")
+            .applyConfig(httpAuthProperties)
         if (prefixEnabled) {
             httpAuthSecurity.enablePrefix()
         }

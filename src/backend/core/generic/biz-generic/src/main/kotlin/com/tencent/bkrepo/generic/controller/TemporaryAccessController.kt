@@ -258,7 +258,7 @@ class TemporaryAccessController(
         deltaFile: ArtifactFile
     ): SseEmitter {
         val tokenInfo = temporaryAccessService.validateToken(token, artifactInfo, TokenType.UPLOAD)
-        val emitter = temporaryAccessService.patch(artifactInfo, oldFilePath, deltaFile)
+        val emitter = temporaryAccessService.patch(artifactInfo, oldFilePath, deltaFile, tokenInfo)
         temporaryAccessService.decrementPermits(tokenInfo)
         return emitter
     }

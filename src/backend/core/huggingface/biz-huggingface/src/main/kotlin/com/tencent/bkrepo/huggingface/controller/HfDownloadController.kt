@@ -64,7 +64,8 @@ class HfDownloadController : ArtifactService() {
     }
 
     @GetMapping(
-        "/{projectId}/{repoName}/api/{type}s/{organization}/{name}/tree/{revision}"
+        "/{projectId}/{repoName}/api/{type}s/{organization}/{name}/tree/{revision}",
+        "/{projectId}/{repoName}/api/{type}s/{organization}/{name}/tree/{revision}/**"
     )
     @Permission(type = ResourceType.REPO, action = PermissionAction.READ)
     fun tree(

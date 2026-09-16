@@ -2,7 +2,7 @@
     <canway-dialog
         v-model="show"
         width="600"
-        height-num="463"
+        height-num="500"
         @cancel="cancel"
         :title="editProxyData.type === 'add' ? $t('addProxy') : $t('editProxy')"
     >
@@ -24,19 +24,24 @@
             </bk-form-item>
             <bk-form-item v-if="editProxyData.proxyType === 'privateProxy'" :label="$t('password')" property="password">
                 <bk-input type="password" v-model.trim="editProxyData.password"></bk-input>
+                <p v-if="needReenterPassword" class="proxy-password-hint">
+                    {{ $t('proxyPasswordRequiredOnUrlChange') }}
+                </p>
             </bk-form-item>
             <bk-form-item v-if="repoType === 'helm'" property="connection">
                 <div class="flex-center">
                     <bk-link theme="primary" style="margin-right: auto">{{ $t('connectionTest') }}</bk-link>
                     <Icon v-if="loading" name="loading" size="14" class="svg-loading" />
                     <Icon style="margin-right: 300px" v-if="condition && !loading && connected" name="right" size="14" />
-                    <Icon style="margin-right: 300px" v-if="condition && !loading && !connected" name="wrong" size="14" />
+                    <Icon style="margin-right: 300px"
+                        v-if="condition && !loading && !connected && !needReenterPassword" name="wrong" size="14" />
                 </div>
             </bk-form-item>
         </bk-form>
         <template #footer>
             <bk-button @click="cancel">{{ $t('cancel') }}</bk-button>
-            <bk-button :disabled="!connected || !condition" class="ml10" theme="primary" @click="confirmProxyData">{{ $t('confirm') }}</bk-button>
+            <bk-button :disabled="!connected || !condition || needReenterPassword"
+                class="ml10" theme="primary" @click="confirmProxyData">{{ $t('confirm') }}</bk-button>
         </template>
     </canway-dialog>
 </template>
@@ -83,10 +88,6 @@
                             validator: this.checkName,
                             message: this.$t('sameProxyExist'),
                             trigger: 'blur'
-                        },
-                        {
-                            validator: this.checkValid,
-                            trigger: 'blur'
                         }
                     ],
                     url: [
@@ -94,25 +95,18 @@
                             required: true,
                             message: this.$t('proxyUrlRule'),
                             trigger: 'blur'
-                        },
-                        {
-                            validator: this.checkValid,
-                            trigger: 'blur'
-                        }
-                    ],
-                    username: [
-                        {
-                            validator: this.checkValid,
-                            trigger: 'blur'
-                        }
-                    ],
-                    password: [
-                        {
-                            validator: this.checkValid,
-                            trigger: 'blur'
                         }
                     ]
                 }
+            }
+        },
+        computed: {
+            needReenterPassword () {
+                return this.editProxyData.proxyType === 'privateProxy'
+                    && this.isMaskedPassword(this.editProxyData.password)
+                    && this.editProxyData.url.trim().length > 0
+                    && !(this.editProxyData.type === 'edit'
+                        && this.sameProxyUrl(this.editProxyData.url, this.proxyData.url))
             }
         },
         watch: {
@@ -145,6 +139,18 @@
             },
             'editProxyData.proxyType' () {
                 this.checkValid()
+            },
+            'editProxyData.name' () {
+                this.checkValid()
+            },
+            'editProxyData.url' () {
+                this.checkValid()
+            },
+            'editProxyData.username' () {
+                this.checkValid()
+            },
+            'editProxyData.password' () {
+                this.checkValid()
             }
         },
         created () {
@@ -160,18 +166,30 @@
                 if (this.repoType !== 'helm') {
                     return true
                 }
-                if (this.editProxyData.proxyType === 'publicProxy' && this.editProxyData.name.trim().length > 0 && this.editProxyData.url.trim().length > 0) {
+                const hasNameAndUrl = this.editProxyData.name.trim().length > 0
+                    && this.editProxyData.url.trim().length > 0
+                const urlUnchanged = this.editProxyData.type === 'edit'
+                    && this.sameProxyUrl(this.editProxyData.url, this.proxyData.url)
+                if (this.editProxyData.proxyType === 'publicProxy' && hasNameAndUrl) {
                     this.condition = true
-                    this.debouncedTestConnection()
+                    if (this.debouncedTestConnection) {
+                        this.debouncedTestConnection()
+                    }
                     return true
                 } else if (this.editProxyData.proxyType === 'privateProxy'
-                    && this.editProxyData.name.trim().length > 0
-                    && this.editProxyData.url.trim().length > 0
+                    && hasNameAndUrl
                     && this.editProxyData.username.trim().length > 0
                     && this.editProxyData.password.trim().length > 0
                 ) {
                     this.condition = true
-                    this.debouncedTestConnection()
+                    if (this.isMaskedPassword(this.editProxyData.password)) {
+                        this.cancelPendingCheck()
+                        this.connected = urlUnchanged
+                        return true
+                    }
+                    if (this.debouncedTestConnection) {
+                        this.debouncedTestConnection()
+                    }
                     return true
                 } else {
                     this.condition = false
@@ -180,21 +198,53 @@
                 }
             },
             cancel () {
+                this.cancelPendingCheck()
                 this.$refs.proxyFrom.clearError()
                 this.condition = false
                 this.connected = false
                 this.$emit('cancel')
             },
+            isMaskedPassword (password) {
+                return password === '******'
+            },
+            sameProxyUrl (left, right) {
+                const normalize = (raw) => {
+                    const trimmed = (raw || '').trim()
+                    if (!trimmed) {
+                        return ''
+                    }
+                    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+                        ? trimmed
+                        : `http://${trimmed}`
+                    return withScheme.replace(/\/+$/, '')
+                }
+                return normalize(left) === normalize(right)
+            },
+            cancelPendingCheck () {
+                if (this.debouncedTestConnection) {
+                    this.debouncedTestConnection.cancel()
+                }
+                this.loading = false
+            },
             async testConnection () {
+                if (this.editProxyData.proxyType === 'privateProxy'
+                    && this.isMaskedPassword(this.editProxyData.password)) {
+                    return
+                }
                 this.loading = true
-                const encrypt = new window.JSEncrypt()
-                const rsaKey = await this.getRSAKey()
-                encrypt.setPublicKey(rsaKey)
+                this.connected = false
                 const body = {
                     url: this.editProxyData.url,
-                    userName: this.editProxyData.proxyType !== 'privateProxy' ? null : this.editProxyData.username,
-                    password: this.editProxyData.proxyType !== 'privateProxy' ? null : encrypt.encrypt(this.editProxyData.password),
+                    userName: null,
+                    password: null,
                     type: this.repoType
+                }
+                if (this.editProxyData.proxyType === 'privateProxy') {
+                    const encrypt = new window.JSEncrypt()
+                    const rsaKey = await this.getRSAKey()
+                    encrypt.setPublicKey(rsaKey)
+                    body.userName = this.editProxyData.username
+                    body.password = encrypt.encrypt(this.editProxyData.password)
                 }
                 this.checkProxy({ body: body }).then(res => {
                     if (res === true) {
@@ -229,6 +279,12 @@
 .svg-loading {
     margin-right: 300px;
     animation: rotate-loading 1s linear infinite;
+}
+.proxy-password-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 16px;
+    color: #ea3636;
 }
 @keyframes rotate-loading {
     0% {

@@ -386,8 +386,15 @@ class TranscodeJobService @Autowired constructor(
         return builder.toString()
     }
 
-    fun restartJob(ids: Set<String>) {
-        mediaTranscodeJobDao.updateJobsStatus(ids, MediaTranscodeJobStatus.WAITING)
+    fun restartJob(ids: Set<String>): Long {
+        val result = if (ids.isEmpty()) {
+            mediaTranscodeJobDao.resetStuckJobsToWaiting()
+        } else {
+            mediaTranscodeJobDao.updateJobsStatus(ids, MediaTranscodeJobStatus.WAITING)
+        }
+        logger.info("restartJob reset ${result.modifiedCount} jobs to WAITING" +
+            if (ids.isEmpty()) " (stuck)" else ", ids=$ids")
+        return result.modifiedCount
     }
 
     /**

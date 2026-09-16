@@ -47,5 +47,9 @@ data class OidcConfiguration(
     @JsonProperty("scopes_supported")
     val scopesSupported: List<String>,
     @JsonProperty("token_endpoint_auth_methods_supported")
-    val tokenEndpointAuthMethodsSupported: List<String> = listOf("client_secret_basic")
+    val tokenEndpointAuthMethodsSupported: List<String> = listOf(
+        "client_secret_basic",
+        "client_secret_post",
+        "none"
+    )
 )

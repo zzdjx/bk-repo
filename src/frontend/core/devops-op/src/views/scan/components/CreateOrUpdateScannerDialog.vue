@@ -117,10 +117,10 @@
         <el-input v-model="scanner.knowledgeBase.endpoint" placeholder="知识库URL" />
       </el-form-item>
       <el-form-item v-if="scanner.type === SCANNER_TYPE_ARROWHEAD" label="知识库认证ID" prop="knowledgeBase.secretId">
-        <el-input v-model="scanner.knowledgeBase.secretId" placeholder="知识库认证SecretId" />
+        <el-input v-model="scanner.knowledgeBase.secretId" placeholder="知识库认证SecretId，空或 * 表示不修改" />
       </el-form-item>
       <el-form-item v-if="scanner.type === SCANNER_TYPE_ARROWHEAD" label="知识库认证KEY" prop="knowledgeBase.secretKey">
-        <el-input v-model="scanner.knowledgeBase.secretKey" placeholder="知识库认证SecretKey" />
+        <el-input v-model="scanner.knowledgeBase.secretKey" placeholder="知识库认证SecretKey，空或 * 表示不修改" />
       </el-form-item>
       <!-- trivy -->
       <el-form-item v-if="scanner.type === SCANNER_TYPE_TRIVY" label="漏洞库来源" prop="vulDbConfig.dbSource" required>

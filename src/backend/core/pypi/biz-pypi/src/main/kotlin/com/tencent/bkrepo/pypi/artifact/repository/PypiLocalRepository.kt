@@ -62,13 +62,9 @@ import com.tencent.bkrepo.pypi.artifact.PypiSimpleArtifactInfo
 import com.tencent.bkrepo.pypi.artifact.url.UrlPatternUtil.parameterMaps
 import com.tencent.bkrepo.pypi.artifact.xml.Value
 import com.tencent.bkrepo.pypi.artifact.xml.XmlUtil
-import com.tencent.bkrepo.pypi.constants.INDENT
-import com.tencent.bkrepo.pypi.constants.LINE_BREAK
 import com.tencent.bkrepo.pypi.constants.NON_ALPHANUMERIC_SEQ_REGEX
 import com.tencent.bkrepo.pypi.constants.PACKAGE_INDEX_TITLE
 import com.tencent.bkrepo.pypi.constants.REQUIRES_PYTHON
-import com.tencent.bkrepo.pypi.constants.REQUIRES_PYTHON_ATTR
-import com.tencent.bkrepo.pypi.constants.SIMPLE_PAGE_CONTENT
 import com.tencent.bkrepo.pypi.constants.SUMMARY
 import com.tencent.bkrepo.pypi.constants.VERSION
 import com.tencent.bkrepo.pypi.constants.VERSION_INDEX_TITLE
@@ -76,7 +72,7 @@ import com.tencent.bkrepo.pypi.exception.PypiSimpleNotFoundException
 import com.tencent.bkrepo.pypi.pojo.Basic
 import com.tencent.bkrepo.pypi.pojo.PypiArtifactVersionData
 import com.tencent.bkrepo.pypi.service.PypiSimpleIndexCacheService
-import com.tencent.bkrepo.pypi.util.HtmlUtils
+import com.tencent.bkrepo.pypi.util.PypiSimpleHtml
 import com.tencent.bkrepo.pypi.util.PypiSimpleIndexUtils
 import com.tencent.bkrepo.pypi.util.PypiVersionUtils.toPypiPackagePojo
 import com.tencent.bkrepo.pypi.util.XmlUtils
@@ -398,7 +394,7 @@ class PypiLocalRepository(
                 ).filter { it.folder && !PypiSimpleIndexUtils.isSimpleIndexCacheFolder(it.name) }
                     .takeIf { it.isNotEmpty() } ?: throw PypiSimpleNotFoundException(StringPool.SLASH)
                 // 过滤掉'根节点'与 simple 索引缓存目录
-                return buildPypiPageContent(PACKAGE_INDEX_TITLE, buildPackageListContent(nodeList))
+                return PypiSimpleHtml.page(PACKAGE_INDEX_TITLE, buildPackageListContent(nodeList))
             }
             // 请求中带包名，返回对应包的文件列表。
             val nodes = nodeService.listNodeWithMetadataKeys(
@@ -410,7 +406,7 @@ class PypiLocalRepository(
                 listOf(VERSION, REQUIRES_PYTHON),
             )
             if (!nodes.isNullOrEmpty()) {
-                return buildPypiPageContent(
+                return PypiSimpleHtml.page(
                     String.format(VERSION_INDEX_TITLE, packageName),
                     buildPackageFileListContent(nodes)
                 )
@@ -437,19 +433,12 @@ class PypiLocalRepository(
                 pageNumber++
             } while (records.size == PAGE_SIZE)
             nodeList.ifEmpty { throw PypiSimpleNotFoundException(packageName!!) }
-            return buildPypiPageContent(
+            return PypiSimpleHtml.page(
                 String.format(VERSION_INDEX_TITLE, packageName),
                 buildPackageFileNodeListContent(nodeList)
             )
         }
     }
-
-    /**
-     * html 页面公用的元素
-     * @param listContent 显示的内容
-     */
-    private fun buildPypiPageContent(title: String, listContent: String) =
-        String.format(SIMPLE_PAGE_CONTENT, title, title, listContent)
 
     /**
      * 对应包中的文件列表
@@ -467,12 +456,11 @@ class PypiLocalRepository(
                 SemVersion(0, 0, 0)
             }
         }
-        // data-requires-python属性值中的"<"和">"需要转换为HTML编码
         sortedNodeList.forEachIndexed { i, node ->
             val requiresPython = getNodeMetadata(node)
                 .find { it.key == REQUIRES_PYTHON }?.value?.toString()?.ifBlank { null }
             builder.append(
-                buildPackageFileNodeLink(
+                PypiSimpleHtml.fileNodeLink(
                     fullPath = node[FULL_PATH].toString(),
                     name = node[NAME].toString(),
                     sha256 = node[SHA256]?.toString(),
@@ -510,22 +498,12 @@ class PypiLocalRepository(
         sortedNodeList.forEachIndexed { i, node ->
             val requiresPython = node.nodeMetadata
                 ?.find { it.key == REQUIRES_PYTHON }?.value?.toString()?.ifBlank { null }
-            builder.append(buildPackageFileNodeLink(node.fullPath, node.name, node.sha256, requiresPython))
+            builder.append(
+                PypiSimpleHtml.fileNodeLink(node.fullPath, node.name, node.sha256, requiresPython)
+            )
             if (i != nodeList.size - 1) builder.append("\n")
         }
         return builder.toString()
-    }
-
-    private fun buildPackageFileNodeLink(
-        fullPath: String,
-        name: String,
-        sha256: String?,
-        requiresPython: String?
-    ): String {
-        val href = "../../packages$fullPath#sha256=$sha256"
-        val requiresPythonAttr = requiresPython
-            ?.let { " $REQUIRES_PYTHON_ATTR=\"${HtmlUtils.partialEncode(it)}\"" } ?: ""
-        return "$INDENT<a href=\"$href\"$requiresPythonAttr rel=\"internal\">$name</a>$LINE_BREAK"
     }
 
     /**
@@ -537,10 +515,8 @@ class PypiLocalRepository(
         if (nodeList.isEmpty()) {
             builder.append("The directory is empty.")
         }
-        // href中的包名需要根据PEP 503规范进行标准化，且以"/"结尾
         nodeList.forEachIndexed { i, node ->
-            val href = "\"${node.name.replace(nonAlphanumericSeqRegex, "-").toLowerCase()}/\""
-            builder.append("$INDENT<a href=$href rel=\"internal\">${node.name}</a>$LINE_BREAK")
+            builder.append(PypiSimpleHtml.packageListItem(node.name))
             if (i != nodeList.size - 1) builder.append("\n")
         }
         return builder.toString()
@@ -585,7 +561,6 @@ class PypiLocalRepository(
 
     companion object {
         private const val PAGE_SIZE = 1000
-        private val nonAlphanumericSeqRegex = Regex(NON_ALPHANUMERIC_SEQ_REGEX)
         val logger: Logger = LoggerFactory.getLogger(PypiLocalRepository::class.java)
         const val pageLimitCurrent = 0
         const val pageLimitSize = 10

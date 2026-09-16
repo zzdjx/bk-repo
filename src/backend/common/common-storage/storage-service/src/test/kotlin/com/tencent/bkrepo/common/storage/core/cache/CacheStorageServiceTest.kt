@@ -108,12 +108,7 @@ internal class CacheStorageServiceTest {
         val sha256 = artifactFile.getFileSha256()
         val path = fileLocator.locate(sha256)
         storageService.store(sha256, artifactFile, null)
-
-        // wait to async store
-        Thread.sleep(500)
-
-        // check persist
-        Assertions.assertTrue(storageService.exist(sha256, null))
+        awaitExist(sha256)
 
         // check cache
         Assertions.assertTrue(cacheClient.exist(path, sha256))
@@ -131,12 +126,7 @@ internal class CacheStorageServiceTest {
         val sha256 = artifactFile.getFileSha256()
         val path = fileLocator.locate(sha256)
         storageService.store(sha256, artifactFile, null)
-
-        // wait to async store
-        Thread.sleep(500)
-
-        // check persist
-        Assertions.assertTrue(storageService.exist(sha256, null))
+        awaitExist(sha256)
 
         // check cache
         Assertions.assertTrue(cacheClient.exist(path, sha256))
@@ -162,15 +152,10 @@ internal class CacheStorageServiceTest {
         val sha256 = artifactFile.getFileSha256()
         val path = fileLocator.locate(sha256)
         storageService.store(sha256, artifactFile, null)
-
-        // wait to async store
-        Thread.sleep(500)
+        awaitExist(sha256)
 
         // check cache
         Assertions.assertTrue(cacheClient.exist(path, sha256))
-
-        // check persist
-        Assertions.assertTrue(storageService.exist(sha256, null))
 
         // remove cache
         cacheClient.delete(path, sha256)
@@ -204,8 +189,7 @@ internal class CacheStorageServiceTest {
         val sha256 = artifactFile.getFileSha256()
         val path = fileLocator.locate(sha256)
         storageService.store(sha256, artifactFile, null)
-        // wait to async store
-        Thread.sleep(500)
+        awaitExist(sha256)
         // remove cache
         cacheClient.delete(path, sha256)
 
@@ -240,6 +224,8 @@ internal class CacheStorageServiceTest {
             println(artifactFile1.getFileMd5())
             storageService.store(digest1, artifactFile1, null)
             storageService.store(digest2, artifactFile2, null)
+            awaitExist(digest1)
+            awaitExist(digest2)
 
             // 增量存储
             val compressedSize = storageService.compress(
@@ -303,6 +289,9 @@ internal class CacheStorageServiceTest {
             storageService.store(digest1, artifactFile1, null)
             storageService.store(digest2, artifactFile2, null)
             storageService.store(digest3, artifactFile3, null)
+            awaitExist(digest1)
+            awaitExist(digest2)
+            awaitExist(digest3)
             val digest1CompressedSize = storageService.compress(
                 digest1,
                 file1Len,
@@ -357,21 +346,34 @@ internal class CacheStorageServiceTest {
         val artifactFile1 = createTempArtifactFile(data1)
         val digest = artifactFile1.getFileSha256()
         storageService.store(digest, artifactFile1, null)
+        awaitExist(digest)
         val cyclicBarrier = CyclicBarrier(10)
+        val threads = mutableListOf<Thread>()
         repeat(10) {
             val data = data1.copyOfRange(it + 1, data1.size)
             val artifactFile = createTempArtifactFile(data)
             val sha256 = artifactFile.getFileSha256()
             storageService.store(sha256, artifactFile, null)
-            thread {
-                // 等待异步存储完成
-                Thread.sleep(1000)
-                cyclicBarrier.await()
-                storageService.compress(sha256, data.size.toLong(), digest, data1.size.toLong(), null)
-            }
+            threads.add(
+                thread {
+                    awaitExist(sha256)
+                    cyclicBarrier.await()
+                    storageService.compress(sha256, data.size.toLong(), digest, data1.size.toLong(), null)
+                }
+            )
         }
-        // 等待执行
-        Thread.sleep(2000)
+        threads.forEach { it.join() }
+    }
+
+    private fun awaitExist(digest: String) {
+        val deadline = System.currentTimeMillis() + STORE_WAIT_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (storageService.exist(digest, null)) {
+                return
+            }
+            Thread.sleep(50)
+        }
+        Assertions.assertTrue(storageService.exist(digest, null))
     }
 
     private fun createTempArtifactFile(size: Long): ArtifactFile {
@@ -389,5 +391,9 @@ internal class CacheStorageServiceTest {
         val tempFile = createTempFile()
         tempFile.writeBytes(data)
         return FileSystemArtifactFile(tempFile)
+    }
+
+    companion object {
+        private const val STORE_WAIT_MS = 10_000L
     }
 }

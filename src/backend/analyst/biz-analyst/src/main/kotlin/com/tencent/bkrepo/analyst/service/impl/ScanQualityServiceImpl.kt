@@ -66,6 +66,7 @@ class ScanQualityServiceImpl(
 
     override fun getScanQuality(planId: String): ScanQuality {
         val scanPlan = scanPlanDao.get(planId)
+        permissionCheckHandler.checkProjectPermission(scanPlan.projectId, PermissionAction.MANAGE)
         return ScanQuality.create(scanPlan.scanQuality)
     }
 

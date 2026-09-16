@@ -54,6 +54,7 @@ import org.springframework.http.MediaType
 import org.springframework.web.servlet.AsyncHandlerInterceptor
 import org.springframework.web.servlet.HandlerMapping
 import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
 
 class ProxyAuthInterceptor(
     private val proxyAuthProperties: ProxyAuthProperties
@@ -91,9 +92,11 @@ class ProxyAuthInterceptor(
                     emptyStringHash
                 }
                 val sig = HttpSigner.sign(request, uri, bodyHash, sessionKey, HmacAlgorithms.HMAC_SHA_1.getName())
-                if (sig != request.getParameter(SIGN)) {
+                val clientSig = request.getParameter(SIGN)
+                if (clientSig == null || !MessageDigest.isEqual(sig.toByteArray(), clientSig.toByteArray())) {
                     val signatureStr = HttpSigner.getSignatureStr(request, uri, bodyHash)
-                    throw AuthenticationException("Invalid signature, server signature string: $signatureStr")
+                    logger.warn("Invalid signature, server signature string: [$signatureStr]")
+                    throw AuthenticationException("Invalid signature")
                 }
             } catch (e: RemoteErrorCodeException) {
                 logger.error("proxy auth error: ", e)

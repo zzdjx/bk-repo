@@ -28,6 +28,8 @@
 package com.tencent.bkrepo.lfs.utils
 
 import com.tencent.bkrepo.common.api.constant.StringPool
+import com.tencent.bkrepo.common.api.exception.ErrorCodeException
+import com.tencent.bkrepo.common.api.message.CommonMessageCode
 
 object OidUtils {
 
@@ -35,7 +37,12 @@ object OidUtils {
      * oid转换成真实存储节点的fullPath
      */
     fun convertToFullPath(oid: String): String {
-        return "/${oid.substring(0,2)}/${oid.substring(2,4)}/$oid"
+        if (oid.length < OID_PREFIX_LENGTH) {
+            throw ErrorCodeException(CommonMessageCode.PARAMETER_INVALID, "oid")
+        }
+        val firstDir = oid.substring(0, OID_DIR_SEGMENT_LENGTH)
+        val secondDir = oid.substring(OID_DIR_SEGMENT_LENGTH, OID_PREFIX_LENGTH)
+        return "/$firstDir/$secondDir/$oid"
     }
 
     /**
@@ -44,4 +51,7 @@ object OidUtils {
     fun convertToOid(fullPath: String): String {
         return fullPath.split(StringPool.SLASH).last()
     }
+
+    private const val OID_DIR_SEGMENT_LENGTH = 2
+    private const val OID_PREFIX_LENGTH = 4
 }

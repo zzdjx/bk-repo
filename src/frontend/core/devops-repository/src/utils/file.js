@@ -7,10 +7,7 @@ const textType = [
     'yml',
     'xml',
     'log',
-    'ini',
-    'log',
     'properties',
-    'toml',
     'sql'
 ]
 
@@ -24,6 +21,8 @@ const formatType = [
     'xlsm',
     'ppt',
     'pptx',
+    'pptm',
+    'ppsx',
     'vsd',
     'rtf',
     'odt',
@@ -77,11 +76,45 @@ const jsxType = [
     'jsx'
 ]
 
+const htmlFileType = [
+    'html',
+    'htm'
+]
+
 const xmindType = [
     'xmind'
 ]
 
-// 与 preview 服务 FileType.CODES 对齐
+const livePptxType = [
+    'pptx',
+    'pptm',
+    'ppsx',
+    'ppt'
+]
+
+const compressedType = [
+    'rar', 'zip', 'gz', 'tgz', 'tar', 'jar'
+]
+
+const mediaVideoType = [
+    'mp4',
+    'webm'
+]
+
+const mediaAudioType = [
+    'mp3',
+    'wav',
+    'ogg',
+    'oga',
+    'm4a'
+]
+
+const glbType = [
+    'glb'
+]
+
+// 与 preview 服务 FileType.CODES 对齐（html 已拆到 isHtmlFile 做渲染预览）
+// 含原文本类后缀：统一走 onlinePreview + Monaco
 const codeType = [
     'java',
     'c',
@@ -90,7 +123,6 @@ const codeType = [
     'python',
     'py',
     'js',
-    'html',
     'ftl',
     'css',
     'lua',
@@ -104,7 +136,14 @@ const codeType = [
     'cs',
     'aspx',
     'jsp',
-    'sql'
+    'sql',
+    'ini',
+    'toml',
+    'txt',
+    'bat',
+    'xml',
+    'log',
+    'properties'
 ]
 
 function getFileSuffix (param) {
@@ -117,7 +156,7 @@ function getFileSuffix (param) {
         : normalized
     const dotIndex = baseName.lastIndexOf('.')
     if (dotIndex < 0) {
-        // 远程预览接口可能直接传 suffix（如 java）
+        // getPreviewInfo 的 suffix 响应字段会被直接用于类型判断，例如 "java"。
         return baseName.toLowerCase()
     }
     if (dotIndex === baseName.length - 1) {
@@ -126,55 +165,97 @@ function getFileSuffix (param) {
     return baseName.slice(dotIndex + 1).toLowerCase()
 }
 
+function findFileType (param, types) {
+    const suffix = getFileSuffix(param)
+    return types.find(type => type === suffix)
+}
+
 // 判断文本类型
 export function isText (param) {
-    return textType.find(type => param.endsWith(type))
+    return findFileType(param, textType)
 }
 
 // 判断代码类型（走 preview onlinePreview + Monaco）
 export function isCode (param) {
-    const suffix = getFileSuffix(param)
-    return codeType.find(type => type === suffix)
+    return findFileType(param, codeType)
 }
 
 // 判断预览可转换的类型（转换的为pdf或者html）
 export function isFormatType (param) {
-    return formatType.find(type => param.endsWith(type))
+    return findFileType(param, formatType)
 }
 
 // 判断转换成html的类型
 export function isHtmlType (param) {
-    return isHtmlFormatType.find(type => param.endsWith(type))
+    return findFileType(param, isHtmlFormatType)
 }
 
 export function isPic (param) {
-    return picType.find(type => param.endsWith(type))
+    return findFileType(param, picType)
 }
 
 export function isExcel (param) {
-    return excelType.find(type => param.endsWith(type))
+    return findFileType(param, excelType)
 }
 
 export function isMarkdown (param) {
-    return markdownType.find(type => param.endsWith(type))
+    return findFileType(param, markdownType)
 }
 
 export function isJsx (param) {
-    return jsxType.find(type => param.endsWith(type))
+    return findFileType(param, jsxType)
+}
+
+// 单 HTML 文件渲染预览（勿与 isHtmlType / Excel→HTML 混淆）
+export function isHtmlFile (param) {
+    return findFileType(param, htmlFileType)
 }
 
 export function isXmind (param) {
-    return xmindType.find(type => param.endsWith(type))
+    return findFileType(param, xmindType)
+}
+
+export function isLivePptx (param) {
+    return findFileType(param, livePptxType)
+}
+
+export function isCompressed (param) {
+    return findFileType(param, compressedType)
+}
+
+export function isMediaVideo (param) {
+    return Boolean(findFileType(param, mediaVideoType))
+}
+
+export function isMediaAudio (param) {
+    return Boolean(findFileType(param, mediaAudioType))
+}
+
+export function isMedia (param) {
+    return isMediaVideo(param) || isMediaAudio(param)
+}
+
+export function isGlb (param) {
+    return Boolean(findFileType(param, glbType))
+}
+
+export function isPdf (param) {
+    return getFileSuffix(param) === 'pdf'
+}
+
+/**
+ * 走浏览器内置 PDF 阅读器：仅原生 PDF。PPT 等转换结果仍用 PDF.js。
+ */
+export function isNativePdfPreview (param) {
+    return Boolean(isPdf(param))
 }
 
 // 判断可预览的类型(不包括pic)
 export function isDisplayType (param) {
-    const isExcel = excelType.find(type => param.endsWith(type))
-    return isText(param) || isFormatType(param) || isExcel || isXmind(param)
+    return isText(param) || isFormatType(param) || isExcel(param) || isXmind(param)
 }
 
 // 判断可预览的类型(包括pic)
 export function isOutDisplayType (param) {
-    const isExcel = excelType.find(type => param.endsWith(type))
-    return isText(param) || isCode(param) || isFormatType(param) || isExcel || isPic(param) || isMarkdown(param) || isJsx(param) || isXmind(param)
+    return isText(param) || isCode(param) || isFormatType(param) || isExcel(param) || isPic(param) || isMarkdown(param) || isJsx(param) || isHtmlFile(param) || isXmind(param)
 }

@@ -142,6 +142,8 @@ class PermissionFilterFunction(
             "/node/create/**",
             "/node/delete/**",
             "/node/mkdir/**",
+            "/node/mknod/**",
+            "/node/symlink/**",
             "/node/set-length/**",
             "/block/**",
             "/stream/**"

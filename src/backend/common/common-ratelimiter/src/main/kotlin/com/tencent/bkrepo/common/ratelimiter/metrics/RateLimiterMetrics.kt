@@ -67,18 +67,10 @@ import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_PASSED_PERMITS
 import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_PASSED_PERMITS_DESC
 import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_REJECT_PERMITS
 import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_REJECT_PERMITS_DESC
-import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_RESOURCE_LIMITED_COUNT
-import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_RESOURCE_LIMITED_COUNT_DESC
-import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_RESOURCE_PASSED_COUNT
-import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_RESOURCE_PASSED_COUNT_DESC
-import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_RESOURCE_PASS_RATE
-import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_RESOURCE_PASS_RATE_DESC
 import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_TOTAL_COUNT
 import com.tencent.bkrepo.common.metrics.constant.RATE_LIMITER_TOTAL_COUNT_DESC
 import com.tencent.bkrepo.common.metrics.constant.TAG_DIMENSION
-import com.tencent.bkrepo.common.metrics.constant.TAG_NAME
 import com.tencent.bkrepo.common.metrics.constant.TAG_REASON
-import com.tencent.bkrepo.common.metrics.constant.TAG_RESOURCE
 import com.tencent.bkrepo.common.metrics.constant.TAG_RATE_LIMITER_STATUS
 import com.tencent.bkrepo.common.ratelimiter.service.connection.ServiceInstanceConnectionLimiterService
 import io.micrometer.core.instrument.Counter
@@ -118,41 +110,31 @@ class RateLimiterMetrics(
         .description(CONNECTION_DURATION_DESC)
         .register(registry)
 
-    // 各维度限流资源的实时状态
-    private val resourcePassRateMap = ConcurrentHashMap<String, AtomicLong>()
-    private val resourceLimitRateMap = ConcurrentHashMap<String, AtomicLong>()
+    private val overallPassed = AtomicLong(0)
+    private val overallLimited = AtomicLong(0)
     private val dimensionStatsMap = ConcurrentHashMap<String, DimensionStats>()
-    // 已注册 Gauge 的资源集合，用于保证并发下每个 resource 只注册一次
-    private val registeredResourceSet = ConcurrentHashMap<String, Boolean>()
 
     init {
         connectionLimiterServiceProvider?.let { registerConnectionGauges() }
 
-        // 注册汇总级别的gauge
-        Gauge.builder(RATE_LIMITER_OVERALL_PASS_COUNT) {
-            resourcePassRateMap.values.sumOf { it.get() }.toDouble()
-        }
+        Gauge.builder(RATE_LIMITER_OVERALL_PASS_COUNT) { overallPassed.get().toDouble() }
             .description(RATE_LIMITER_OVERALL_PASS_COUNT_DESC)
             .register(registry)
 
-        Gauge.builder(RATE_LIMITER_OVERALL_LIMIT_COUNT) {
-            resourceLimitRateMap.values.sumOf { it.get() }.toDouble()
-        }
+        Gauge.builder(RATE_LIMITER_OVERALL_LIMIT_COUNT) { overallLimited.get().toDouble() }
             .description(RATE_LIMITER_OVERALL_LIMIT_COUNT_DESC)
             .register(registry)
 
         Gauge.builder(RATE_LIMITER_OVERALL_PASS_RATE) {
-            val total = resourcePassRateMap.values.sumOf { it.get() } +
-                resourceLimitRateMap.values.sumOf { it.get() }
-            if (total > 0) {
-                resourcePassRateMap.values.sumOf { it.get() }.toDouble() / total
-            } else 0.0
+            val total = overallPassed.get() + overallLimited.get()
+            if (total > 0) overallPassed.get().toDouble() / total else 0.0
         }
             .description(RATE_LIMITER_OVERALL_PASS_RATE_DESC)
             .baseUnit("percent")
             .register(registry)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun collectMetrics(
         resource: String,
         result: Boolean,
@@ -161,23 +143,19 @@ class RateLimiterMetrics(
         permits: Long = 1L
     ) {
         try {
-            getTotalCounter(resource, dimension).increment()
+            // resource 是请求 URI，禁止作为 tag：路径泄漏且 registered 只增不删会高基数 OOM
+            getTotalCounter(dimension).increment()
             if (result) {
-                getPassedCounter(resource, dimension).increment(permits.toDouble())
-                resourcePassRateMap.computeIfAbsent(resource) { AtomicLong(0) }.addAndGet(permits)
+                getPassedCounter(dimension).increment(permits.toDouble())
+                overallPassed.addAndGet(permits)
             } else {
-                getLimitedCounter(resource, dimension).increment()
-                resourceLimitRateMap.computeIfAbsent(resource) { AtomicLong(0) }.incrementAndGet()
+                getLimitedCounter(dimension).increment()
+                overallLimited.incrementAndGet()
             }
             if (e != null) {
-                getExceptionCounter(resource, dimension).increment()
+                getExceptionCounter(dimension).increment()
             }
-
-            // 维度级别统计
             dimension?.let { updateDimensionStats(it, result, permits) }
-
-            // 注册资源级别的实时通过率gauge
-            registerResourceGauges(resource)
         } catch (ignore: Exception) {
         }
     }
@@ -222,58 +200,28 @@ class RateLimiterMetrics(
             .register(registry)
     }
 
-    private fun registerResourceGauges(resource: String) {
-        // putIfAbsent 是原子操作，返回 null 表示首次插入，保证并发下只注册一次 Gauge
-        if (registeredResourceSet.putIfAbsent(resource, true) != null) return
-
-        Gauge.builder(RATE_LIMITER_RESOURCE_PASSED_COUNT) {
-            resourcePassRateMap[resource]?.get()?.toDouble() ?: 0.0
-        }
-            .description(RATE_LIMITER_RESOURCE_PASSED_COUNT_DESC)
-            .tag(TAG_NAME, resource)
-            .register(registry)
-
-        Gauge.builder(RATE_LIMITER_RESOURCE_LIMITED_COUNT) {
-            resourceLimitRateMap[resource]?.get()?.toDouble() ?: 0.0
-        }
-            .description(RATE_LIMITER_RESOURCE_LIMITED_COUNT_DESC)
-            .tag(TAG_NAME, resource)
-            .register(registry)
-
-        Gauge.builder(RATE_LIMITER_RESOURCE_PASS_RATE) {
-            val passed = resourcePassRateMap[resource]?.get() ?: 0L
-            val limited = resourceLimitRateMap[resource]?.get() ?: 0L
-            val total = passed + limited
-            if (total > 0) passed.toDouble() / total else 0.0
-        }
-            .description(RATE_LIMITER_RESOURCE_PASS_RATE_DESC)
-            .tag(TAG_NAME, resource)
-            .baseUnit("percent")
-            .register(registry)
-    }
-
-    private fun getTotalCounter(resource: String, dimension: String? = null): Counter {
+    private fun getTotalCounter(dimension: String? = null): Counter {
         return getMetricsCount(
-            RATE_LIMITER_TOTAL_COUNT, RATE_LIMITER_TOTAL_COUNT_DESC, MetricType.TOTAL.name, resource, dimension
+            RATE_LIMITER_TOTAL_COUNT, RATE_LIMITER_TOTAL_COUNT_DESC, MetricType.TOTAL.name, dimension
         )
     }
 
-    private fun getPassedCounter(resource: String, dimension: String? = null): Counter {
+    private fun getPassedCounter(dimension: String? = null): Counter {
         return getMetricsCount(
-            RATE_LIMITER_PASSED_COUNT, RATE_LIMITER_PASSED_COUNT_DESC, MetricType.PASSED.name, resource, dimension
+            RATE_LIMITER_PASSED_COUNT, RATE_LIMITER_PASSED_COUNT_DESC, MetricType.PASSED.name, dimension
         )
     }
 
-    private fun getLimitedCounter(resource: String, dimension: String? = null): Counter {
+    private fun getLimitedCounter(dimension: String? = null): Counter {
         return getMetricsCount(
-            RATE_LIMITER_LIMITED_COUNT, RATE_LIMITER_LIMITED_COUNT_DESC, MetricType.LIMITED.name, resource, dimension
+            RATE_LIMITER_LIMITED_COUNT, RATE_LIMITER_LIMITED_COUNT_DESC, MetricType.LIMITED.name, dimension
         )
     }
 
-    private fun getExceptionCounter(resource: String, dimension: String? = null): Counter {
+    private fun getExceptionCounter(dimension: String? = null): Counter {
         return getMetricsCount(
             RATE_LIMITER_EXCEPTION_COUNT, RATE_LIMITER_EXCEPTION_COUNT_DESC,
-            MetricType.EXCEPTION.name, resource, dimension
+            MetricType.EXCEPTION.name, dimension
         )
     }
 
@@ -281,13 +229,11 @@ class RateLimiterMetrics(
         metricsName: String,
         metricsDes: String,
         status: String,
-        resource: String,
         dimension: String? = null
     ): Counter {
         val builder = Counter.builder(metricsName)
             .description(metricsDes)
             .tag(TAG_RATE_LIMITER_STATUS, status)
-            .tag(TAG_NAME, resource)
         dimension?.let { builder.tag(TAG_DIMENSION, it) }
         return builder.register(registry)
     }
@@ -347,15 +293,17 @@ class RateLimiterMetrics(
     /**
      * 记录限流拒绝详情
      */
+    @Suppress("UNUSED_PARAMETER")
     fun recordLimitRejectDetail(dimension: String, resource: String, permits: Long) {
-        getOrCreateRejectPermitsSummary(dimension, resource).record(permits.toDouble())
+        getOrCreateRejectPermitsSummary(dimension).record(permits.toDouble())
     }
 
     /**
      * 记录限流通过的许可数
      */
+    @Suppress("UNUSED_PARAMETER")
     fun recordPassedPermits(dimension: String, resource: String, permits: Long) {
-        getOrCreatePassedPermitsSummary(dimension, resource).record(permits.toDouble())
+        getOrCreatePassedPermitsSummary(dimension).record(permits.toDouble())
     }
 
     /**
@@ -377,20 +325,18 @@ class RateLimiterMetrics(
             .increment()
     }
 
-    private fun getOrCreateRejectPermitsSummary(dimension: String, resource: String): DistributionSummary {
+    private fun getOrCreateRejectPermitsSummary(dimension: String): DistributionSummary {
         return DistributionSummary.builder(RATE_LIMITER_REJECT_PERMITS)
             .description(RATE_LIMITER_REJECT_PERMITS_DESC)
             .tag(TAG_DIMENSION, dimension)
-            .tag(TAG_RESOURCE, resource)
             .publishPercentiles(0.5, 0.95, 0.99)
             .register(registry)
     }
 
-    private fun getOrCreatePassedPermitsSummary(dimension: String, resource: String): DistributionSummary {
+    private fun getOrCreatePassedPermitsSummary(dimension: String): DistributionSummary {
         return DistributionSummary.builder(RATE_LIMITER_PASSED_PERMITS)
             .description(RATE_LIMITER_PASSED_PERMITS_DESC)
             .tag(TAG_DIMENSION, dimension)
-            .tag(TAG_RESOURCE, resource)
             .publishPercentiles(0.5, 0.95, 0.99)
             .register(registry)
     }

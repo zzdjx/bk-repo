@@ -49,4 +49,9 @@ data class BackupTemporaryToken(
     var expireDate: LocalDateTime? = null,
     var permits: Int? = null,
     var type: TokenType
-)
+) {
+    override fun toString(): String {
+        return "BackupTemporaryToken(id=$id, createdBy=$createdBy, projectId=$projectId, " +
+            "repoName=$repoName, fullPath=$fullPath, type=$type)"
+    }
+}

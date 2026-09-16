@@ -4,20 +4,21 @@ package com.tencent.bkrepo.analyst.utils
  * 版本区间
  */
 class DefaultVersionRange(
-    val versionNumber: VersionNumber,
+    val version: String,
     val operator: Operator
 ) : VersionRange {
 
     /**
-     * 判断[versionNumber]是否在当前版本范围内
+     * 判断[version]是否在当前版本范围内
      */
-    override fun contains(versionNumber: VersionNumber): Boolean {
+    override fun contains(version: String): Boolean {
+        val cmp = VersionCompare.compare(version, this.version)
         return when (operator) {
-            Operator.LT -> versionNumber.lt(this.versionNumber)
-            Operator.LTE -> versionNumber.lte(this.versionNumber)
-            Operator.EQ -> versionNumber.eq(this.versionNumber)
-            Operator.GTE -> versionNumber.gte(this.versionNumber)
-            Operator.GT -> versionNumber.gt(this.versionNumber)
+            Operator.LT -> cmp < 0
+            Operator.LTE -> cmp <= 0
+            Operator.EQ -> cmp == 0
+            Operator.GTE -> cmp >= 0
+            Operator.GT -> cmp > 0
         }
     }
 
@@ -53,8 +54,9 @@ class DefaultVersionRange(
                 op.append(trimRange[1])
             }
             val opStr = op.toString()
-            val versionNumber = VersionNumber(trimRange.substring(opStr.length))
-            return DefaultVersionRange(versionNumber, Operator.lookup(opStr))
+            val version = trimRange.substring(opStr.length)
+            VersionCompare.validate(version)
+            return DefaultVersionRange(version, Operator.lookup(opStr))
         }
     }
 }

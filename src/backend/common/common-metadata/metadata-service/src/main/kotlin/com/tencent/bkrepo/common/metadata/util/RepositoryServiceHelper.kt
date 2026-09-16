@@ -3,6 +3,7 @@ package com.tencent.bkrepo.common.metadata.util
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.api.util.Preconditions
+import com.tencent.bkrepo.common.api.util.UrlFormatter
 import com.tencent.bkrepo.common.api.util.readJsonString
 import com.tencent.bkrepo.common.api.util.toJsonString
 import com.tencent.bkrepo.common.artifact.pojo.RepositoryCategory
@@ -54,6 +55,7 @@ class RepositoryServiceHelper(
     companion object {
         const val REPO_NAME_PATTERN = "[a-zA-Z_][a-zA-Z0-9\\.\\-_]{1,63}"
         const val REPO_DESC_MAX_LENGTH = 200
+        const val PASSWORD_MASK = "******"
         private const val SETTING_CLIENT_URL = "clientUrl"
         private lateinit var repositoryProperties: RepositoryProperties
         private const val CLEAN_UP_STRATEGY = "cleanupStrategy"
@@ -98,7 +100,7 @@ class RepositoryServiceHelper(
                     category = it.category,
                     public = it.public,
                     description = it.description,
-                    configuration = cryptoConfigurationPwd(it.configuration.readJsonString()),
+                    configuration = maskConfigurationPwd(it.configuration.readJsonString()),
                     storageCredentialsKey = it.credentialsKey,
                     projectId = it.projectId,
                     createdBy = it.createdBy,
@@ -150,7 +152,7 @@ class RepositoryServiceHelper(
         }
 
         /**
-         * 加/解密密码
+         * 处理配置中的敏感字段
          */
         fun cryptoConfigurationPwd(
             repoConfiguration: RepositoryConfiguration,
@@ -158,17 +160,113 @@ class RepositoryServiceHelper(
         ): RepositoryConfiguration {
             if (repoConfiguration is CompositeConfiguration) {
                 repoConfiguration.proxy.channelList.forEach {
-                    it.password?.let { pw ->
-                        it.password = crypto(pw, decrypt)
+                    it.password = cryptoIfNeeded(it.password, decrypt)
+                }
+            }
+            if (repoConfiguration is RemoteConfiguration) {
+                val credentials = repoConfiguration.credentials
+                credentials.password = cryptoIfNeeded(credentials.password, decrypt)
+            }
+            return repoConfiguration
+        }
+
+        private fun cryptoIfNeeded(password: String?, decrypt: Boolean): String? {
+            if (password == null || (!decrypt && isMaskedPassword(password))) {
+                return password
+            }
+            return crypto(password, decrypt)
+        }
+
+        fun maskConfigurationPwd(repoConfiguration: RepositoryConfiguration): RepositoryConfiguration {
+            if (repoConfiguration is CompositeConfiguration) {
+                repoConfiguration.proxy.channelList.forEach {
+                    if (!it.password.isNullOrBlank()) {
+                        it.password = PASSWORD_MASK
                     }
                 }
             }
             if (repoConfiguration is RemoteConfiguration) {
-                repoConfiguration.credentials.password?.let {
-                    repoConfiguration.credentials.password = crypto(it, decrypt)
+                if (!repoConfiguration.credentials.password.isNullOrBlank()) {
+                    repoConfiguration.credentials.password = PASSWORD_MASK
                 }
             }
             return repoConfiguration
+        }
+
+        fun restoreMaskedPasswords(
+            newConfiguration: RepositoryConfiguration,
+            oldConfiguration: RepositoryConfiguration,
+        ) {
+            if (newConfiguration is RemoteConfiguration && oldConfiguration is RemoteConfiguration) {
+                if (isMaskedPassword(newConfiguration.credentials.password) &&
+                    sameProxyUrl(newConfiguration.url, oldConfiguration.url)
+                ) {
+                    newConfiguration.credentials.password = oldConfiguration.credentials.password
+                }
+                if (isMaskedPassword(newConfiguration.credentials.password)) {
+                    throw ErrorCodeException(CommonMessageCode.PARAMETER_INVALID, "password")
+                }
+            }
+            if (newConfiguration is CompositeConfiguration && oldConfiguration is CompositeConfiguration) {
+                restoreCompositePasswords(newConfiguration, oldConfiguration)
+            }
+        }
+
+        private fun restoreCompositePasswords(
+            newConfiguration: CompositeConfiguration,
+            oldConfiguration: CompositeConfiguration,
+        ) {
+            val oldByName = oldConfiguration.proxy.channelList.associateBy { it.name }
+            val newNames = newConfiguration.proxy.channelList.mapTo(mutableSetOf()) { it.name }
+            val assignedOldNames = mutableSetOf<String>()
+            newConfiguration.proxy.channelList.forEach { channel ->
+                if (!isMaskedPassword(channel.password)) {
+                    return@forEach
+                }
+                oldByName[channel.name]?.takeIf { sameProxyUrl(it.url, channel.url) }?.let {
+                    channel.password = it.password
+                    assignedOldNames.add(it.name)
+                }
+            }
+            val leftoverOld = oldConfiguration.proxy.channelList.filter {
+                it.name !in newNames && it.name !in assignedOldNames
+            }
+            newConfiguration.proxy.channelList.forEach { channel ->
+                if (!isMaskedPassword(channel.password)) {
+                    return@forEach
+                }
+                leftoverOld.singleOrNull { sameProxyUrl(it.url, channel.url) }?.let {
+                    channel.password = it.password
+                    assignedOldNames.add(it.name)
+                }
+            }
+            newConfiguration.proxy.channelList.forEach { channel ->
+                if (isMaskedPassword(channel.password)) {
+                    throw ErrorCodeException(CommonMessageCode.PARAMETER_INVALID, "password")
+                }
+            }
+        }
+
+        fun isMaskedPassword(password: String?): Boolean {
+            return password == PASSWORD_MASK
+        }
+
+        fun sameProxyUrl(left: String?, right: String?): Boolean {
+            val a = left?.trim().orEmpty()
+            val b = right?.trim().orEmpty()
+            if (a.isEmpty() && b.isEmpty()) {
+                return true
+            }
+            if (a.isEmpty() || b.isEmpty()) {
+                return false
+            }
+            return try {
+                val leftUrl = UrlFormatter.formatUrl(a).trimEnd('/')
+                val rightUrl = UrlFormatter.formatUrl(b).trimEnd('/')
+                leftUrl == rightUrl
+            } catch (_: Exception) {
+                a == b
+            }
         }
 
         fun crypto(pw: String, decrypt: Boolean): String {

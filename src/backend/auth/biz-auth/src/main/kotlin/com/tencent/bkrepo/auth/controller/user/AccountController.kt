@@ -184,13 +184,4 @@ class AccountController @Autowired constructor(
         accountService.updateCredentialStatus(appId, accesskey, status)
         return ResponseBuilder.success(true)
     }
-
-    @Operation(summary = "校验ak/sk")
-    @GetMapping("/credential/{accesskey}/{secretkey}")
-    fun checkCredential(@PathVariable accesskey: String, @PathVariable secretkey: String): Response<String?> {
-        preCheckPlatformPermission()
-        preCheckUserAdmin()
-        val result = accountService.checkCredential(accesskey, secretkey)
-        return ResponseBuilder.success(result)
-    }
 }

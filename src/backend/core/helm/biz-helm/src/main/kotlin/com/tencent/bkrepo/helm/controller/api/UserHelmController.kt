@@ -35,11 +35,14 @@ import com.tencent.bk.audit.annotations.ActionAuditRecord
 import com.tencent.bk.audit.annotations.AuditAttribute
 import com.tencent.bk.audit.annotations.AuditEntry
 import com.tencent.bk.audit.annotations.AuditInstanceRecord
+import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.auth.pojo.enums.ResourceType
 import com.tencent.bkrepo.common.api.pojo.Response
 import com.tencent.bkrepo.common.artifact.api.ArtifactPathVariable
 import com.tencent.bkrepo.common.artifact.audit.ActionAuditContent
 import com.tencent.bkrepo.common.artifact.audit.REPO_EDIT_ACTION
 import com.tencent.bkrepo.common.artifact.audit.REPO_RESOURCE
+import com.tencent.bkrepo.common.security.permission.Permission
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.helm.pojo.HelmDomainInfo
 import com.tencent.bkrepo.helm.pojo.artifact.HelmArtifactInfo
@@ -69,6 +72,7 @@ class UserHelmController(
     private val chartRepositoryService: ChartRepositoryService
 ) {
 
+    @Permission(type = ResourceType.REPO, action = PermissionAction.READ)
     @Operation(summary = "查询包的版本详情")
     @GetMapping(HELM_VERSION_DETAIL)
     fun detailVersion(
@@ -100,11 +104,12 @@ class UserHelmController(
         scopeId = "#artifactInfo?.projectId",
         content = ActionAuditContent.REPO_PACKAGE_DELETE_CONTENT
     )
+    @Permission(type = ResourceType.REPO, action = PermissionAction.DELETE)
     @Operation(summary = "删除仓库下的包")
     @DeleteMapping(CHART_PACKAGE_DELETE_URL)
     fun deletePackage(
         @RequestAttribute userId: String,
-        artifactInfo: HelmDeleteArtifactInfo,
+        @ArtifactPathVariable artifactInfo: HelmDeleteArtifactInfo,
         @Parameter(name = "包唯一key", required = true)
         @RequestParam packageKey: String
     ): Response<Void> {
@@ -131,11 +136,12 @@ class UserHelmController(
         scopeId = "#artifactInfo?.projectId",
         content = ActionAuditContent.REPO_PACKAGE_VERSION_DELETE_CONTENT
     )
+    @Permission(type = ResourceType.REPO, action = PermissionAction.DELETE)
     @Operation(summary = "删除仓库下的包版本")
     @DeleteMapping(CHART_VERSION_DELETE_URL)
     fun deleteVersion(
         @RequestAttribute userId: String,
-        artifactInfo: HelmDeleteArtifactInfo,
+        @ArtifactPathVariable artifactInfo: HelmDeleteArtifactInfo,
         @Parameter(name = "包唯一key", required = true)
         @RequestParam packageKey: String,
         @Parameter(name = "包版本", required = true)

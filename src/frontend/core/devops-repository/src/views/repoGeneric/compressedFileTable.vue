@@ -176,17 +176,17 @@
                 }
             },
             getBtnDisabled (name) {
-                return name.endsWith('txt')
-                    || name.endsWith('sh')
-                    || name.endsWith('bat')
-                    || name.endsWith('json')
-                    || name.endsWith('yaml')
-                    || name.endsWith('xml')
-                    || name.endsWith('log')
-                    || name.endsWith('ini')
-                    || name.endsWith('log')
-                    || name.endsWith('properties')
-                    || name.endsWith('toml')
+                const normalizedName = name.toLowerCase()
+                return normalizedName.endsWith('txt')
+                    || normalizedName.endsWith('sh')
+                    || normalizedName.endsWith('bat')
+                    || normalizedName.endsWith('json')
+                    || normalizedName.endsWith('yaml')
+                    || normalizedName.endsWith('xml')
+                    || normalizedName.endsWith('log')
+                    || normalizedName.endsWith('ini')
+                    || normalizedName.endsWith('properties')
+                    || normalizedName.endsWith('toml')
             }
         }
     }

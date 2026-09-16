@@ -45,7 +45,7 @@ class StandardScanner(
     @get:Schema(title = "docker仓库用户")
     val dockerRegistryUsername: String?,
     @get:Schema(title = "docker仓库密码")
-    val dockerRegistryPassword: String?,
+    var dockerRegistryPassword: String?,
     @get:Schema(title = "扫描器容器启动CMD")
     val cmd: String,
     override val version: String = image.substring(image.lastIndexOf(COLON) + 1, image.length),

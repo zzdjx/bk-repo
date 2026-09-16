@@ -34,6 +34,7 @@ package com.tencent.bkrepo.common.security.http
 import com.tencent.bkrepo.common.security.crypto.CryptoProperties
 import com.tencent.bkrepo.common.security.http.basic.BasicAuthHandler
 import com.tencent.bkrepo.common.security.http.core.HttpAuthInterceptor
+import com.tencent.bkrepo.common.security.http.core.HttpAuthProperties
 import com.tencent.bkrepo.common.security.http.core.HttpAuthSecurity
 import com.tencent.bkrepo.common.security.http.core.HttpAuthSecurityCustomizer
 import com.tencent.bkrepo.common.security.http.jwt.JwtAuthHandler
@@ -60,7 +61,8 @@ class HttpAuthSecurityConfiguration(
     @Lazy
     private val authenticationManager: AuthenticationManager,
     private val jwtAuthProperties: JwtAuthProperties,
-    private val cryptoProperties: CryptoProperties
+    private val cryptoProperties: CryptoProperties,
+    private val httpAuthProperties: HttpAuthProperties
 ) {
 
     @Bean
@@ -87,6 +89,7 @@ class HttpAuthSecurityConfiguration(
     private fun configHttpAuthSecurity(httpAuthSecurity: HttpAuthSecurity) {
         httpAuthSecurity.authenticationManager = authenticationManager
         httpAuthSecurity.jwtAuthProperties = jwtAuthProperties
+        httpAuthSecurity.applyConfig(httpAuthProperties)
         unifiedCustomizer.stream().forEach {
             it.customize(httpAuthSecurity)
         }
@@ -100,12 +103,17 @@ class HttpAuthSecurityConfiguration(
         if (httpAuthSecurity.platformAuthEnabled) {
             httpAuthSecurity.addHttpAuthHandler(PlatformAuthHandler(authenticationManager))
         }
-        if (httpAuthSecurity.jwtAuthEnabled) {
+        if (httpAuthSecurity.jwtAuthEnabled || httpAuthSecurity.oauthEnabled) {
+            // Bearer 的 JWT 解析与 OAuth 回落都在 JwtAuthHandler 内。
+            // 只关其中一种时仍要注册，让另一种 Bearer 路径继续工作。
+            // 两种都关则不注册，各服务自有的 Bearer Handler 不受影响。
             httpAuthSecurity.addHttpAuthHandler(
                 JwtAuthHandler(
                     jwtAuthProperties = jwtAuthProperties,
                     cryptoProperties = cryptoProperties,
-                    authenticationManager = authenticationManager
+                    authenticationManager = authenticationManager,
+                    jwtEnabled = httpAuthSecurity.jwtAuthEnabled,
+                    oauthEnabled = httpAuthSecurity.oauthEnabled
                 )
             )
         }

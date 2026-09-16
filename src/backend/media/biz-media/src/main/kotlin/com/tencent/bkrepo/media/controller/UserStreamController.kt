@@ -10,6 +10,7 @@ import com.tencent.bkrepo.common.security.util.SecurityUtils
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.media.artifact.MediaArtifactInfo
 import com.tencent.bkrepo.media.artifact.MediaArtifactInfo.Companion.DEFAULT_STREAM_MAPPING_URI
+import com.tencent.bkrepo.media.config.MediaProperties
 import com.tencent.bkrepo.media.service.StreamService
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.security.MessageDigest
 
 /**
  * 流控制器
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/user/stream")
 class UserStreamController(
     private val streamService: StreamService,
+    private val mediaProperties: MediaProperties,
 ) {
 
     /**
@@ -111,9 +114,15 @@ class UserStreamController(
     fun handleSrsHttpHook(
         @RequestParam(required = true)
         machine: String,
+        @RequestParam(required = false)
+        secret: String?,
         @RequestBody
         body: Map<String, Any>
     ): Response<Boolean> {
+        if (!verifyHookSecret(secret)) {
+            logger.warn("invalid hook secret, machine=$machine")
+            return ResponseBuilder.fail(HttpStatus.FORBIDDEN.value, "invalid secret")
+        }
         logger.debug("handleSrsHttpHook| $body")
         val action = body["action"] as? String ?: return ResponseBuilder.fail(
             HttpStatus.BAD_REQUEST.value,
@@ -184,6 +193,17 @@ class UserStreamController(
             builder.header(HEADER_STREAM_SERVER_ID, it)
         }
         return builder.build()
+    }
+
+    /**
+     * 校验回调方携带的共享密钥
+     */
+    private fun verifyHookSecret(secret: String?): Boolean {
+        val expected = mediaProperties.hookSecret
+        if (expected.isBlank()) {
+            return true
+        }
+        return secret != null && MessageDigest.isEqual(expected.toByteArray(), secret.toByteArray())
     }
 
     companion object {

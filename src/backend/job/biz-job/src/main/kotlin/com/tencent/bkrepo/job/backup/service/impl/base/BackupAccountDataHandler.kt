@@ -8,6 +8,7 @@ import com.tencent.bkrepo.job.backup.pojo.query.enums.BackupDataEnum
 import com.tencent.bkrepo.job.backup.pojo.record.BackupContext
 import com.tencent.bkrepo.job.backup.pojo.setting.BackupConflictStrategy
 import com.tencent.bkrepo.job.backup.service.BackupDataHandler
+import com.tencent.bkrepo.job.backup.util.BackupSecretCrypto
 import org.slf4j.LoggerFactory
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.query.Criteria
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component
 @Component
 class BackupAccountDataHandler(
     private val mongoTemplate: MongoTemplate,
+    private val backupSecretCrypto: BackupSecretCrypto,
 ) : BackupDataHandler {
     override fun dataType(): BackupDataEnum {
         return BackupDataEnum.ACCOUNT_DATA
@@ -35,8 +37,13 @@ class BackupAccountDataHandler(
         return (data as BackupAccount).id!!
     }
 
+    override fun <T> preBackupDataHandler(record: T, backupDataEnum: BackupDataEnum, context: BackupContext) {
+        encryptAccount(record as BackupAccount)
+    }
+
     override fun <T> storeRestoreDataHandler(record: T, backupDataEnum: BackupDataEnum, context: BackupContext) {
         val record = record as BackupAccount
+        decryptAccount(record)
         val existRecord = findExistAccount(record)
         if (existRecord != null) {
             if (context.task.backupSetting.conflictStrategy == BackupConflictStrategy.SKIP) {
@@ -121,6 +128,13 @@ class BackupAccountDataHandler(
         return result
     }
 
+    private fun encryptAccount(account: BackupAccount) {
+        account.credentials.forEach { it.secretKey = backupSecretCrypto.encrypt(it.secretKey) }
+    }
+
+    private fun decryptAccount(account: BackupAccount) {
+        account.credentials.forEach { it.secretKey = backupSecretCrypto.decrypt(it.secretKey) }
+    }
 
     companion object {
         private val logger = LoggerFactory.getLogger(BackupAccountDataHandler::class.java)

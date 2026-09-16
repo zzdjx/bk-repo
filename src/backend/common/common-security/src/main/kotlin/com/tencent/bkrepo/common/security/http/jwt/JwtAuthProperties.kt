@@ -31,6 +31,7 @@
 
 package com.tencent.bkrepo.common.security.http.jwt
 
+import org.springframework.beans.factory.InitializingBean
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
 
@@ -41,12 +42,19 @@ import java.time.Duration
 data class JwtAuthProperties(
 
     /**
-     * 加密密钥
+     * 签名密钥，必须由部署注入。
      */
-    var secretKey: String = "secret@key",
+    var secretKey: String = "",
 
     /**
      * 过期时间，[Duration.ZERO]代表永不过期
      */
-    var expiration: Duration = Duration.ZERO
-)
+    var expiration: Duration = Duration.ofHours(24)
+) : InitializingBean {
+    override fun afterPropertiesSet() {
+        require(secretKey.isNotBlank()) {
+            "security.auth.jwt.secretKey must be configured; " +
+                "set BK_REPO_JWT_SECRET_KEY or security.auth.jwt.secretKey"
+        }
+    }
+}

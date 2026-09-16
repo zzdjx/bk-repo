@@ -12,10 +12,10 @@
 
 ```shell
 $ helm repo add bkee <bkrepo helm repo url>
-$ helm install bkrepo bkee/bkrepo
+$ helm install bkrepo bkee/bkrepo --set common.password=<your-password> --set mongodb.auth.password=<your-mongo-password> --set gateway.accessKey=<your-access-key> --set gateway.secretKey=<your-secret-key>
 ```
 
-上述命令将使用默认配置在Kubernetes集群中部署bkrepo, 并输出访问指引。
+上述命令将在Kubernetes集群中部署bkrepo, 并输出访问指引。`common.password` 与 `mongodb.auth.password` 必须显式指定，禁止使用公开默认口令。新安装还必须设置 `gateway.accessKey` 与 `gateway.secretKey`。存量升级若已有格式正确的 `gateway.authorization`（`Platform <base64(ak:sk)>`），可继续使用，不必改这两个字段。
 
 ## 卸载Chart
 使用以下命令卸载`bkrepo`:
@@ -130,8 +130,8 @@ $ helm uninstall bkrepo
 | `mongodb.auth.enabled` | 是否开启认证 | `true` |
 | `mongodb.auth.database` | mongodb数据库名称 | `bkrepo` |
 | `mongodb.auth.username` | mongodb认证用户名 | `bkrepo` |
-| `mongodb.auth.password` | mongodb密码 | `bkrepo` |
-| `externalMongodb.uri` | 外部mongodb服务的连接地址。当`mongodb.enabled`配置为`false`时，bkrepo将使用此参数连接外部mongodb | `mongodb://bkrepo:bkrepo@localhost:27017/bkrepo` |
+| `mongodb.auth.password` | mongodb密码（`mongodb.enabled=true` 时必填，禁止使用 `bkrepo`） | 无默认值，需 `--set mongodb.auth.password=<password>` |
+| `externalMongodb.uri` | 外部mongodb连接地址。当`mongodb.enabled=false`时必填，禁止使用默认凭据 `bkrepo/bkrepo` | 无默认值 |
 
 > 如果需要持久化mongodb数据，请参考[bitnami/mongodb](https://github.com/bitnami/charts/blob/master/bitnami/mongodb)配置存储卷
 
@@ -159,7 +159,7 @@ $ helm uninstall bkrepo
 | `common.jvmOption` | jvm启动选项, 如-Xms1024M -Xmx1024M | `""` |
 | `common.springProfile` | SpringBoot active profile | `dev` |
 | `common.username` | bkrepo初始用户名 | `admin` |
-| `common.password` | bkrepo初始密码 | `blueking` |
+| `common.password` | bkrepo初始密码（必填，禁止使用 `password`/`blueking`） | 无默认值，需 `--set common.password=<password>` |
 | `common.mountPath` | pod volume挂载路径 | `/data/storage` |
 | `common.config.storage.type` | 存储类型，支持filesystem/cos/s3/hdfs | `filesystem` |
 | `common.config.storage.filesystem.path` | filesystem存储方式配置，存储路径 | `/data/storage` |
@@ -189,7 +189,9 @@ $ helm uninstall bkrepo
 | `gateway.service.nodePort` | 服务类型为`NodePort`时端口设置 | `80` |
 | `gateway.host` | bkrepo 地址 | `bkrepo.example.com` |
 | `gateway.dnsServer` | dns服务器地址，用于配置nginx resolver | `local=on`(openrestry语法，取本机`/etc/resolv.conf`配置) |
-| `gateway.authorization` | 网关访问微服务认证信息 | `"Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="` |
+| `gateway.authorization` | 网关访问微服务认证信息。新安装请用 accessKey/secretKey；升级可保留已有且格式正确的值 | `"Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="` |
+| `gateway.accessKey` | 网关平台账号 accessKey（新安装必填，禁止公开默认值） | `""` |
+| `gateway.secretKey` | 网关平台账号 secretKey（新安装必填，禁止公开默认值） | `""` |
 | `gateway.deployMode` | 部署模式，standalone: 独立模式，ci: 与ci搭配模式 | `standalone` |
 
 ### repository服务配置
@@ -207,6 +209,7 @@ $ helm uninstall bkrepo
 |参数|描述|默认值 |
 |---|---|---|
 | `auth.config.realm` | 认证realm类型，支持local/devops | `local` |
+| `auth.config.allowDefaultPwd` | 是否允许使用内置默认口令 `password` 登录 | `false` |
 
 ### generic服务配置
 
@@ -267,7 +270,11 @@ $ helm uninstall bkrepo
 
 ```shell
 $ helm install bkrepo bkee/bkrepo \
-  --set global.imageRegistry=your.registry.com \
+  --set common.password=<your-password> \
+  --set mongodb.auth.password=<your-mongo-password> \
+  --set gateway.accessKey=<your-access-key> \
+  --set gateway.secretKey=<your-secret-key> \
+  --set global.imageRegistry=your.registry.com \
   --set gateway.host=bkrepo.example.com
 ```
 

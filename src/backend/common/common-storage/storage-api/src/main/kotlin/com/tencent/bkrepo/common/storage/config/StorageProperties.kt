@@ -117,4 +117,14 @@ class StorageProperties {
             else -> filesystem
         }
     }
+
+    /**
+     * 校验存储加密配置：开启加密时必须显式配置密钥
+     */
+    fun validate() {
+        filesystem.encrypt.requireKeyIfEnabled()
+        innercos.encrypt.requireKeyIfEnabled()
+        hdfs.encrypt.requireKeyIfEnabled()
+        s3.encrypt.requireKeyIfEnabled()
+    }
 }

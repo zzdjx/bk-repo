@@ -250,7 +250,9 @@ class AccountServiceImpl constructor(
     override fun findSecretKey(appId: String, accessKey: String): String? {
         val query = AccountQueryHelper.checkAppAccessKey(appId, accessKey)
         val account = accountDao.findOne(query, TAccount::class.java) ?: return null
-        return account.credentials.first { it.accessKey == accessKey }.secretKey
+        return account.credentials.find {
+            it.accessKey == accessKey && it.status == CredentialStatus.ENABLE
+        }?.secretKey
     }
 
     private fun transferAccount(tAccount: TAccount, displaySecretKey: Boolean = false): Account {

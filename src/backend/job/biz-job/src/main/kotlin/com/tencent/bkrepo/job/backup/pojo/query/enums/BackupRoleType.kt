@@ -33,5 +33,6 @@ package com.tencent.bkrepo.job.backup.pojo.query.enums
 
 enum class BackupRoleType {
     PROJECT,
-    REPO
+    REPO,
+    SERVICE
 }

@@ -34,6 +34,7 @@ package com.tencent.bkrepo.preview.utils
 import com.tencent.bkrepo.common.api.exception.SystemErrorException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.preview.config.configuration.PreviewConfig
+import com.tencent.bkrepo.preview.exception.PreviewInvalidException
 import com.tencent.bkrepo.preview.pojo.DownloadResult
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import okhttp3.ResponseBody
@@ -49,7 +50,8 @@ import java.util.UUID
  */
 @Component
 class DownloadUtils(
-    private val httpUtils: HttpUtils
+    private val httpUtils: HttpUtils,
+    private val ssrfGuard: SsrfGuard
 ) {
     companion object {
         private val logger = org.slf4j.LoggerFactory.getLogger(DownloadUtils::class.java)
@@ -68,11 +70,22 @@ class DownloadUtils(
     fun downLoad(fileAttribute: FileAttribute, config: PreviewConfig): DownloadResult {
         val result = DownloadResult()
         val urlStr = processUrl(fileAttribute)
+        if (urlStr.isNullOrBlank()) {
+            result.apply {
+                code = DownloadResult.CODE_FAIL
+                msg = "Unrecognized URL"
+            }
+            return result
+        }
+        // HTTP 与 FTP 共用 SSRF / 远程预览总开关。控制连接在此校验；
+        // FTP PASV 数据连接在 FtpUtils 打开 socket 前再次校验目标地址。
+        ssrfGuard.validate(urlStr)
 
         val fileName = fileAttribute.fileName
-        val realPath = getRelFilePath(fileName, fileAttribute.suffix!!, config.fileDir!!)
+        val realPath = getRelFilePath(fileName, fileAttribute.suffix!!, config.fileDir)
+        val resolvedName = File(realPath).name
 
-        if (!isValidFile(realPath, fileName!!, urlStr!!, config, result)) return result
+        if (!isValidFile(resolvedName, urlStr, config, result)) return result
 
         try {
             val url = WebUtils.normalizedURL(urlStr)
@@ -87,7 +100,7 @@ class DownloadUtils(
                 }
             }
 
-            return calculateFileMd5AndSize(realPath, fileName, result)
+            return calculateFileMd5AndSize(realPath, resolvedName, result)
         } catch (e: IOException) {
             logger.error("File download failed，url：$urlStr")
             result.apply {
@@ -145,8 +158,11 @@ class DownloadUtils(
                 realPath,
                 ftpUsername.takeUnless { it.isNullOrEmpty() } ?: config.ftpUsername,
                 ftpPassword.takeUnless { it.isNullOrEmpty() } ?: config.ftpPassword,
-                ftpControlEncoding.takeUnless { it.isNullOrEmpty() } ?: config.ftpControlEncoding
+                ftpControlEncoding.takeUnless { it.isNullOrEmpty() } ?: config.ftpControlEncoding,
+                ssrfGuard
             )
+        } catch (e: PreviewInvalidException) {
+            throw e
         } catch (e: Exception) {
             logger.error("FTP download failed: $e")
             result.apply {
@@ -174,19 +190,20 @@ class DownloadUtils(
         return result
     }
 
-    private fun isValidFile(realPath: String,
-                            fileName: String,
-                            urlStr: String,
-                            config: PreviewConfig,
-                            result: DownloadResult): Boolean {
-        if (FileUtils.isIllegalFileName(realPath)) {
+    private fun isValidFile(
+        fileName: String,
+        urlStr: String,
+        config: PreviewConfig,
+        result: DownloadResult
+    ): Boolean {
+        if (FileUtils.isIllegalFileName(fileName)) {
             result.apply {
                 code = DownloadResult.CODE_FAIL
                 msg = "Download failed, The file name is invalid,$fileName"
             }
             return false
         }
-        if (!FileUtils.isAllowedUpload(realPath, config.prohibitSuffix)) {
+        if (!FileUtils.isAllowedUpload(fileName, config.prohibitSuffix)) {
             result.apply {
                 code = DownloadResult.CODE_FAIL
                 msg = "Download Failed, Unsupported Type, $urlStr"
@@ -215,17 +232,22 @@ class DownloadUtils(
      */
     fun getRelFilePath(fileName: String?, suffix: String, fileDir: String): String {
         var updatedFileName = fileName ?: UUID.randomUUID().toString() + "." + suffix
-        updatedFileName = updatedFileName.replace(
-            updatedFileName.substring(updatedFileName.lastIndexOf(".") + 1),
-            suffix
-        )
+        FileUtils.requireSafeFileName(updatedFileName)
+        val dotIndex = updatedFileName.lastIndexOf('.')
+        if (dotIndex >= 0) {
+            updatedFileName = updatedFileName.replace(
+                updatedFileName.substring(dotIndex + 1),
+                suffix
+            )
+        }
+        FileUtils.requireSafeFileName(updatedFileName)
 
-        val dir = "$fileDir${File.separator}download"
-        val realPath = "$dir${File.separator}${UUID.randomUUID()}${File.separator}$updatedFileName"
-        val dirFile = File(dir)
+        val uniqueDir = UUID.randomUUID().toString()
+        val realPath = FileUtils.resolveUnderDirectory(fileDir, "download", uniqueDir, updatedFileName)
+        val dirFile = File(fileDir, "download")
 
         if (!dirFile.exists() && !dirFile.mkdirs()) {
-            logger.error("Failed to create directory,$dir")
+            logger.error("Failed to create directory,${dirFile.path}")
             throw SystemErrorException(CommonMessageCode.SYSTEM_ERROR, "Failed to create directory")
         }
         return realPath

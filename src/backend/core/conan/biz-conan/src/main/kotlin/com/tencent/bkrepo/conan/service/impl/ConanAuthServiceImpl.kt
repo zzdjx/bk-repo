@@ -31,6 +31,7 @@ import com.tencent.bkrepo.common.api.constant.BEARER_AUTH_PREFIX
 import com.tencent.bkrepo.common.api.util.BasicAuthUtils
 import com.tencent.bkrepo.common.security.exception.AuthenticationException
 import com.tencent.bkrepo.common.security.http.jwt.JwtAuthProperties
+import com.tencent.bkrepo.common.security.manager.AuthenticationManager
 import com.tencent.bkrepo.common.security.util.JwtUtils
 import com.tencent.bkrepo.conan.service.ConanAuthService
 import io.jsonwebtoken.ExpiredJwtException
@@ -39,7 +40,8 @@ import org.springframework.stereotype.Service
 
 @Service
 class ConanAuthServiceImpl(
-    private val jwtProperties: JwtAuthProperties
+    private val jwtProperties: JwtAuthProperties,
+    private val authenticationManager: AuthenticationManager
 ) : ConanAuthService {
 
     private val signingKey = JwtUtils.createSigningKey(jwtProperties.secretKey)
@@ -60,7 +62,8 @@ class ConanAuthServiceImpl(
     override fun authenticate(content: String): String {
         return try {
             val pair = BasicAuthUtils.decode(content)
-            JwtUtils.generateToken(signingKey, jwtProperties.expiration, pair.first)
+            val userId = authenticationManager.checkUserAccount(pair.first, pair.second)
+            JwtUtils.generateToken(signingKey, jwtProperties.expiration, userId)
         } catch (ignored: IllegalArgumentException) {
             throw AuthenticationException("Invalid authorization value.")
         }

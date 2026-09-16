@@ -80,6 +80,7 @@ import com.tencent.bkrepo.npm.exception.NpmBadRequestException
 import com.tencent.bkrepo.npm.exception.NpmTagNotExistException
 import com.tencent.bkrepo.npm.handler.NpmDependentHandler
 import com.tencent.bkrepo.npm.handler.NpmPackageHandler
+import com.tencent.bkrepo.npm.model.metadata.NpmAttachmentDeserializer
 import com.tencent.bkrepo.npm.model.metadata.NpmPackageMetaData
 import com.tencent.bkrepo.npm.model.metadata.NpmVersionMetadata
 import com.tencent.bkrepo.npm.model.properties.PackageProperties
@@ -98,7 +99,6 @@ import com.tencent.bkrepo.npm.utils.NpmUtils
 import com.tencent.bkrepo.npm.utils.TimeUtil
 import com.tencent.bkrepo.repository.pojo.metadata.MetadataModel
 import com.tencent.bkrepo.repository.pojo.metadata.MetadataSaveRequest
-import org.apache.commons.codec.binary.Base64
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.lang3.StringUtils
@@ -124,34 +124,37 @@ class NpmClientServiceImpl(
         artifactInfo: NpmArtifactInfo,
         name: String
     ): NpmSuccessResponse {
-        try {
-            val npmPackageMetaData =
-                objectMapper.readValue(HttpContextHolder.getRequest().inputStream, NpmPackageMetaData::class.java)
-            when {
-                isUploadRequest(npmPackageMetaData) -> {
-                    measureTimeMillis {
-                        handlerPackagePublish(userId, artifactInfo, npmPackageMetaData)
-                    }.apply {
-                        logger.info(
-                            "user [$userId] public npm package [$name] " +
-                                "to repo [${artifactInfo.getRepoIdentify()}] success, elapse $this ms"
-                        )
+        return try {
+            NpmAttachmentDeserializer.withCleanup(
+                parse = {
+                    objectMapper.readValue(HttpContextHolder.getRequest().inputStream, NpmPackageMetaData::class.java)
+                }
+            ) { npmPackageMetaData ->
+                when {
+                    isUploadRequest(npmPackageMetaData) -> {
+                        measureTimeMillis {
+                            handlerPackagePublish(userId, artifactInfo, npmPackageMetaData)
+                        }.apply {
+                            logger.info(
+                                "user [$userId] public npm package [$name] " +
+                                    "to repo [${artifactInfo.getRepoIdentify()}] success, elapse $this ms"
+                            )
+                        }
+                        NpmSuccessResponse.createEntitySuccess()
                     }
-                    return NpmSuccessResponse.createEntitySuccess()
-                }
-                isDeprecateRequest(npmPackageMetaData) -> {
-                    handlerPackageDeprecated(userId, artifactInfo, npmPackageMetaData)
-                    return NpmSuccessResponse.updatePkgSuccess()
-                }
-                else -> {
-                    val message = "Unknown npm put/update request, check the debug logs for further information."
-                    logger.warn(message)
-                    logger.debug(
-                        "Unknown npm put/update request: {}",
-                        objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(npmPackageMetaData)
-                    )
-                    // 异常声明为npm模块的异常
-                    throw NpmBadRequestException(message)
+                    isDeprecateRequest(npmPackageMetaData) -> {
+                        handlerPackageDeprecated(userId, artifactInfo, npmPackageMetaData)
+                        NpmSuccessResponse.updatePkgSuccess()
+                    }
+                    else -> {
+                        val message = "Unknown npm put/update request, check the debug logs for further information."
+                        logger.warn(message)
+                        logger.debug(
+                            "Unknown npm put/update request: {}",
+                            objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(npmPackageMetaData)
+                        )
+                        throw NpmBadRequestException(message)
+                    }
                 }
             }
         } catch (exception: IOException) {
@@ -169,7 +172,12 @@ class NpmClientServiceImpl(
         artifactFile: ArtifactFile
     ): OhpmResponse {
         measureTimeMillis {
-            handlerPackagePublish(userId, artifactInfo, npmPackageMetaData, artifactFile)
+            try {
+                handlerPackagePublish(userId, artifactInfo, npmPackageMetaData, artifactFile)
+            } finally {
+                npmPackageMetaData.attachments?.deleteArtifactFiles()
+                NpmAttachmentDeserializer.cleanupTrackedFiles()
+            }
         }.apply {
             logger.info(
                 "user [$userId] public ohpm package [${npmPackageMetaData.name}] " +
@@ -269,9 +277,13 @@ class NpmClientServiceImpl(
     @Permission(ResourceType.REPO, PermissionAction.WRITE)
     override fun updatePackage(userId: String, artifactInfo: NpmArtifactInfo, name: String) {
         logger.info("handling update package request for package [$name] in repo [${artifactInfo.getRepoIdentify()}]")
-        val packageMetadata =
-            objectMapper.readValue(HttpContextHolder.getRequest().inputStream, NpmPackageMetaData::class.java)
-        doPackageFileUpload(userId, artifactInfo, packageMetadata)
+        NpmAttachmentDeserializer.withCleanup(
+            parse = {
+                objectMapper.readValue(HttpContextHolder.getRequest().inputStream, NpmPackageMetaData::class.java)
+            }
+        ) { packageMetadata ->
+            doPackageFileUpload(userId, artifactInfo, packageMetadata)
+        }
     }
 
     @Permission(ResourceType.REPO, PermissionAction.WRITE)
@@ -429,12 +441,15 @@ class NpmClientServiceImpl(
             logger.warn(message)
             throw NpmBadRequestException(message)
         }
+        NpmUtils.checkPackageMetaData(npmPackageMetaData)
         try {
             var size = 0L
             if (artifactFile != null) {
                 size = artifactFile.getSize()
             } else {
-                npmPackageMetaData.attachments!!.getMap().values.forEach { size += it.length!!.toLong() }
+                npmPackageMetaData.attachments!!.getMap().values.forEach { attachment ->
+                    size += attachment.artifactFile?.getSize() ?: attachment.length!!.toLong()
+                }
             }
             val ohpm = ArtifactContextHolder.getRepoDetail()!!.type == RepositoryType.OHPM
             if (ohpm) {
@@ -521,6 +536,7 @@ class NpmClientServiceImpl(
         artifactInfo: NpmArtifactInfo,
         npmPackageMetaData: NpmPackageMetaData
     ) {
+        NpmUtils.checkPackageMetaData(npmPackageMetaData)
         with(artifactInfo) {
             val fullPath = NpmUtils.getPackageMetadataPath(npmPackageMetaData.name!!)
             val inputStream = objectMapper.writeValueAsString(npmPackageMetaData).byteInputStream()
@@ -585,20 +601,22 @@ class NpmClientServiceImpl(
         }
 
         if (artifactFile == null) {
-            // 从package metadata中获取tarball数据
+            // tarball 已在反序列化时从 _attachments.data 流式落盘
             npmPackageMetaData.attachments!!.getMap().forEach { attachment ->
+                val tarball = attachment.value.artifactFile
+                    ?: throw NpmBadRequestException(
+                        "Missing attachments with tarball data, aborting upload for '${npmPackageMetaData.name}'"
+                    )
                 val fullPath = "${versionMetadata.name}/-/${attachment.key}"
-                val inputStream = tgzContentToInputStream(attachment.value.data!!)
-                val attachmentArtifactFile = inputStream.use { ArtifactFileFactory.build(it) }
                 handlerAttachmentsUpload(
                     userId,
                     artifactInfo,
                     attachment.value.contentType!!,
-                    attachment.value.length!!,
-                    attachmentArtifactFile,
+                    attachment.value.length ?: tarball.getSize().toInt(),
+                    tarball,
                     fullPath
                 )
-                attachmentArtifactFile.delete()
+                tarball.delete()
             }
             // 将attachments移除
             npmPackageMetaData.attachments = null
@@ -712,10 +730,6 @@ class NpmClientServiceImpl(
                 MetadataModel(key = metadata.key, value = metadata.value!!)
             }
         } ?: emptyList()
-    }
-
-    private fun tgzContentToInputStream(data: String): InputStream {
-        return Base64.decodeBase64(data).inputStream()
     }
 
     private fun handlerPackageDeprecated(

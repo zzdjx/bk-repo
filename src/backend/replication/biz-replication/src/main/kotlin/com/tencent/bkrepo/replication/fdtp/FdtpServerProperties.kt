@@ -27,6 +27,7 @@
 
 package com.tencent.bkrepo.replication.fdtp
 
+import org.springframework.beans.factory.InitializingBean
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 /**
@@ -65,5 +66,16 @@ data class FdtpServerProperties(
     /**
      * 连接认证密钥
      * */
-    var secretKey: String = "secret",
-)
+    var secretKey: String = "",
+) : InitializingBean {
+    override fun afterPropertiesSet() {
+        require(secretKey.toByteArray().size >= SECRET_KEY_MIN_LENGTH) {
+            "fdtp.server.secretKey must be at least $SECRET_KEY_MIN_LENGTH bytes; " +
+                "set BK_REPO_FDTP_SECRET_KEY or fdtp.server.secretKey"
+        }
+    }
+
+    companion object {
+        private const val SECRET_KEY_MIN_LENGTH = 64
+    }
+}

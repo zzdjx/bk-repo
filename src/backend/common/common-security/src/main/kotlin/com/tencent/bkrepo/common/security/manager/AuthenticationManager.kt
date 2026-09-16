@@ -27,6 +27,10 @@
 
 package com.tencent.bkrepo.common.security.manager
 
+import com.fasterxml.jackson.core.JsonProcessingException
+import com.google.common.cache.CacheBuilder
+import com.google.common.cache.CacheLoader
+import com.google.common.cache.LoadingCache
 import com.tencent.bkrepo.auth.api.ServiceAccountClient
 import com.tencent.bkrepo.auth.api.ServiceOauthAuthorizationClient
 import com.tencent.bkrepo.auth.api.ServiceTemporaryTokenClient
@@ -36,12 +40,12 @@ import com.tencent.bkrepo.auth.pojo.oauth.OauthToken
 import com.tencent.bkrepo.auth.pojo.token.TemporaryTokenInfo
 import com.tencent.bkrepo.auth.pojo.user.CreateUserRequest
 import com.tencent.bkrepo.auth.pojo.user.UserInfo
+import com.tencent.bkrepo.common.api.util.JsonUtils
 import com.tencent.bkrepo.common.security.exception.AuthenticationException
-import com.google.common.cache.CacheBuilder
-import com.google.common.cache.CacheLoader
-import com.google.common.cache.LoadingCache
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
+import java.time.Clock
+import java.util.Base64
 import java.util.Optional
 import java.util.concurrent.TimeUnit
 
@@ -58,6 +62,8 @@ class AuthenticationManager {
 
     @Autowired
     private lateinit var serviceTemporaryTokenClient: ServiceTemporaryTokenClient
+
+    internal var clock: Clock = Clock.systemUTC()
 
     private val oauthTokenCache: LoadingCache<String, Optional<OauthToken>> = CacheBuilder.newBuilder()
         .maximumSize(3000)
@@ -126,8 +132,33 @@ class AuthenticationManager {
         return serviceUserClient.userTokenById(userId).data
     }
 
+    /**
+     * 查询 OAuth access token。
+     * 结果缓存 1 分钟；命中后再读取 JWT `exp` 与当前时间比较，已过期则抛出 [AuthenticationException]。
+     */
     fun findOauthToken(accessToken: String): OauthToken? {
-        return oauthTokenCache.get(accessToken).orElse(null)
+        val token = oauthTokenCache.get(accessToken).orElse(null) ?: return null
+        val expirationEpochSecond = readJwtExp(token.accessToken) ?: return token
+        if (clock.instant().epochSecond >= expirationEpochSecond) {
+            oauthTokenCache.invalidate(accessToken)
+            throw AuthenticationException("Expired token")
+        }
+        return token
+    }
+
+    private fun readJwtExp(jwt: String): Long? {
+        val payload = jwt.split(".").getOrNull(1) ?: return null
+        val payloadBytes = try {
+            Base64.getUrlDecoder().decode(payload)
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+        val expNode = try {
+            JsonUtils.objectMapper.readTree(payloadBytes).get("exp")
+        } catch (_: JsonProcessingException) {
+            return null
+        } ?: return null
+        return if (expNode.isNumber) expNode.longValue() else null
     }
 
     /**

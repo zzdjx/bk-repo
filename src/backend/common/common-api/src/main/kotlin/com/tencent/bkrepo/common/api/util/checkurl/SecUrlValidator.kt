@@ -40,18 +40,11 @@ object SecUrlValidator {
     }
 
     private fun UrlCheckProperties.toConfig(): UrlCheckConfig {
-        return if (rules.isEmpty()) {
-            UrlCheckConfig(
-                schemes = schemes.toMutableList(),
-                mode = "regex",
-                rules = mutableListOf(".*"),
-            )
-        } else {
-            UrlCheckConfig(
-                schemes = schemes.toMutableList(),
-                mode = mode,
-                rules = rules.toMutableList(),
-            )
-        }
+        return UrlCheckConfig(
+            schemes = schemes.toMutableList(),
+            mode = mode,
+            rules = rules.toMutableList(),
+            blockPrivateIp = blockPrivateIp,
+        )
     }
 }

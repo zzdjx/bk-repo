@@ -74,10 +74,11 @@ class DevopsAuthConfig {
     var userIdSet: String = ""
 
     /**
-     * 允许默认密码校验
+     * 是否允许使用内置默认口令（password）登录。默认关闭。
+     * 本地开发请启用 `spring.profiles.active=dev`。
      */
-    @Value("\${auth.allowDefaultPwd: true}")
-    var allowDefaultPwd: Boolean = true
+    @Value("\${auth.allowDefaultPwd: false}")
+    var allowDefaultPwd: Boolean = false
 
 
 

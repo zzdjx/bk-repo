@@ -68,6 +68,7 @@ import com.tencent.bkrepo.huggingface.pojo.user.CommitDeletedFolder
 import com.tencent.bkrepo.huggingface.pojo.user.CommitFile
 import com.tencent.bkrepo.huggingface.pojo.user.CommitHeader
 import com.tencent.bkrepo.huggingface.pojo.user.CommitLfsFile
+import com.tencent.bkrepo.huggingface.util.HfHubUrls
 import com.tencent.bkrepo.repository.pojo.metadata.MetadataModel
 import com.tencent.bkrepo.repository.pojo.metadata.MetadataSaveRequest
 import com.tencent.bkrepo.repository.pojo.node.service.NodeCreateRequest
@@ -110,6 +111,8 @@ class HfUploadService(
             checkRepository(projectId, repoName)
             checkPackage(projectId, repoName, type, repoId)
             val sha1 = (SecurityUtils.getUserId() + LocalDateTime.now().toString()).sha1()
+            // 未支持 type 在写节点前失败，避免 commitUrl 拼路径时再抛
+            val commitUrl = HfHubUrls.commitUrl(type, repoId, sha1)
             val artifactInfo = HuggingfaceArtifactInfo(
                 projectId = projectId,
                 repoName = repoName,
@@ -135,7 +138,7 @@ class HfUploadService(
             }
             deleteLfsFiles(artifactInfo, commitLfsFiles)
             createPackageVersion(header, sha1)
-            return CommitResponse(true, sha1, "$type/$repoId/commit/$sha1")
+            return CommitResponse(true, sha1, commitUrl)
         }
     }
 

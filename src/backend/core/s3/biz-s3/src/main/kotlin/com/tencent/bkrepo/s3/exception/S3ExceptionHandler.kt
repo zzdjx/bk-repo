@@ -55,6 +55,15 @@ class S3ExceptionHandler {
     }
 
     /**
+     * 客户端错误
+     */
+    @ExceptionHandler(S3BadRequestException::class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    fun handleException(exception: S3BadRequestException) {
+        S3ExceptionCommonResponse.buildErrorResponse(exception)
+    }
+
+    /**
      * 资源不存在
      */
     @ExceptionHandler(S3NotFoundException::class)

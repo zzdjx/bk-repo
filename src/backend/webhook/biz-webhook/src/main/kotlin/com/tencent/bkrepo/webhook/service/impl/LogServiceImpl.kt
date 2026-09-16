@@ -34,6 +34,8 @@ import com.tencent.bkrepo.webhook.model.TWebHookLog
 import com.tencent.bkrepo.webhook.pojo.ListWebHookLogOption
 import com.tencent.bkrepo.webhook.pojo.WebHookLog
 import com.tencent.bkrepo.webhook.service.LogService
+import com.tencent.bkrepo.webhook.service.WebHookService
+import com.tencent.bkrepo.webhook.util.toWebHookLog
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
@@ -43,10 +45,12 @@ import java.time.LocalDateTime
 
 @Service
 class LogServiceImpl(
-    private val webHookLogDao: WebHookLogDao
+    private val webHookLogDao: WebHookLogDao,
+    private val webHookService: WebHookService
 ) : LogService {
 
-    override fun listLog(webHookId: String, option: ListWebHookLogOption): Page<WebHookLog> {
+    override fun listLog(userId: String, webHookId: String, option: ListWebHookLogOption): Page<WebHookLog> {
+        webHookService.getWebHook(userId, webHookId)
         with(option) {
             val startDateTime = LocalDateTime.parse(
                 startDate ?: LocalDateTime.now().minusMonths(3).toString()
@@ -64,24 +68,8 @@ class LogServiceImpl(
             val pageRequest = Pages.ofRequest(pageNumber, pageSize)
             val sort = Sort.by(Sort.Direction.DESC, TWebHookLog::requestTime.name)
             val totalRecords = webHookLogDao.count(query)
-            val records = webHookLogDao.find(query.with(sort).with(pageRequest)).map { transfer(it) }
+            val records = webHookLogDao.find(query.with(sort).with(pageRequest)).map { it.toWebHookLog() }
             return Pages.ofResponse(pageRequest, totalRecords, records)
         }
-    }
-
-    private fun transfer(tWebHookLog: TWebHookLog): WebHookLog {
-        return WebHookLog(
-            id = tWebHookLog.id!!,
-            webHookUrl = tWebHookLog.webHookUrl,
-            triggeredEvent = tWebHookLog.triggeredEvent,
-            requestHeaders = tWebHookLog.requestHeaders,
-            requestPayload = tWebHookLog.requestPayload,
-            status = tWebHookLog.status,
-            responseHeaders = tWebHookLog.responseHeaders,
-            responseBody = tWebHookLog.responseBody,
-            requestDuration = tWebHookLog.requestDuration,
-            requestTime = tWebHookLog.requestTime,
-            errorMsg = tWebHookLog.errorMsg
-        )
     }
 }

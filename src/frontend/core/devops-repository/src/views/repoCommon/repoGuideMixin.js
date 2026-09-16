@@ -1587,6 +1587,7 @@ export default {
                             title: this.$t('guideMacLinuxTitle'),
                             description: this.$t('guideMacLinuxDescription'),
                             codeList: [
+                                'export HF_HUB_DISABLE_XET=1',
                                 'export HF_HUB_ETAG_TIMEOUT=86400',
                                 'export HF_HUB_DOWNLOAD_TIMEOUT=86400',
                                 `export HF_ENDPOINT=${this.repoUrl}`,
@@ -1596,11 +1597,23 @@ export default {
                         {
                             title: this.$t('guideWindowsTitle'),
                             description: this.$t('guideWindowsDescription'),
+                            subTitle: 'CMD',
                             codeList: [
+                                'set HF_HUB_DISABLE_XET=1',
                                 'set HF_HUB_ETAG_TIMEOUT=86400',
                                 'set HF_HUB_DOWNLOAD_TIMEOUT=86400',
                                 `set HF_ENDPOINT=${this.repoUrl}`,
                                 `set HF_TOKEN=${this.accessToken}`
+                            ]
+                        },
+                        {
+                            subTitle: 'PowerShell',
+                            codeList: [
+                                '$env:HF_HUB_DISABLE_XET = "1"',
+                                '$env:HF_HUB_ETAG_TIMEOUT = "86400"',
+                                '$env:HF_HUB_DOWNLOAD_TIMEOUT = "86400"',
+                                `$env:HF_ENDPOINT = "${this.repoUrl}"`,
+                                `$env:HF_TOKEN = "${this.accessToken}"`
                             ]
                         }
                     ]
@@ -1617,8 +1630,8 @@ export default {
                         },
                         {
                             key: 'dependInputValue2',
-                            label: this.$t('targetPath'),
-                            placeholder: this.$t('targetPathPlaceholder'),
+                            label: this.$t('huggingfaceLocalPath'),
+                            placeholder: this.$t('huggingfaceLocalPathPlaceholder'),
                             methodFunctionName: 'SET_DEPEND_INPUT_VALUE2'
                         },
                         {
@@ -1652,7 +1665,7 @@ export default {
                         {
                             subTitle: this.$t('huggingfaceUse2'),
                             codeList: [
-                                `huggingface-cli repo create --organization ${(this.dependInputValue1 || this.packageName) === '<PACKAGE_NAME>' ? '<FIRST_PART_OF_PACKAGE_NAME>' : (this.dependInputValue1 || this.packageName).split('/')[0] || '<FIRST_PART_OF_PACKAGE_NAME>'} ${(this.dependInputValue1 || this.packageName) === '<PACKAGE_NAME>' ? '<SECOND_PART_OF_PACKAGE_NAME>' : (this.dependInputValue1 || this.packageName).split('/')[1] || '<SECOND_PART_OF_PACKAGE_NAME>'} --type ${this.dependInputValue3 || '<TYPE>'}`
+                                `hf repos create ${this.dependInputValue1 || this.packageName} --repo-type ${this.dependInputValue3 || '<TYPE>'}`
                             ]
                         },
                         {
@@ -1662,7 +1675,9 @@ export default {
                             subTitle: this.$t('huggingfaceUse1'),
                             codeList: [
                                 'from huggingface_hub import HfApi',
-                                'api = HfApi()',
+                                'import huggingface_hub.constants as hf_constants',
+                                'hf_constants.HF_HUB_DISABLE_XET = True',
+                                `api = HfApi()`,
                                 'api.upload_folder(',
                                 `    folder_path="${this.dependInputValue2 || '<LOCAL_PATH>'}",`,
                                 `    repo_id="${this.dependInputValue1 || this.packageName}",`,
@@ -1673,7 +1688,7 @@ export default {
                         {
                             subTitle: this.$t('huggingfaceUse2'),
                             codeList: [
-                                `huggingface-cli upload ${this.dependInputValue1 || this.packageName} ${this.dependInputValue2 || '<LOCAL_PATH>'} --repo-type=${this.dependInputValue3 || '<TYPE>'}`
+                                `hf upload ${this.dependInputValue1 || this.packageName} ${this.dependInputValue2 || '<LOCAL_PATH>'} --repo-type ${this.dependInputValue3 || '<TYPE>'}`
                             ]
                         }
                     ]
@@ -1724,7 +1739,7 @@ export default {
                         {
                             subTitle: this.$t('huggingfaceUse2'),
                             codeList: [
-                                `huggingface-cli download ${this.dependInputValue1 || this.packageName} --repo-type ${this.dependInputValue3 || '<TYPE>'} --revision ${this.dependInputValue2 || this.versionLabel}`
+                                `hf download ${this.dependInputValue1 || this.packageName} --repo-type ${this.dependInputValue3 || '<TYPE>'} --revision ${this.dependInputValue2 || this.versionLabel}`
                             ]
                         }
                     ]
@@ -1747,7 +1762,7 @@ export default {
                         {
                             subTitle: this.$t('huggingfaceUse2'),
                             codeList: [
-                                `huggingface-cli download ${this.packageName.split('/').slice(1).join('/') || ''} --repo-type ${this.packageKey.match(/:\/\/([^\/]+)/)?.[1] || ''} --revision ${this.versionLabel}`
+                                `hf download ${this.packageName.split('/').slice(1).join('/') || ''} --repo-type ${this.packageKey.match(/:\/\/([^\/]+)/)?.[1] || ''} --revision ${this.versionLabel}`
                             ]
                         }
                     ]

@@ -49,7 +49,15 @@ import jakarta.servlet.http.HttpServletRequest
 open class JwtAuthHandler(
     jwtAuthProperties: JwtAuthProperties,
     private val cryptoProperties: CryptoProperties,
-    private val authenticationManager: AuthenticationManager
+    private val authenticationManager: AuthenticationManager,
+    /**
+     * 是否校验内部 JWT。关闭后 Bearer 不再走 HMAC JWT 解析。
+     */
+    private val jwtEnabled: Boolean = true,
+    /**
+     * 是否允许把 Bearer 回落到 OAuth 公钥校验。关闭后 JWT 失败不再尝试 OAuth。
+     */
+    private val oauthEnabled: Boolean = true
 ) : HttpAuthHandler {
 
     private val signingKey = JwtUtils.createSigningKey(jwtAuthProperties.secretKey)
@@ -66,20 +74,26 @@ open class JwtAuthHandler(
         require(authCredentials is JwtAuthCredentials)
 
         val token = authCredentials.token
-        try {
-            return validateToken { JwtUtils.validateToken(signingKey, token).body.subject }
-        } catch (ignore: AuthenticationException) {
-            // do nothing
+        if (jwtEnabled) {
+            try {
+                return validateToken { JwtUtils.validateToken(signingKey, token).body.subject }
+            } catch (ignore: AuthenticationException) {
+                if (!oauthEnabled) {
+                    throw ignore
+                }
+            }
         }
-
-        return validateToken {
-            val key = RsaUtils.stringToPublicKey(cryptoProperties.publicKeyStr2048PKCS8)
-            val userId = JwtUtils.validateToken(key, token).body.subject
-            val scope = authenticationManager.findOauthToken(token)?.scope
-                ?: throw AuthenticationException("Invalid token")
-            request.setAttribute(AUTHORITIES_KEY, scope)
-            userId
+        if (oauthEnabled) {
+            return validateToken {
+                val key = RsaUtils.stringToPublicKey(cryptoProperties.publicKeyStr2048PKCS8)
+                val userId = JwtUtils.validateToken(key, token).body.subject
+                val scope = authenticationManager.findOauthToken(token)?.scope
+                    ?: throw AuthenticationException("Invalid token")
+                request.setAttribute(AUTHORITIES_KEY, scope)
+                userId
+            }
         }
+        throw AuthenticationException("Invalid token")
     }
 
     private fun validateToken(action: () -> String): String {

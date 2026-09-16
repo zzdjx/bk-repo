@@ -1,4 +1,4 @@
-FROM bkrepo/bkrepo-preview-base:0.0.2-jdk17
+FROM bkrepo/bkrepo-preview-base:0.0.3-jdk17
 
 LABEL maintainer="Tencent BlueKing Devops"
 

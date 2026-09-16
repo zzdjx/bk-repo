@@ -30,6 +30,9 @@ package com.tencent.bkrepo.huggingface.constants
 const val REPO_TYPE_MODEL = "model"
 const val REPO_TYPE_DATASET = "dataset"
 
+const val TREE_TYPE_FILE = "file"
+const val TREE_TYPE_DIRECTORY = "directory"
+
 const val ERROR_CODE_HEADER = "X-Error-Code"
 const val ERROR_MSG_HEADER = "X-Error-Message"
 

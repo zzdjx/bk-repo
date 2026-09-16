@@ -6,6 +6,7 @@ import com.tencent.bkrepo.job.backup.pojo.query.enums.BackupDataEnum
 import com.tencent.bkrepo.job.backup.pojo.record.BackupContext
 import com.tencent.bkrepo.job.backup.pojo.setting.BackupConflictStrategy
 import com.tencent.bkrepo.job.backup.service.BackupDataHandler
+import com.tencent.bkrepo.job.backup.util.BackupSecretCrypto
 import org.slf4j.LoggerFactory
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.query.Criteria
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component
 @Component
 class BackupUserDataHandler(
     private val mongoTemplate: MongoTemplate,
+    private val backupSecretCrypto: BackupSecretCrypto,
 ) : BackupDataHandler {
     override fun dataType(): BackupDataEnum {
         return BackupDataEnum.USER_DATA
@@ -30,12 +32,17 @@ class BackupUserDataHandler(
         return criteria
     }
 
+    override fun <T> preBackupDataHandler(record: T, backupDataEnum: BackupDataEnum, context: BackupContext) {
+        encryptUser(record as BackupUser)
+    }
+
     override fun <T> returnLastId(data: T): String {
         return (data as BackupUser).id!!
     }
 
     override fun <T> storeRestoreDataHandler(record: T, backupDataEnum: BackupDataEnum, context: BackupContext) {
         val record = record as BackupUser
+        decryptUser(record)
         val existRecord = findExistUser(record)
         if (existRecord != null) {
             if (context.task.backupSetting.conflictStrategy == BackupConflictStrategy.SKIP) {
@@ -71,9 +78,7 @@ class BackupUserDataHandler(
             .set(BackupUser::pwd.name, userInfo.pwd)
             .set(BackupUser::locked.name, userInfo.locked)
             .set(BackupUser::group.name, userInfo.group)
-            .set(BackupUser::pwd.name, userInfo.pwd)
             .set(BackupUser::email.name, userInfo.email)
-            .set(BackupUser::pwd.name, userInfo.pwd)
             .set(BackupUser::phone.name, userInfo.phone)
             .set(BackupUser::source.name, userInfo.source)
             .set(BackupUser::tokens.name, mergedTokens)
@@ -98,6 +103,16 @@ class BackupUserDataHandler(
             }
         }
         return result
+    }
+
+    private fun encryptUser(user: BackupUser) {
+        user.pwd = backupSecretCrypto.encrypt(user.pwd)
+        user.tokens = user.tokens.map { it.copy(id = backupSecretCrypto.encrypt(it.id)) }
+    }
+
+    private fun decryptUser(user: BackupUser) {
+        user.pwd = backupSecretCrypto.decrypt(user.pwd)
+        user.tokens = user.tokens.map { it.copy(id = backupSecretCrypto.decrypt(it.id)) }
     }
 
     companion object {

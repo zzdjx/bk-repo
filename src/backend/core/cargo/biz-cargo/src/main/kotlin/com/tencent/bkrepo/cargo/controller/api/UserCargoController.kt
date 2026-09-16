@@ -31,6 +31,8 @@
 
 package com.tencent.bkrepo.cargo.controller.api
 
+import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.auth.pojo.enums.ResourceType
 import com.tencent.bkrepo.common.api.constant.DEFAULT_PAGE_NUMBER
 import com.tencent.bkrepo.common.api.constant.DEFAULT_PAGE_SIZE
 import com.tencent.bkrepo.common.api.pojo.Page
@@ -56,6 +58,7 @@ import com.tencent.bkrepo.common.artifact.api.ArtifactPathVariable
 import com.tencent.bkrepo.common.artifact.audit.ActionAuditContent
 import com.tencent.bkrepo.common.artifact.audit.REPO_EDIT_ACTION
 import com.tencent.bkrepo.common.artifact.audit.REPO_RESOURCE
+import com.tencent.bkrepo.common.security.permission.Permission
 import com.tencent.bkrepo.common.service.otel.util.TraceHeaderUtils
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import io.swagger.v3.oas.annotations.Operation
@@ -80,6 +83,7 @@ class UserCargoController(
 
     @Operation(summary = "查询包的版本详情")
     @GetMapping(CARGO_VERSION_DETAIL)
+    @Permission(type = ResourceType.REPO, action = PermissionAction.READ)
     fun detailVersion(
         @RequestAttribute
         userId: String,
@@ -94,6 +98,7 @@ class UserCargoController(
 
     @Operation(summary = "查询版本依赖(deps)")
     @GetMapping(CARGO_VERSION_DEPS)
+    @Permission(type = ResourceType.REPO, action = PermissionAction.READ)
     fun queryDeps(
         @RequestAttribute
         userId: String,
@@ -108,6 +113,7 @@ class UserCargoController(
 
     @Operation(summary = "查询依赖当前版本的包(depts)")
     @GetMapping(CARGO_VERSION_DEPTS)
+    @Permission(type = ResourceType.REPO, action = PermissionAction.READ)
     fun queryDependents(
         @RequestAttribute
         userId: String,

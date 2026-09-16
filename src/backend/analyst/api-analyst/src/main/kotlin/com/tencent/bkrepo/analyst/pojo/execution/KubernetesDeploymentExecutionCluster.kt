@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 
 data class KubernetesDeploymentExecutionCluster(
     override val name: String,
+    override val description: String = "",
     @get:Schema(title = "使用的扫描器")
     val scanner: String,
     @get:Schema(title = "k8s配置")
@@ -17,7 +18,7 @@ data class KubernetesDeploymentExecutionCluster(
     val scaleThreshold: Int = 1,
     @get:Schema(title = "扫描器重试拉取任务次数，-1表示一直拉取直到拉取任务成功")
     val pullRetry: Int = 3,
-) : ExecutionCluster(name, type) {
+) : ExecutionCluster(name, type, description) {
     companion object {
         const val type: String = "k8s_deployment"
     }

@@ -178,7 +178,7 @@
                                     { clickEvent: () => showDetail(row), label: $t('detail') },
                                     row.folder && row.category !== 'REMOTE' && { clickEvent: () => calculateFolderSize(row), label: $t('realSize') },
                                     !row.folder && getBtnDisabled(row.name) && { clickEvent: () => handlerPreviewBasicsFile(row), label: $t('preview') }, //基本类型文件 eg: txt
-                                    !row.folder && row.category !== 'REMOTE' && baseCompressedType.includes(row.name.slice(-3)) && { clickEvent: () => handlerPreviewCompressedFile(row), label: $t('preview') }, //压缩文件 eg: rar|zip|gz|tgz|tar|jar
+                                    !row.folder && row.category !== 'REMOTE' && isCompressedFile(row.name) && { clickEvent: () => handlerPreviewCompressedFile(row), label: $t('preview') }, //压缩文件 eg: rar|zip|gz|tgz|tar|jar
                                     ...(!row.metadata.forbidStatus ? [
                                         (row.category !== 'REMOTE' || !row.folder) && { clickEvent: () => handlerDownload(row), label: $t('download') },
                                         ...(repoName !== 'pipeline' && row.category !== 'REMOTE' ? [
@@ -394,7 +394,7 @@
     import compressedFileTable from './compressedFileTable'
     import previewBasicFileDialog from './previewBasicFileDialog'
     import { Base64 } from 'js-base64'
-    import { isOutDisplayType, isText } from '@repository/utils/file'
+    import { isCode, isCompressed, isGlb, isMedia, isOutDisplayType, isText } from '@repository/utils/file'
     import {
         CLIENT_DOWNLOAD_CANCELLED,
         CLIENT_DOWNLOAD_FAILED,
@@ -455,7 +455,6 @@
                     limit: 20,
                     limitList: [10, 20, 50, 100]
                 },
-                baseCompressedType: ['rar', 'zip', 'gz', 'tgz', 'tar', 'jar'],
                 compressedData: [],
                 metadataLabelList: [],
                 debounceClickTreeNode: null,
@@ -652,7 +651,6 @@
                 'getFolderSize',
                 'getFileNumOfFolder',
                 'getMultiFileNumOfFolder',
-                'previewBasicFile',
                 'previewCompressedBasicFile',
                 'previewCompressedFileList',
                 'forbidMetadata',
@@ -1057,7 +1055,7 @@
                 })
             },
             previewFile (row) {
-                if (isOutDisplayType(row.fullPath)) {
+                if (this.canOpenFilePreview(row.fullPath)) {
                     const isLocal = this.localRepo
                     const typeParam = isLocal ? 'local/' : 'remote/'
                     let extraParam = 0
@@ -1824,60 +1822,7 @@
                 })
             },
             async handlerPreviewBasicsFile (row) {
-                if (this.enableMultipleTypeFilePreview) {
-                    this.previewFile(row)
-                    return
-                }
-                const isLocal = this.localRepo
-                this.$refs.previewBasicFileDialog.setDialogData({
-                    show: true,
-                    title: row.name,
-                    isLoading: true,
-                    repoName: row.repoName,
-                    repoType: isLocal ? 'local' : 'remote',
-                    extraParam: 0,
-                    filePath: row.fullPath
-                })
-                const res = await this.previewBasicFile({
-                    projectId: this.projectId,
-                    repoName: this.repoName,
-                    path: row.fullPath
-                }).catch(e => {
-                    if (e.status === 403) {
-                        this.getPermissionUrl({
-                            body: {
-                                projectId: this.projectId,
-                                action: 'READ',
-                                resourceType: 'NODE',
-                                uid: this.userInfo.name,
-                                repoName: this.repoName,
-                                path: row.fullPath
-                            }
-                        }).then(res => {
-                            if (res !== '') {
-                                this.showIamDenyDialog = true
-                                this.showData = {
-                                    projectId: this.projectId,
-                                    repoName: this.repoName,
-                                    action: 'READ',
-                                    path: row.fullPath,
-                                    url: res
-                                }
-                            } else {
-                                this.$bkMessage({
-                                    theme: 'error',
-                                    message: e.message
-                                })
-                            }
-                        })
-                    } else {
-                        this.$bkMessage({
-                            theme: 'error',
-                            message: e.message
-                        })
-                    }
-                })
-                this.$refs.previewBasicFileDialog.setData(typeof (res) === 'string' ? res : JSON.stringify(res))
+                this.previewFile(row)
             },
             async handlerPreviewCompressedFile (row) {
                 if (row.size > 1073741824) {
@@ -1963,8 +1908,18 @@
                 this.$refs.previewBasicFileDialog.setData(typeof (res) === 'string' ? res : JSON.stringify(res))
             },
 
+            canOpenFilePreview (path) {
+                return Boolean(isOutDisplayType(path) || (this.localRepo && (isMedia(path) || isGlb(path))))
+            },
+            isCompressedFile (path) {
+                return Boolean(isCompressed(path))
+            },
             getBtnDisabled (name) {
-                return this.enableMultipleTypeFilePreview ? isOutDisplayType(name) : isText(name)
+                if (this.enableMultipleTypeFilePreview) {
+                    return this.canOpenFilePreview(name)
+                }
+                const codeSuffix = isCode(name)
+                return Boolean(isText(name) || codeSuffix === 'ini' || codeSuffix === 'toml')
             },
             // 文件夹内部的搜索，根据文件名或文件夹名搜索
             inFolderSearchFile () {

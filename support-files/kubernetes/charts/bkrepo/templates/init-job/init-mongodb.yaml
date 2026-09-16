@@ -52,9 +52,9 @@ spec:
           command: ['/bin/sh','-c','/data/workspace/init-mongodb.sh']
           env:
             - name: BK_REPO_USERNAME
-              value: {{ .Values.common.username }}
+              value: {{ .Values.common.username | quote }}
             - name: BK_REPO_PASSWORD
-              value: {{ .Values.common.password }}
+              value: {{ include "bkrepo.admin.password" . | quote }}
             - name: BK_REPO_MONGODB_URI
               value: {{ include "bkrepo.mongodbUri" . }}
             - name: BK_REPO_BCS_ACCESSKEY

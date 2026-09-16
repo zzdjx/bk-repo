@@ -112,6 +112,22 @@ class PermissionHelper constructor(
         }
     }
 
+    /**
+     * 确认权限文档存在且属于[projectId]，避免仅校验请求体中的 projectId 后按 permissionId 跨项目改权限。
+     */
+    fun checkPermissionBelongToProject(permissionId: String, projectId: String) {
+        val permission = permissionDao.findFirstById(permissionId) ?: run {
+            logger.warn("update permission [$permissionId] not exist.")
+            throw ErrorCodeException(AuthMessageCode.AUTH_PERMISSION_NOT_EXIST)
+        }
+        if (permission.projectId != projectId) {
+            logger.warn(
+                "permission [$permissionId] project [${permission.projectId}] not match request project [$projectId]"
+            )
+            throw ErrorCodeException(AuthMessageCode.AUTH_PERMISSION_NOT_EXIST)
+        }
+    }
+
     fun checkPlatformProject(projectId: String?, scopeDesc: List<ScopeRule>?): Boolean {
         if (scopeDesc == null || projectId == null) return false
 

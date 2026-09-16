@@ -38,6 +38,7 @@ import com.tencent.bkrepo.common.artifact.audit.ActionAuditContent
 import com.tencent.bkrepo.common.artifact.audit.ActionAuditContent.NODE_USER_SHARE_DOWNLOAD_URL_CREATE_CONTENT
 import com.tencent.bkrepo.common.artifact.audit.NODE_RESOURCE
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
+import com.tencent.bkrepo.common.security.permission.Principal
 import com.tencent.bkrepo.common.security.permission.PrincipalType
 import com.tencent.bkrepo.common.security.util.SecurityUtils
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
@@ -104,6 +105,7 @@ class UserShareController(
     }
 
     @PostMapping("/approval/create/{shareId}")
+    @Principal(type = PrincipalType.GENERAL)
     fun createApproval(
         @PathVariable shareId: String
     ): Response<UserShareApprovalInfo> {
@@ -111,6 +113,7 @@ class UserShareController(
     }
 
     @GetMapping("/approval")
+    @Principal(type = PrincipalType.GENERAL)
     fun getApproval(
         @RequestParam approvalId: String?,
         @RequestParam shareId: String?,

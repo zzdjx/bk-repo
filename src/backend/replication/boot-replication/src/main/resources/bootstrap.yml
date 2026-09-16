@@ -2,4 +2,5 @@ spring.application.name: replication
 server.port: 25903
 fdtp.server.port: 25903
 fdtp.server.enabled: false
+fdtp.server.secretKey: ${BK_REPO_FDTP_SECRET_KEY:}
 request.trailing.slash.enable: false

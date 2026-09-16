@@ -134,7 +134,7 @@ class DeltaSyncService(
                 ArtifactInfo(
                     projectId,
                     repoName,
-                    URLDecoder.decode(oldFilePath, Charsets.UTF_8)
+                    decodeOldFilePath(oldFilePath)
                 ),
             )
             if (node == null || node.folder) {
@@ -245,14 +245,21 @@ class DeltaSyncService(
         if (bkBaseProperties.domain.isBlank()) {
             return 0.0
         }
-        val sql = "SELECT buildId,fileName,fileSize,genericUploadTime FROM ${bkBaseProperties.table} " +
-            "WHERE dtEventTimeStamp >= 0 AND dtEventTimeStamp <= ${System.currentTimeMillis()} " +
-            "AND networkSpeed < ${deltaProperties.allowUseMaxBandwidth} " +
-            "AND genericUploadTime > 0 " +
-            "AND taskId = '${metrics.taskId}' " +
-            "AND fileType = '${metrics.fileType}' " +
-            "AND buildId != '${metrics.buildId}' " +
-            "ORDER BY dtEventTimeStamp DESC LIMIT 100"
+        val sql = buildHistoryUploadSql(
+            table = bkBaseProperties.table,
+            now = System.currentTimeMillis(),
+            maxBandwidth = deltaProperties.allowUseMaxBandwidth,
+            taskId = metrics.taskId,
+            fileType = metrics.fileType,
+            buildId = metrics.buildId,
+        )
+        if (sql == null) {
+            logger.warn(
+                "Skip history upload speed query due to disallowed characters: " +
+                    "taskId[${metrics.taskId}], fileType[${metrics.fileType}], buildId[${metrics.buildId}]"
+            )
+            return 0.0
+        }
         val url = UrlFormatter.format(bkBaseProperties.domain, "/prod/v3/dataquery/query/")
         val query = QueryRequest(token = bkBaseProperties.token, sql = sql)
         val authHeader = toJson(
@@ -643,5 +650,34 @@ class DeltaSyncService(
             ArrayBlockingQueue(1024),
             ThreadFactoryBuilder().setNameFormat("BkSync-metrics-%d").build(),
         )
+
+        private val BKBASE_SQL_LITERAL = Regex("^[A-Za-z0-9._:-]+$")
+
+        /** 与客户端 URLEncoder 对齐：只解一层，`+` 为空格。授权校验必须走同一函数。 */
+        internal fun decodeOldFilePath(oldFilePath: String): String =
+            URLDecoder.decode(oldFilePath, Charsets.UTF_8)
+
+        internal fun sqlLiteral(value: String): String? = value.takeIf { BKBASE_SQL_LITERAL.matches(it) }
+
+        internal fun buildHistoryUploadSql(
+            table: String,
+            now: Long,
+            maxBandwidth: Int,
+            taskId: String,
+            fileType: String,
+            buildId: String,
+        ): String? {
+            val safeTaskId = sqlLiteral(taskId) ?: return null
+            val safeFileType = sqlLiteral(fileType) ?: return null
+            val safeBuildId = sqlLiteral(buildId) ?: return null
+            return "SELECT buildId,fileName,fileSize,genericUploadTime FROM $table " +
+                "WHERE dtEventTimeStamp >= 0 AND dtEventTimeStamp <= $now " +
+                "AND networkSpeed < $maxBandwidth " +
+                "AND genericUploadTime > 0 " +
+                "AND taskId = '$safeTaskId' " +
+                "AND fileType = '$safeFileType' " +
+                "AND buildId != '$safeBuildId' " +
+                "ORDER BY dtEventTimeStamp DESC LIMIT 100"
+        }
     }
 }

@@ -27,6 +27,9 @@
 
 package com.tencent.bkrepo.huggingface.controller
 
+import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.auth.pojo.enums.ResourceType
+import com.tencent.bkrepo.common.security.permission.Permission
 import com.tencent.bkrepo.huggingface.pojo.CommitRequest
 import com.tencent.bkrepo.huggingface.pojo.CommitResponse
 import com.tencent.bkrepo.huggingface.pojo.PreUploadRequest
@@ -45,6 +48,7 @@ import org.springframework.web.bind.annotation.RestController
 class HfUploadController(private val hfUploadService: HfUploadService) {
 
     @PostMapping("{projectId}/{repoName}/api/{type}s/{organization}/{name}/preupload/{revision}")
+    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun preUpload(
         @PathVariable projectId: String,
         @PathVariable repoName: String,
@@ -67,6 +71,7 @@ class HfUploadController(private val hfUploadService: HfUploadService) {
     }
 
     @PostMapping("/{projectId}/{repoName}/api/validate-yaml")
+    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun validateYaml(
         @PathVariable projectId: String,
         @PathVariable repoName: String,
@@ -78,6 +83,7 @@ class HfUploadController(private val hfUploadService: HfUploadService) {
 
 
     @PostMapping("/{projectId}/{repoName}/api/{type}s/{organization}/{name}/commit/{revision}")
+    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun commit(
         @PathVariable projectId: String,
         @PathVariable repoName: String,

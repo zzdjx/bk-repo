@@ -33,98 +33,47 @@ package com.tencent.bkrepo.common.security.crypto
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 
+/**
+ * 加解密密钥。代码里不保留默认值，未配置的密钥在被用到时才报错，见 [CryptoPropertiesInitializer]。
+ * helm 部署由 chart 渲染时随机生成，二进制部署用 scripts/gen-crypto-keys.sh 生成后填入。
+ * 公钥可留空，启动时从私钥推导。
+ */
 @ConfigurationProperties("security.crypto")
 data class CryptoProperties(
     var rsaAlgorithm: String = "RSA/ECB/PKCS1Padding",
-    // 公私钥必须配置，不然多实例部署时会存在无法解析出加密内容的问题
-    var privateKeyStr: String = "MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAMaoDhrj" +
-        "+Da2tGpawrE8et6vHBjprVj0UiCEza7JVymYTo9gd/pxNJRnbf6NehUL1WP8D6f5e2XZEDNfqXOqyEjPqOKtWIYI6ZLQeQIuAXgyGE5aP3" +
-        "/KVHFnxk+IuzcJtvqTAthfeuVXGel9ATP8hlEyDuCJe7/orBjIVYFk3p+PAgMBAAECgYAGYwLJFIk3YRpdzPszbYlZvXF" +
-        "+z4x2LqyxRPPD6c82lCH6dBSHZbpWBxk/NNc29AFxTHpIYTn5ZUgjDrFI+bWkqxvgqWS/oyfB6rxajIQjTeorsGvt" +
-        "/oumxQA7hvUE2XXLi218RXCURWgz/FZnvNhGhPYUOJWHoPeNlVx3V5mG8QJBAOzP9iSPcw1YJkv6uAgY4MRv1GqPu3NcMif" +
-        "+DQVPOZCNPq7ynSg15Zl3HMpl6jAZNJ/AUXRby3tLhO8WiWr6C8cCQQDWwKbhy4AZ5SDigFIPtk" +
-        "/655Uzprm2JaZSvGkBeOSB9EYCUC1ApKeImrufPZpSj3Ood/fbMyA6cl8Bswl2z335AkBTNa" +
-        "+ToSQYKEUspWhM0BEKdRD6cI65NkgZbVc96lybwkWoS2+VVXrbtdLT+4OSawjmqTj13dtd82c" +
-        "+a3jVsg65AkEAn1kiO0caDZzj8s2OlpQL8rwmDMZ45Lw5FwkwzWPcAsWzsQG3IlFK8uUFtRoryXkiM" +
-        "+6Y3nCoSFYXQxaLPjqmWQJBAI2tn28XAHFcSd0UnS8L6exJuMdjCw4huI5" +
-        "FOeZ0arf5NrWDFoKU30Crw2ozmRBcDvtjDVH9sn8oLC2ObCFItlM=",
-    var publicKeyStr: String = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDGqA4a4" +
-        "/g2trRqWsKxPHrerxwY6a1Y9FIghM2uyVcpmE6PYHf6cTSUZ23+jXoVC9Vj/A+n+Xtl2RAzX6lzqshIz6jirViGCOmS0HkCLgF4MhhOWj9" +
-        "/ylRxZ8ZPiLs3Cbb6kwLYX3rlVxnpfQEz/IZRMg7giXu/6KwYyFWBZN6fjwIDAQAB",
-
-    var privateKeyStr2048PKCS8: String = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCub16CL5c2snVi" +
-        "EC1JKi183lRHhEATysjIc0Glok8JYIOI5jBO5v6J+L5QaX8E1Bxlry3ajEsrYWwN" +
-        "GyXCFz4boSIOUFtkawi2pdVR/VRyTQR77bRLvBqqsO76Ro6h7CMXBkkbFerqCaU7" +
-        "qz8f2GbQM/D5S0obwUEMT2GaXzkC/FCKfnjvnxzM+dpRSQCf1YneKkdhQZKFTVUV" +
-        "0psstbx3mZCrYa31tDzTw9vtD6yd38e83+Np+PpVrIq923GqTOJBm1HrqbOPJ8PQ" +
-        "7F7jwpQqQ7EMsGwJ1L7YVMW5ubwmLqctwcGNo47XB/Tcfp1CIQaTDnRoTuqQ1qyG" +
-        "lnf7lDM9AgMBAAECggEAaHCH7nyeFgK9o2w6IQ9e0t+vKG63iuIkW1ge2xQWLHAb" +
-        "8TCZhfRqPKOxFyZDBdoV8o/zbWIIc73N2v8BGXefGR3d7SIRxksLmYgq8/8wu4r/" +
-        "f0/wXlQOx1pOi40JQ0vGKrf5t3zk/SGvS82ZavC/hjNDOY/pnDqWPs+cibgvw2fe" +
-        "20R1IR73EdXnEcEkorGRXqIwpmWciRj451wYqbdT0ihQgrZwa56bOxL8vD9N6Cyx" +
-        "Obec6HBApKJu4OpZhq5UaMXZPE6Rzjy6blf5zNwZZljo+7yAYRb1cbYkGtWyTBvT" +
-        "gJgTZbbebUQxfAl9vZYO380o9Tsj+Eclqv5TlQiQAQKBgQDk1Eh6jZOUnAcdwY0S" +
-        "FOibigfdsZrWdiQMQcnqbJmnHalu5hxHO6Dcml8DHHYzkwqIQ14y8aKNK4HtQr/e" +
-        "0M+4YFdyarn2YtUH4XVaMiV6L8v3cMBhAKJ7G9gGEpTY9Iy1jhoviTITtUxeUWwW" +
-        "+f9ez2Qc4CMReAubuQt8Ft7EAQKBgQDDJaq9gNucb9WZt+bYTZJDzMMD6ZwiIzTi" +
-        "ZbsKSefeCw3Rnx/4tdC09H3DiBjAOvvPNh64ikIhHR/O0GO4lA9mtCLXZKYvbmwO" +
-        "cGD/nNJr4sUhryk9RI6fg2QRr/dLyjRzuZWNAhlxjbCcDfxMXdusso1qYKdu41Bx" +
-        "8+KcuUN/PQKBgQCSzCiPDmId1RavnSpd7jHnDl7LdxOo/3NStaXOEMtlrR6z+UUs" +
-        "4XDp9NJ9EXY20d7Q2b8FmYQ5Yi7gwZCLZZPMaWnQCe2wxWh6vMVnDoKCZ0VHQPr5" +
-        "f8m8hnlINAVvRTs7gaUE19PbVtReMYfRGaIc9Zj4+UUmAMgZp1VZzuYsAQKBgDo9" +
-        "eJp75Y7nlYD98IgnhnpzltQJGU7a4QKcR9kHO4r6E5K3AcyxPmty+EGt0W01bUdn" +
-        "KH38zUWisoZ/jPNeRMZrBmbwI+TN+LPKeDhxLh+Cm0C1TQJ6/nG+vdPFh3F4FHVh" +
-        "Mq/Vq5BHMCkyx1RnQpNk6m2QEQg4ER8hIUWSyQElAoGBANTpY5npwCDTopEDXcmH" +
-        "8eZIQbMU69UGzLiIIvfgPdHcFIpDZ0FfHdeL21QeCdnySI6reXQ8l1dd555fMT7K" +
-        "BdsQJqmRZzVQiDMQR7DVe+b5WI98KMAV74VVojoZ6jVwypIqlimezJqPP4Z/SkJK" +
-        "WGOwDexLmIqrfXE8IU6bQz3Y",
-    var publicKeyStr2048PKCS8: String = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArm9egi+XNrJ1YhAtSSot" +
-        "fN5UR4RAE8rIyHNBpaJPCWCDiOYwTub+ifi+UGl/BNQcZa8t2oxLK2FsDRslwhc+" +
-        "G6EiDlBbZGsItqXVUf1Uck0Ee+20S7waqrDu+kaOoewjFwZJGxXq6gmlO6s/H9hm" +
-        "0DPw+UtKG8FBDE9hml85AvxQin54758czPnaUUkAn9WJ3ipHYUGShU1VFdKbLLW8" +
-        "d5mQq2Gt9bQ808Pb7Q+snd/HvN/jafj6VayKvdtxqkziQZtR66mzjyfD0Oxe48KU" +
-        "KkOxDLBsCdS+2FTFubm8Ji6nLcHBjaOO1wf03H6dQiEGkw50aE7qkNashpZ3+5Qz" +
-        "PQIDAQAB",
-    var privateKeyStr2048PKCS1: String = """
-        MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCyg0rVBmt1qWM9
-        iSilwRXWobCQ94jRqS4cSufekk0ZTt/D9p2CzCNnL40q5EGGjapTrCcE15vQJ/2K
-        1IfVqMbn8mT2z6IsF8J69dkz1nIhVAHBSL4AQ0toJr3/5C154o6NPo54LvyIZSHM
-        3Hcpmvg3yzfJQH1O1zzZOLWl+zAVwXBr3TG4Ospduj3hyonIXkk1y7Zo7IlL3K5j
-        baDpOuazm4LuAQTnYv6AfrqfBrMmyJ9aMi88/qZ7BBCW8ukxIPJHif6EMfYHHznN
-        qisI+2t02+cku8S1FfnHaDWAhvkdTBsFUt7Fvv0NykEVYROe2u/2KGeifsWRSfPh
-        kMjnCUOPAgMBAAECggEAFnHLht03xaN2htYn9i9Av6u0t4Vn/nR3B7ejT6i1aOkx
-        2UG4rCleiirAZRQt6O0G7V5HyaQSQynEByCRs5t05tTjPOT+Tuzt1ufyV0IvN2GI
-        lvS+buoHISE94l6eGSUTJ08mOpYtyjhs94UAtop1iw5SBUvGdZM6Y1VuAWCDuzhR
-        Dnx7LMg5W7TCOuBoHWShEk4M2Su6elYLZ+VXMGDsIvy8jcmDWmdZFrXiK0/aMKqA
-        WnEjc3R5HAssDIJsckTp0a8MP3vOKF7vD5Bi15HDphpVWj3DXgOyCeOKd5mwFz5m
-        AuZ0kpM//HeRHpMFNN9dc7kVoPVgf1czlW4jleKiAQKBgQDtIf1wXAlVuLrU5Rmh
-        doZb9CUw1Vxcjt6YRUBAj9d7pYTHlWmnT+OmVCaeutXz8YaoSCpWrswtilp/hwZP
-        cv/+FfeAuD0JmOv2e26ctoCtFxcX9aO1gS54OQjRwyQKNRBf/Pog7bhc/wILt1jT
-        edLXZT2K82RK+Cf711NIokuZUQKBgQDAt09MwP8PHdky0N2Na8sM2sfaWqD2XghY
-        yqS0rSTkuFBogKq3cWLm5copxc4nFUxfTiHCinirIT5xAozhrLA8kD2Nv8bEiKLg
-        co99LI7GkoXSBjxrysypZe9o3JLpaQagpYk5VopGF/34CObUCA77o5qKWkG0HR5m
-        AD62U3XW3wKBgQDf+vD1xhkTHM9r85GIDvnNtQfD3mPFETVzQkX0NWllYuvN0HTh
-        EfaGzolD+FnKduGn5bIH+kbk5P+h4Rm2xXrCtmD29g7BF+4Y/HF4GHHmDB9GBEDD
-        WedYqxaHevh5o7F52OsxWxh+zmdSRbXi2fiqdvfwXQDoRwkNOU9zFciuYQKBgHvN
-        Bsdi8DdQ0HgBj2JLTgy6+0o9kEvUin4n5/kdhabc9OK9TW49C/ESy3VcWhvnZcGP
-        2sYz2GLvH0LQBZrwKeMuMiy+dz1IHYIcditOlYXhGNCcKvKAPEvSbSMrF8GUM6q9
-        zNKl0nxG62MMrOSnLKDhL+UTKERBtIaIP8E3Cmt3AoGBAOHWQvp7N8y0PaVmHfwb
-        t96safaDoJoFw4YavxaTKiegvic6JzJf5mE0b5MejAN3JqY7qbMFYq4rBblXRilq
-        dAZktLBcn1Wqgx4Cqysbjtu9KqeV42sojqa7grBwH/wqVT1IVMlUxG2/Yj8Mtd0Q
-        Quj28hbWINpHLnF5gegRPGc6
-    """.trimIndent(),
-    var publicKeyStr2048PKCS1: String = """
-        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsoNK1QZrdaljPYkopcEV
-        1qGwkPeI0akuHErn3pJNGU7fw/adgswjZy+NKuRBho2qU6wnBNeb0Cf9itSH1ajG
-        5/Jk9s+iLBfCevXZM9ZyIVQBwUi+AENLaCa9/+QteeKOjT6OeC78iGUhzNx3KZr4
-        N8s3yUB9Ttc82Ti1pfswFcFwa90xuDrKXbo94cqJyF5JNcu2aOyJS9yuY22g6Trm
-        s5uC7gEE52L+gH66nwazJsifWjIvPP6mewQQlvLpMSDyR4n+hDH2Bx85zaorCPtr
-        dNvnJLvEtRX5x2g1gIb5HUwbBVLexb79DcpBFWETntrv9ihnon7FkUnz4ZDI5wlD
-        jwIDAQAB
-    """.trimIndent(),
-
-    // Key长度 16/24/32Bytes
-    var aesKey: String = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    // IV长度 16Bytes
-    var aesIv: String = "aaaaaaaaaaaaaaaa"
+    /**
+     * RSA 私钥，单行 Base64。登录密码加解密，多实例须同一套。
+     * 不限位数，存量集群多是 1024，chart 与 gen-crypto-keys.sh 现在统一生成 2048。
+     */
+    var privateKeyStr: String = "",
+    /**
+     * RSA 公钥，单行 Base64。
+     */
+    var publicKeyStr: String = "",
+    /**
+     * RSA PKCS#8 私钥，单行 Base64。OAuth/OIDC JWT 签名走 RS256，
+     * jjwt 按 RFC 7518 要求密钥不低于 2048 位，否则签名时抛 WeakKeyException。
+     */
+    var privateKeyStr2048PKCS8: String = "",
+    /**
+     * RSA PKCS#8 公钥，单行 Base64。
+     */
+    var publicKeyStr2048PKCS8: String = "",
+    /**
+     * RSA 2048 私钥，单行 PKCS#8 Base64（字段名历史遗留，不是 PKCS#1）。
+     * 制品传输 crypt key（artifact.crypt.enabled）。
+     */
+    var privateKeyStr2048PKCS1: String = "",
+    /**
+     * RSA 2048 公钥，单行 X.509 Base64。
+     */
+    var publicKeyStr2048PKCS1: String = "",
+    /**
+     * AES 密钥，16/24/32 字节。代理密钥加解密。
+     */
+    var aesKey: String = "",
+    /**
+     * AES IV，16 字节。
+     */
+    var aesIv: String = ""
 )

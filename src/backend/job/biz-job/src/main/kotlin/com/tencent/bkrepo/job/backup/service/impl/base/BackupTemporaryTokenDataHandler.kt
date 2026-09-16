@@ -4,6 +4,7 @@ import com.tencent.bkrepo.job.backup.pojo.query.common.BackupTemporaryToken
 import com.tencent.bkrepo.job.backup.pojo.query.enums.BackupDataEnum
 import com.tencent.bkrepo.job.backup.pojo.record.BackupContext
 import com.tencent.bkrepo.job.backup.service.BackupDataHandler
+import com.tencent.bkrepo.job.backup.util.BackupSecretCrypto
 import org.slf4j.LoggerFactory
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.query.Criteria
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component
 @Component
 class BackupTemporaryTokenDataHandler(
     private val mongoTemplate: MongoTemplate,
+    private val backupSecretCrypto: BackupSecretCrypto,
 ) : BackupDataHandler {
     override fun dataType(): BackupDataEnum {
         return BackupDataEnum.TEMPORARY_TOKEN_DATA
@@ -31,15 +33,20 @@ class BackupTemporaryTokenDataHandler(
         return (data as BackupTemporaryToken).id!!
     }
 
+    override fun <T> preBackupDataHandler(record: T, backupDataEnum: BackupDataEnum, context: BackupContext) {
+        val token = record as BackupTemporaryToken
+        token.token = backupSecretCrypto.encrypt(token.token)
+    }
+
     override fun <T> storeRestoreDataHandler(record: T, backupDataEnum: BackupDataEnum, context: BackupContext) {
         val record = record as BackupTemporaryToken
+        record.token = backupSecretCrypto.decrypt(record.token)
         val existedRecord = findExistTemporaryToken(record)
         if (existedRecord == null) {
             mongoTemplate.save(record, BackupDataEnum.TEMPORARY_TOKEN_DATA.collectionName)
             logger.info("Create token ${record.id} success!")
         }
     }
-
 
     private fun findExistTemporaryToken(record: BackupTemporaryToken): BackupTemporaryToken? {
         val existTokenQuery = Query(Criteria.where(BackupTemporaryToken::id.name).isEqualTo(record.id))

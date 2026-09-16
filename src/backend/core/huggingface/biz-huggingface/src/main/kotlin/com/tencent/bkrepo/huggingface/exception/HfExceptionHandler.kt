@@ -30,8 +30,6 @@ package com.tencent.bkrepo.huggingface.exception
 import com.tencent.bkrepo.common.service.log.LoggerHolder
 import com.tencent.bkrepo.common.service.otel.util.TraceHeaderUtils
 import com.tencent.bkrepo.common.service.util.HttpContextHolder
-import com.tencent.bkrepo.huggingface.constants.ERROR_CODE_HEADER
-import com.tencent.bkrepo.huggingface.constants.ERROR_MSG_HEADER
 import okhttp3.internal.format
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
@@ -41,23 +39,25 @@ class HfExceptionHandler {
 
     @ExceptionHandler(HfException::class)
     fun response(exception: HfException) {
-        val response = HttpContextHolder.getResponse()
         TraceHeaderUtils.setResponseHeader()
-        response.status = exception.status.value
-        response.setHeader(ERROR_CODE_HEADER, exception.errorCode.code)
-        response.setHeader(
-            ERROR_MSG_HEADER,
-            format(exception.errorCode.messageFormat, *exception.params.toList().toTypedArray())
+        val errorMessage = format(exception.errorCode.messageFormat, *exception.params.toList().toTypedArray())
+        HfErrorResponse.write(
+            response = HttpContextHolder.getResponse(),
+            status = exception.status.value,
+            errorCode = exception.errorCode.code,
+            errorMessage = errorMessage,
         )
     }
 
     @ExceptionHandler(HfApiException::class)
     fun response(exception: HfApiException) {
-        val response = HttpContextHolder.getResponse()
         TraceHeaderUtils.setResponseHeader()
-        response.status = exception.status
-        response.setHeader(ERROR_CODE_HEADER, exception.errorCode)
-        response.setHeader(ERROR_MSG_HEADER, exception.errorMessage)
         LoggerHolder.logException(exception, exception.errorMessage, false)
+        HfErrorResponse.write(
+            response = HttpContextHolder.getResponse(),
+            status = exception.status,
+            errorCode = exception.errorCode,
+            errorMessage = exception.errorMessage,
+        )
     }
 }

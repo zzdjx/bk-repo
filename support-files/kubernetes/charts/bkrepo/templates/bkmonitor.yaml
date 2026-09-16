@@ -27,7 +27,7 @@ kind: Secret
 metadata:
   name: bkrepo-basic-auth
 data:
-  password: {{ .Values.common.password | b64enc }}
+  password: {{ include "bkrepo.admin.password" . | b64enc }}
   user: {{ .Values.common.username | b64enc }}
 type: Opaque
 

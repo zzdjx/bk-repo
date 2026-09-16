@@ -41,5 +41,6 @@ import org.springframework.data.mongodb.core.mapping.Document
 data class TMongoDistributedLock(
     var key: String,
     var value: Int,
-    var expireTime: Long
+    var expireTime: Long,
+    var owner: String? = null
 )

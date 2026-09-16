@@ -3,7 +3,7 @@ Thank you for installing {{ .Chart.Name }}.
 Your release is named {{ .Release.Name }}.
 
 {{- $username := .Values.common.username | toString }}
-{{- $password := .Values.common.password | toString }}
+{{- $password := include "bkrepo.admin.password" . }}
 
 验证步骤:
 

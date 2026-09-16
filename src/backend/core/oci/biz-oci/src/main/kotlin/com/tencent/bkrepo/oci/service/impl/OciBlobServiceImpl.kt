@@ -126,7 +126,7 @@ class OciBlobServiceImpl(
             val domain = ociOperationService.getReturnDomain(HttpContextHolder.getRequest())
             val ociDigest = OciDigest(mount)
             val (mountProjectId, mountRepoName) = splitRepoInfo(from) ?: Pair(projectId, repoName)
-            if (mountProjectId != projectId && mountRepoName != repoName) {
+            if (mountProjectId != projectId || mountRepoName != repoName) {
                 try {
                     permissionManager.checkRepoPermission(
                         action = PermissionAction.READ,

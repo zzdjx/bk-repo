@@ -55,6 +55,7 @@ abstract class AbstractEncryptorFileStorage<Credentials : StorageCredentials, Cl
         if (!storageCredentials.encrypt.enabled) {
             return super.store(path, name, file, storageCredentials, storageClass)
         }
+        storageCredentials.encrypt.requireKeyIfEnabled()
         val encryptedFile = createTempFile(storageCredentials)
         val newName = getEncryptName(name, storageCredentials)
         try {
@@ -77,7 +78,7 @@ abstract class AbstractEncryptorFileStorage<Credentials : StorageCredentials, Cl
         if (!storageCredentials.encrypt.enabled) {
             return super.store(path, name, inputStream, size, storageCredentials)
         }
-        val secretKey = storageCredentials.encrypt.key
+        val secretKey = storageCredentials.encrypt.requiredKey()
         val cipherFactory = CipherFactoryProducer.getFactory(storageCredentials.encrypt.algorithm)
         cipherFactory.getEncryptInputStream(inputStream, secretKey).use {
             val newSize = size + IV_LENGTH
@@ -94,7 +95,7 @@ abstract class AbstractEncryptorFileStorage<Credentials : StorageCredentials, Cl
         val size = range.length + IV_LENGTH
         val newName = getEncryptName(name, storageCredentials)
         val encryptedInput = super.load(path, newName, Range.full(size), storageCredentials) ?: return null
-        val key = storageCredentials.encrypt.key
+        val key = storageCredentials.encrypt.requiredKey()
         val cipherFactory = CipherFactoryProducer.getFactory(storageCredentials.encrypt.algorithm)
         val inputStream = cipherFactory.getPlainInputStream(encryptedInput, key)
         if (range.start > 0) {
@@ -131,6 +132,8 @@ abstract class AbstractEncryptorFileStorage<Credentials : StorageCredentials, Cl
             require(!toCredentials.encrypt.enabled)
             return super.copy(fromPath, fromName, toPath, toName, fromCredentials, toCredentials)
         }
+        fromCredentials.encrypt.requireKeyIfEnabled()
+        toCredentials.encrypt.requireKeyIfEnabled()
         require(
             toCredentials.encrypt.enabled &&
                     fromCredentials.encrypt.algorithm == toCredentials.encrypt.algorithm &&
@@ -152,7 +155,7 @@ abstract class AbstractEncryptorFileStorage<Credentials : StorageCredentials, Cl
         file: File,
         newFile: File,
     ): Long {
-        val key = storageCredentials.encrypt.key
+        val key = storageCredentials.encrypt.requiredKey()
         val cipherFactory = CipherFactoryProducer.getFactory(storageCredentials.encrypt.algorithm)
         cipherFactory.getEncryptOutputStream(newFile.outputStream(), key).use { output ->
             file.inputStream().use { input ->

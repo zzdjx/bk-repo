@@ -56,10 +56,12 @@ data class ClusterNodeInfo(
     @JsonIgnore
     val password: String?,
     @get:Schema(title = "集群的证书，独立集群需要此字段")
+    @JsonIgnore
     val certificate: String?,
     @get:Schema(title = "集群appId", required = false)
     var appId: String? = null,
     @get:Schema(title = "集群访问凭证", required = false)
+    @JsonIgnore
     var accessKey: String? = null,
     @get:Schema(title = "集群密钥", required = false)
     @JsonIgnore

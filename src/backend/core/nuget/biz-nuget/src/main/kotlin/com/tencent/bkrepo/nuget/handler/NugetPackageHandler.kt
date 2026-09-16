@@ -18,6 +18,7 @@ import com.tencent.bkrepo.nuget.pojo.nuspec.DependencyGroup
 import com.tencent.bkrepo.nuget.pojo.nuspec.FrameworkAssembly
 import com.tencent.bkrepo.nuget.pojo.nuspec.Reference
 import com.tencent.bkrepo.nuget.pojo.nuspec.ReferenceGroup
+import com.tencent.bkrepo.nuget.util.NugetUtils
 import com.tencent.bkrepo.nuget.util.NugetV3RegistrationUtils
 import com.tencent.bkrepo.repository.pojo.metadata.MetadataModel
 import com.tencent.bkrepo.repository.pojo.packages.PackageType
@@ -63,11 +64,12 @@ class NugetPackageHandler {
                 val versionExtension = mutableMapOf<String, Any>(
                     PACKAGE to this.toJsonString()
                 )
+                val packageId = NugetUtils.normalizePackageId(id)
                 val packageVersionCreateRequest = PackageVersionCreateRequest(
                     projectId = projectId,
                     repoName = repoName,
-                    packageName = id,
-                    packageKey = PackageKeys.ofNuget(id.toLowerCase()),
+                    packageName = packageId,
+                    packageKey = PackageKeys.ofNuget(packageId.toLowerCase()),
                     packageType = PackageType.NUGET,
                     packageDescription = description,
                     versionName = version,

@@ -32,6 +32,7 @@ import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.api.util.readJsonString
 import com.tencent.bkrepo.common.api.util.toJsonString
 import com.tencent.bkrepo.common.notify.api.NotifyChannelCredential
+import com.tencent.bkrepo.common.notify.api.NotifyChannelSecrets
 import com.tencent.bkrepo.common.notify.model.TNotifyChannelCredential
 import com.tencent.bkrepo.common.notify.repository.NotifyChannelCredentialRepository
 import org.springframework.stereotype.Service
@@ -84,12 +85,14 @@ class NotifyChannelCredentialService(
                 throw ErrorCodeException(CommonMessageCode.PARAMETER_INVALID)
             }
 
-            old.default = default
-            old.credential = notifyChannelCredential.toJsonString()
+            val existing: NotifyChannelCredential = old.credential.readJsonString()
+            val merged = NotifyChannelSecrets.keepExisting(notifyChannelCredential, existing)
+            old.default = merged.default
+            old.credential = merged.toJsonString()
             old.lastModifiedBy = userId
             old.lastModifiedDate = LocalDateTime.now()
             notifyChannelCredentialRepository.save(old)
-            return notifyChannelCredential
+            return merged
         }
     }
 

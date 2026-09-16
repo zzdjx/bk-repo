@@ -1,0 +1,3 @@
+auth:
+  ## 仅 dev profile 允许 init-data.js 中的默认口令 password 登录
+  allowDefaultPwd: true

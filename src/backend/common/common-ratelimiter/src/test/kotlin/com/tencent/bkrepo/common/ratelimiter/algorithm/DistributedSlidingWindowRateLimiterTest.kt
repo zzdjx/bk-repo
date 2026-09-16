@@ -66,11 +66,12 @@ class DistributedSlidingWindowRateLimiterTest : DistributedTest() {
     @Test
     fun testTryAcquireOnMultiThreads() {
         val key = KEY + "testTryAcquireOnMultiThreads"
-        val ratelimiter = DistributedSlidingWindowRateLimiter(key, 5, Duration.ofSeconds(1), redisTemplate)
+        // 窗口必须远大于并发耗时，否则 Redis TIME 跨窗口会让 successNum > limit
+        val ratelimiter = DistributedSlidingWindowRateLimiter(key, 5, Duration.ofMinutes(1), redisTemplate)
         val successNum = java.util.concurrent.atomic.AtomicInteger(0)
         val failedNum = java.util.concurrent.atomic.AtomicInteger(0)
         val errorNum = java.util.concurrent.atomic.AtomicInteger(0)
-        val readers = Runtime.getRuntime().availableProcessors()
+        val readers = 8
         val countDownLatch = CountDownLatch(readers)
         val elapsedTime = measureTimeMillis {
             repeat(readers) {

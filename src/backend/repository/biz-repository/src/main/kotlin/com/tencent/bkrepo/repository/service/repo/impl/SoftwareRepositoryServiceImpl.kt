@@ -1,6 +1,7 @@
 package com.tencent.bkrepo.repository.service.repo.impl
 
 import com.tencent.bkrepo.common.api.pojo.Page
+import com.tencent.bkrepo.common.api.util.EscapeUtils
 import com.tencent.bkrepo.common.api.util.readJsonString
 import com.tencent.bkrepo.common.artifact.constant.PUBLIC_PROXY_PROJECT
 import com.tencent.bkrepo.common.artifact.pojo.RepositoryCategory
@@ -8,6 +9,7 @@ import com.tencent.bkrepo.common.artifact.pojo.RepositoryType
 import com.tencent.bkrepo.common.mongo.dao.util.Pages
 import com.tencent.bkrepo.common.metadata.dao.repo.RepositoryDao
 import com.tencent.bkrepo.common.metadata.model.TRepository
+import com.tencent.bkrepo.common.metadata.util.RepositoryServiceHelper.Companion.maskConfigurationPwd
 import com.tencent.bkrepo.repository.pojo.repo.RepositoryInfo
 import com.tencent.bkrepo.repository.service.repo.SoftwareRepositoryService
 import org.springframework.data.domain.Sort
@@ -31,7 +33,7 @@ class SoftwareRepositoryServiceImpl(
         type: RepositoryType?
     ): Page<RepositoryInfo> {
         val query = buildListQuery(projectId, name, type, includeGeneric = false)
-        val pageRequest = Pages.ofRequest(pageNumber, pageSize)
+        val pageRequest = Pages.ofRequest(pageNumber, pageSize.coerceIn(1, MAX_PAGE_SIZE))
         val totalRecords = repositoryDao.count(query)
         val records = repositoryDao.find(query.with(pageRequest)).map { convertToInfo(it)!! }
         return Pages.ofResponse(pageRequest, totalRecords, records)
@@ -72,11 +74,15 @@ class SoftwareRepositoryServiceImpl(
             criteria.and(TRepository::type).isEqualTo(repoType)
         }
         criteria.orOperator(publicCriteria, systemCriteria)
-        repoName?.takeIf { it.isNotBlank() }?.apply { criteria.and(TRepository::name).regex("^$this") }
+        repoName?.takeIf { it.isNotBlank() }?.let {
+            criteria.and(TRepository::name).regex("^${EscapeUtils.escapeRegex(it)}")
+        }
         return Query(criteria).with(Sort.by(Sort.Direction.DESC, TRepository::createdDate.name))
     }
 
     companion object {
+        private const val MAX_PAGE_SIZE = 1000
+
         private fun convertToInfo(tRepository: TRepository?): RepositoryInfo? {
             return tRepository?.let {
                 RepositoryInfo(
@@ -85,7 +91,7 @@ class SoftwareRepositoryServiceImpl(
                     category = it.category,
                     public = it.public,
                     description = it.description,
-                    configuration = it.configuration.readJsonString(),
+                    configuration = maskConfigurationPwd(it.configuration.readJsonString()),
                     storageCredentialsKey = it.credentialsKey,
                     projectId = it.projectId,
                     createdBy = it.createdBy,

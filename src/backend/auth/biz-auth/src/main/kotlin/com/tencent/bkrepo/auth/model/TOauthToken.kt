@@ -47,8 +47,9 @@ import java.time.Instant
     CompoundIndex(name = ACCESS_TOKEN_IDX, def = ACCESS_TOKEN_IDX_DEF, background = true),
     CompoundIndex(name = USER_IDX, def = USER_IDX_DEF, background = true),
     CompoundIndex(name = ACCOUNT_ID_ACCESS_TOKEN_IDX, def = ACCOUNT_ID_ACCESS_TOKEN_IDX_DEF, background = true),
-    CompoundIndex(name = ACCOUNT_ID_USER_ID_IDX, def = ACCOUNT_ID_USER_ID_IDX_DEF, background = true),
-)data class TOauthToken(
+    CompoundIndex(name = ACCOUNT_ID_USER_ID_IDX, def = ACCOUNT_ID_USER_ID_IDX_DEF, background = true)
+)
+data class TOauthToken(
     val id: String? = null,
     var accessToken: String,
     var refreshToken: String?,

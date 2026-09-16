@@ -49,6 +49,7 @@ import org.springframework.stereotype.Component
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.OutputStream
@@ -66,6 +67,11 @@ class OfficeFileConverter(
 
     companion object {
         private val logger: Logger = LoggerFactory.getLogger(OfficeFileConverter::class.java)
+        private val OOXML_SUFFIXES = setOf(
+            "pptx", "pptm", "potx", "potm", "ppsx", "ppsm",
+            "docx", "docm", "dotx", "dotm",
+            "xlsx", "xlsm", "xltx", "xltm"
+        )
     }
 
     @Throws(OfficeException::class)
@@ -114,14 +120,39 @@ class OfficeFileConverter(
             "FilterData" to filterData
         )
 
-        // 使用 LocalConverter 构建转换器
-        val builder = LocalConverter.builder().storeProperties(customProperties)
+        val inputFile = File(inputFilePath)
+        val convertInput = prepareLibreOfficeInput(inputFile, fileAttribute.suffix)
+        try {
+            LocalConverter.builder()
+                .storeProperties(customProperties)
+                .build()
+                .convert(convertInput)
+                .to(File(outputFilePath))
+                .execute()
+        } finally {
+            if (convertInput != inputFile && !convertInput.delete()) {
+                logger.warn("Failed to delete normalized office file [{}]", convertInput.path)
+            }
+        }
+    }
 
-        // 执行文件转换
-        builder.build()
-            .convert(File(inputFilePath))
-            .to(File(outputFilePath))
-            .execute()
+    private fun prepareLibreOfficeInput(file: File, suffix: String?): File {
+        val ext = suffix?.lowercase().orEmpty()
+        if (ext !in OOXML_SUFFIXES) {
+            return file
+        }
+        if (!OfficeZipNormalizer.hasBackslashEntryNames(file)) {
+            return file
+        }
+        val normalized = File(file.parentFile, "normalized-${file.name}")
+        try {
+            logger.info("Normalize OOXML zip entry names for LibreOffice, input=[{}]", file.path)
+            OfficeZipNormalizer.rewriteForwardSlashes(file, normalized)
+            return normalized
+        } catch (e: IOException) {
+            logger.warn("Failed to normalize office zip, fallback to original file [{}]", file.path, e)
+            return file
+        }
     }
 
     private fun convertCsvToXlsx(inputFilePath: String,

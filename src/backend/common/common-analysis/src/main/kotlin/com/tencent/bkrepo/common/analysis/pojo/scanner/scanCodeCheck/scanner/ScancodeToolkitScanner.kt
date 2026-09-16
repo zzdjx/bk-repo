@@ -50,7 +50,7 @@ class ScancodeToolkitScanner(
         @get:Schema(title = "docker仓库用户")
         val dockerRegistryUsername: String?,
         @get:Schema(title = "docker仓库密码")
-        val dockerRegistryPassword: String?,
+        var dockerRegistryPassword: String?,
         @get:Schema(title = "容器内的工作目录")
         val workDir: String = "/data",
         @get:Schema(title = "输入目录，相对于workDir的路径")

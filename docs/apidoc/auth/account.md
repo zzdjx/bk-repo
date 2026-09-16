@@ -570,48 +570,13 @@ scope description
 |data | object array| result data |the data for response|
 |traceId|string|请求跟踪id|the trace id|
 
-### 校验账号下的ak/sk对
+### 校验账号下的ak/sk对（已移除）
 
-- API: GET /auth/api/account/credential/{appId}/{accessKey}/{secretKey}
-- API 名称: check_account_credential
-- 功能说明：
-	- 中文：校验账号下的ak/sk对
-	- English：check account credential
-
-- input body:
-
-``` json
-
-```
-- input 字段说明
-
-|字段|类型|是否必须|默认值|说明|Description|
-|---|---|---|---|---|---|
-|appId|string|是|无|应用ID|the application id|
-|accessKey|string|是|无|accessKey|accessKey|
-|secretKey|string|是|无|secretKey|secretKey|
-
-- output:
-
-```
-{
-    "code":0,
-    "data":true,
-    "message":"",
-    "traceId":""
-}
-
-
-```
-
-- output 字段说明
-
-| 字段|类型|说明|Description|
-|---|---|---|---|
-|code|bool|错误编码。 0表示success，>0表示失败错误 |0:success, other: failure|
-|message|result message|错误消息 |the failure message |
-|data | object array| result data |the data for response|
-|traceId|string|请求跟踪id|the trace id|
+- 原 API: GET /auth/api/account/credential/{accessKey}/{secretKey}
+- 状态：已移除。secretKey 不得放在 URL path（会进入 access log、浏览器历史、反向代理、APM）。
+- 替代：
+	- 业务请求使用 `Authorization: Platform base64(accessKey:secretKey)`
+	- 服务间校验使用 `POST /auth/service/account/credential`（`accesskey` / `secretkey` 为请求参数，且仅走服务间鉴权）
 
 ### 更新账号下的ak/sk对状态
 

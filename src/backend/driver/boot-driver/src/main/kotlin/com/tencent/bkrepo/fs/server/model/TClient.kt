@@ -56,7 +56,7 @@ data class TClient(
     var heartbeatTime: LocalDateTime
 ) {
     companion object {
-        const val CLIENT_IDX = "client_idx"
-        const val CLIENT_IDX_DEF = "{'projectId': 1, 'repoName': 1,'mountPoint':1, 'ip': 1}"
+        const val CLIENT_IDX = "client_user_idx"
+        const val CLIENT_IDX_DEF = "{'projectId': 1, 'repoName': 1,'mountPoint':1, 'ip': 1, 'userId': 1}"
     }
 }

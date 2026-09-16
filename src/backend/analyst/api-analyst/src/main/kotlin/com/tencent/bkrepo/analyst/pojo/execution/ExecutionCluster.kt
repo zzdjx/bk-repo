@@ -19,5 +19,5 @@ open class ExecutionCluster(
     @get:Schema(title = "类型")
     val type: String,
     @get:Schema(title = "描述")
-    val description: String = "",
+    open val description: String = "",
 )

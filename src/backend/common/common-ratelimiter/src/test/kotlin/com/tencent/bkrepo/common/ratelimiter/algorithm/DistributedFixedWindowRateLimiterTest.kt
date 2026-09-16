@@ -69,11 +69,11 @@ class DistributedFixedWindowRateLimiterTest : DistributedTest() {
     @Test
     fun testTryAcquireOnMultiThreads() {
         val key = KEY + "testTryAcquireOnMultiThreads"
-        val ratelimiter = DistributedFixedWindowRateLimiter(key, 5, Duration.ofSeconds(1), redisTemplate)
+        val ratelimiter = DistributedFixedWindowRateLimiter(key, 5, Duration.ofMinutes(1), redisTemplate)
         val successNum = java.util.concurrent.atomic.AtomicInteger(0)
         val failedNum = java.util.concurrent.atomic.AtomicInteger(0)
         val errorNum = java.util.concurrent.atomic.AtomicInteger(0)
-        val readers = Runtime.getRuntime().availableProcessors()
+        val readers = 8
         val countDownLatch = CountDownLatch(readers)
         val elapsedTime = measureTimeMillis {
             repeat(readers) {

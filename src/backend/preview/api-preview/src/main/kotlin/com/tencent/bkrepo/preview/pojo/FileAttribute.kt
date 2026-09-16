@@ -82,5 +82,16 @@ data class FileAttribute (
     var suffix: String? = null,
 
     // 压缩包内文件路径
-    var zipEntryPath: String? = null
+    var zipEntryPath: String? = null,
+
+    /**
+     * 为 true 时 pptx/pptm/ppsx/ppt 仍走 LibreOffice 转 PDF（前端动画播放失败回退）
+     */
+    var forcePdfConvert: Boolean = false,
+
+    /**
+     * OOXML 幻灯片包内音视频路径，例如 `ppt/media/media1.mp4`。
+     * 有值时 onlinePreview 只按 HTTP Range 流出该条目，不返回整个 pptx。
+     */
+    var embeddedPartPath: String? = null
 )

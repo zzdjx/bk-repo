@@ -59,4 +59,25 @@ class VersionRangeTest {
             CompositeVersionRange.build(";")
         }
     }
+
+    @Test
+    fun testSpringQualifierRange() {
+        val gteRelease = DefaultVersionRange.build(">=2.2.13.RELEASE")
+        Assertions.assertTrue(gteRelease.contains("2.2.13"))
+        Assertions.assertTrue(gteRelease.contains("2.2.13.RELEASE"))
+        Assertions.assertTrue(gteRelease.contains("2.2.14"))
+        Assertions.assertFalse(gteRelease.contains("2.2.13.RC1"))
+        Assertions.assertFalse(gteRelease.contains("2.2.13.SNAPSHOT"))
+
+        val gtePlain = DefaultVersionRange.build(">=2.2.13")
+        Assertions.assertTrue(gtePlain.contains("2.2.13.RELEASE"))
+        Assertions.assertFalse(gtePlain.contains("2.2.13.M1"))
+
+        val compositeRange = CompositeVersionRange.build(">=2.2.13.M1,<2.2.13.RELEASE")
+        Assertions.assertTrue(compositeRange.contains("2.2.13.M1"))
+        Assertions.assertTrue(compositeRange.contains("2.2.13.RC1"))
+        Assertions.assertFalse(compositeRange.contains("2.2.13.SNAPSHOT"))
+        Assertions.assertFalse(compositeRange.contains("2.2.13.RELEASE"))
+        Assertions.assertFalse(compositeRange.contains("2.2.13"))
+    }
 }

@@ -63,13 +63,31 @@ object FtpUtils {
         return ftpClient
     }
 
+    /**
+     * 在打开 PASV 数据连接前校验目标主机。
+     * 先走 Commons Net 默认 NAT 改写（内网 PASV 地址回落到控制连接主机），再套 [SsrfGuard.validateResolvedHost]，
+     * 避免恶意 FTP 在 PASV 应答中指定内网/元数据地址后、客户端在校验前就发起 TCP 连接。
+     */
+    internal fun createPassiveHostResolver(
+        ftpClient: FTPClient,
+        ssrfGuard: SsrfGuard
+    ): FTPClient.HostnameResolver {
+        val natResolver = FTPClient.NatServerResolverImpl(ftpClient)
+        return FTPClient.HostnameResolver { host ->
+            val target = natResolver.resolve(host)
+            ssrfGuard.validateResolvedHost(target)
+            target
+        }
+    }
+
     @Throws(IOException::class)
     fun download(
         ftpUrl: String?,
         localFilePath: String?,
         ftpUsername: String?,
         ftpPassword: String?,
-        ftpControlEncoding: String?
+        ftpControlEncoding: String?,
+        ssrfGuard: SsrfGuard
     ) {
         val url = URL(ftpUrl)
         val host = url.host
@@ -83,6 +101,7 @@ object FtpUtils {
             localFilePath
         )
         val ftpClient: FTPClient = connect(host, port, ftpUsername, ftpPassword, ftpControlEncoding)
+        ftpClient.setPassiveNatWorkaroundStrategy(createPassiveHostResolver(ftpClient, ssrfGuard))
         val outputStream = Files.newOutputStream(Paths.get(localFilePath))
         ftpClient.enterLocalPassiveMode()
         val downloadResult: Boolean = ftpClient.retrieveFile(

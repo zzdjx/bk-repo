@@ -42,4 +42,8 @@ data class ClientCreateRequest(
     val os: String,
     val arch: String,
     val ip: String?,
+    /**
+     * 为 true 时跳过复用查询，始终插入新客户端记录
+     */
+    val forceNew: Boolean = false,
 )

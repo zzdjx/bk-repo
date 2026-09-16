@@ -223,16 +223,10 @@
 ### 获取用户信息
 
 - API:GET /auth/api/user/info
-- API 名称: check_user_token
+- API 名称: get_user_info
 - 功能说明：
-	- 中文：校验用户token
-	- English：check user token
-
-- input body:
-
-``` json
-
-```
+	- 中文：获取当前登录用户信息（含显示名、租户 ID、时区）。displayName / tenantId / timeZone 由网关（`bkrepo.web.conf`）在 `auth_request` 阶段解析登录态后通过请求头注入，后端透传。仅当请求经 `/web/` 入口（`X-BKREPO-API-TYPE=web`）时才会按请求头创建或更新本地用户；未认证的 `/auth/api/` 入口不会写库。
+	- English：Get current login user info (with display name, tenant id and default time zone). Headers are injected by the gateway after `auth_request`. User create/update only happens for the authenticated `/web/` entry (`X-BKREPO-API-TYPE=web`); the unauthenticated `/auth/api/` entry is read-only.
 
 - input 字段说明
 
@@ -248,7 +242,10 @@
     "code":0,
     "message":null,
     "data":{
-        "userId":"owenlxu2"
+        "userId":"owenlxu2",
+        "displayName":"Owen Lxu",
+        "tenantId":"default",
+        "timeZone":"Asia/Shanghai"
     },
     "traceId":""
 }
@@ -259,9 +256,9 @@
 
 | 字段|类型|说明|Description|
 |---|---|---|---|
-|code|bool|错误编码。 0表示success，>0表示失败错误 |0:success, other: failure|
-|message|string|错误消息,或者用户token |the failure message,or bkrepo token |
-|data | bool | result data |the data for response|
+|code|int|错误编码。 0表示success，>0表示失败错误 |0:success, other: failure|
+|message|string|错误消息 |the failure message|
+|data | object | result data |the data for response|
 |traceId|string|请求跟踪id|the trace id|
 
 
@@ -270,4 +267,6 @@
 | 字段|类型|说明|Description|
 |---|---|---|---|
 |userId | string | 用户id |the user Id|
-|bkrepo_ticket|string|请求跟踪id|the bkrepo ticket|
+|displayName | string | 用户显示名 |the user display name|
+|tenantId | string | 企业空间/租户 ID（仅多租户模式下有值） |the tenant id (only in multi-tenant mode)|
+|timeZone | string | 默认时区（IANA 名称，如 `Asia/Shanghai`，由网关注入） |the default time zone (IANA name, injected by gateway)|

@@ -31,10 +31,13 @@
 
 package com.tencent.bkrepo.npm.controller
 
+import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
+import com.tencent.bkrepo.auth.pojo.enums.ResourceType
 import com.tencent.bkrepo.common.api.constant.DEFAULT_PAGE_NUMBER
 import com.tencent.bkrepo.common.api.constant.DEFAULT_PAGE_SIZE
 import com.tencent.bkrepo.common.api.pojo.Page
 import com.tencent.bkrepo.common.api.pojo.Response
+import com.tencent.bkrepo.common.security.permission.Permission
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.npm.pojo.module.des.ModuleDepsInfo
 import com.tencent.bkrepo.npm.service.ModuleDepsService
@@ -56,6 +59,7 @@ class UserModuleDependentsController(
 ) {
     @Operation(summary = "分页查询某个资源节点被依赖的所有资源名称")
     @GetMapping("/dependent/page/{projectId}/{repoName}")
+    @Permission(type = ResourceType.REPO, action = PermissionAction.READ)
     fun page(
         @Parameter(name = "所属项目", required = true)
         @PathVariable projectId: String,

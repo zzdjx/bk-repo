@@ -32,6 +32,8 @@
 package com.tencent.bkrepo.npm.resource
 
 import com.tencent.bkrepo.common.api.pojo.Response
+import com.tencent.bkrepo.common.security.permission.Principal
+import com.tencent.bkrepo.common.security.permission.PrincipalType
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.npm.api.NpmFixToolResource
 import com.tencent.bkrepo.npm.artifact.NpmArtifactInfo
@@ -43,6 +45,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
+@Principal(type = PrincipalType.ADMIN)
 class NpmFixToolResourceImpl @Autowired constructor(
     private val npmFixToolService: NpmFixToolService
 ) : NpmFixToolResource {

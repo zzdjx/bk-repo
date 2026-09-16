@@ -33,11 +33,18 @@ package com.tencent.bkrepo.s3.artifact.utils
 
 import com.tencent.bkrepo.common.service.util.HeaderUtils
 import com.tencent.bkrepo.s3.artifact.auth.AWS4AuthCredentials
+import com.tencent.bkrepo.s3.constant.UNSIGNED_PAYLOAD
 import com.tencent.bkrepo.s3.exception.AWS4AuthenticationException
 import java.io.UnsupportedEncodingException
 import java.math.BigInteger
 import java.security.MessageDigest
 import java.security.NoSuchAlgorithmException
+import java.time.DateTimeException
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -66,7 +73,55 @@ object AWS4AuthUtil {
         val signatureKey = calculateSignatureKey(secretAccessKey, authInfo)
         // 重新生成签名
         val strHexSignature = calculateHexSignature(stringToSign, signatureKey)
-        return authInfo.signature == strHexSignature
+        return MessageDigest.isEqual(authInfo.signature.toByteArray(), strHexSignature.toByteArray())
+    }
+
+    /**
+     * x-amz-date 与服务器时间偏差是否在允许范围内。解析失败视为过期。
+     */
+    fun isRequestDateFresh(
+        requestDate: String,
+        maxClockSkewSeconds: Long,
+        now: Instant = Instant.now()
+    ): Boolean {
+        val requestTime = parseAmzDate(requestDate) ?: return false
+        val skew = Duration.between(requestTime, now).abs()
+        return skew <= Duration.ofSeconds(maxClockSkewSeconds)
+    }
+
+    /**
+     * Credential scope 的 YYYYMMDD 是否与 x-amz-date 的日期部分一致。
+     */
+    fun isCredentialDateConsistent(authorization: String, requestDate: String): Boolean {
+        if (requestDate.length < AMZ_DATE_DAY_LENGTH) {
+            return false
+        }
+        val credentialDate = parseAuthorization(authorization).date
+        return credentialDate == requestDate.substring(0, AMZ_DATE_DAY_LENGTH)
+    }
+
+    /**
+     * UNSIGNED-PAYLOAD 不验 body；否则将声明值与实际 sha256 做常量时间比较（S3 单块 signed payload）。
+     */
+    fun payloadHashMatches(declaredHash: String?, actualSha256: String): Boolean {
+        if (declaredHash == UNSIGNED_PAYLOAD) {
+            return true
+        }
+        if (declaredHash.isNullOrEmpty()) {
+            return false
+        }
+        return MessageDigest.isEqual(
+            declaredHash.lowercase().toByteArray(),
+            actualSha256.lowercase().toByteArray()
+        )
+    }
+
+    private fun parseAmzDate(requestDate: String): Instant? {
+        return try {
+            LocalDateTime.parse(requestDate, AMZ_DATE_FORMATTER).toInstant(ZoneOffset.UTC)
+        } catch (_: DateTimeException) {
+            null
+        }
     }
 
     data class AuthorizationInfo(
@@ -236,4 +291,7 @@ object AWS4AuthUtil {
         }
         return queryParams
     }
+
+    private val AMZ_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
+    private const val AMZ_DATE_DAY_LENGTH = 8
 }

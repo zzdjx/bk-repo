@@ -3,6 +3,7 @@ package com.tencent.bkrepo.analyst.service.impl
 import com.tencent.bkrepo.analyst.dao.ExecutionClusterDao
 import com.tencent.bkrepo.analyst.model.TExecutionCluster
 import com.tencent.bkrepo.analyst.pojo.execution.ExecutionCluster
+import com.tencent.bkrepo.analyst.pojo.execution.ExecutionClusterSecrets
 import com.tencent.bkrepo.analyst.service.ExecutionClusterService
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
@@ -54,12 +55,14 @@ class ExecutionClusterServiceImpl(
                 throw ErrorCodeException(CommonMessageCode.PARAMETER_INVALID, name, type)
             }
 
+            val existing: ExecutionCluster = savedExecutionCluster.config.readJsonString()
+            val merged = ExecutionClusterSecrets.keepExisting(executionCluster, existing)
             return executionClusterDao.save(
                 savedExecutionCluster.copy(
                     lastModifiedBy = userId,
                     lastModifiedDate = LocalDateTime.now(),
-                    description = description,
-                    config = executionCluster.toJsonString()
+                    description = merged.description,
+                    config = merged.toJsonString()
                 )
             ).run { config.readJsonString() }
 

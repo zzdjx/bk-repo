@@ -29,6 +29,7 @@ package com.tencent.bkrepo.common.security.util
 
 import cn.hutool.crypto.asymmetric.RSA
 import com.tencent.bkrepo.common.security.crypto.CryptoProperties
+import com.tencent.bkrepo.common.security.crypto.LegacyCryptoKeys
 import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -45,12 +46,16 @@ internal class RsaUtilsTest {
     @DisplayName("测试默认算法加解密-有key")
     fun testRsaUtilsWithKey() {
         val rsa = RSA()
-        privateKeyStr = rsa.privateKeyBase64
-        publicKeyStr = rsa.publicKeyBase64
+        val generatedPrivateKey = rsa.privateKeyBase64
+        val generatedPublicKey = rsa.publicKeyBase64
+        privateKeyStr = generatedPrivateKey
+        publicKeyStr = generatedPublicKey
         println("$privateKeyStr")
         println("$publicKeyStr")
         cryptoProperties = CryptoProperties(
-            rsaAlgorithm = rsaAlgorithm
+            rsaAlgorithm = rsaAlgorithm,
+            privateKeyStr = generatedPrivateKey,
+            publicKeyStr = generatedPublicKey
         )
         RsaUtils(cryptoProperties!!)
         val encryptResult = RsaUtils.encrypt("test")
@@ -69,5 +74,40 @@ internal class RsaUtilsTest {
         Assertions.assertNotEquals(encryptResult, encryptResult1)
         Assertions.assertEquals(decryptResult, decryptResult1)
         Assertions.assertEquals(decryptResult, decryptResult2)
+    }
+
+    @Test
+    @DisplayName("升级后仍能读出旧默认密钥加密的存量密文")
+    @Suppress("DEPRECATION")
+    fun testLegacyCiphertextCompatibility() {
+        // 升级前：默认密钥是硬编码值，此时入库的密文长这样
+        RsaUtils(
+            CryptoProperties(
+                rsaAlgorithm = rsaAlgorithm,
+                privateKeyStr = RsaUtils.normalizePrivateKey(LegacyCryptoKeys.RSA_1024_PRIVATE_KEY),
+                publicKeyStr = RsaUtils.derivePublicKey(LegacyCryptoKeys.RSA_1024_PRIVATE_KEY)
+            )
+        )
+        val legacyCipher = RsaUtils.encrypt("p@ssw0rd")
+
+        // 升级后：换成一把全新随机密钥
+        val fresh = RSA()
+        RsaUtils(
+            CryptoProperties(
+                rsaAlgorithm = rsaAlgorithm,
+                privateKeyStr = fresh.privateKeyBase64,
+                publicKeyStr = fresh.publicKeyBase64
+            )
+        )
+
+        // 存量密文靠兜底读出来，并被标记成待重加密
+        val (legacyPlain, legacySource) = RsaUtils.decryptWithSource(legacyCipher)
+        Assertions.assertEquals("p@ssw0rd", legacyPlain)
+        Assertions.assertEquals(KeySource.LEGACY, legacySource)
+
+        // 重加密后归当前密钥，job 再跑不会重复处理
+        val rewritten = RsaUtils.encrypt(legacyPlain)
+        Assertions.assertNotEquals(legacyCipher, rewritten)
+        Assertions.assertEquals("p@ssw0rd" to KeySource.CURRENT, RsaUtils.decryptWithSource(rewritten))
     }
 }

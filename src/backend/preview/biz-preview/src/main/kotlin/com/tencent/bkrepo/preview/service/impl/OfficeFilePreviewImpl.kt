@@ -38,7 +38,9 @@ import com.tencent.bkrepo.preview.exception.PreviewSystemException
 import com.tencent.bkrepo.preview.pojo.DownloadResult
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.service.FileTransferService
+import com.tencent.bkrepo.preview.service.LivePptxPreview
 import com.tencent.bkrepo.preview.service.OfficeFileConverter
+import com.tencent.bkrepo.preview.service.PptxEmbeddedMediaService
 import com.tencent.bkrepo.preview.service.cache.impl.PreviewFileCacheServiceImpl
 import com.tencent.bkrepo.preview.utils.EncodingDetects
 import java.io.BufferedReader
@@ -62,13 +64,23 @@ class OfficeFilePreviewImpl(
     private val officeFileConverter: OfficeFileConverter,
     private val fileTransferService: FileTransferService,
     private val previewFileCacheService: PreviewFileCacheServiceImpl,
-    private val nodeService: NodeService
+    private val nodeService: NodeService,
+    private val pptxEmbeddedMediaService: PptxEmbeddedMediaService
 ) : AbstractFilePreview(
     config,
     fileTransferService,
     previewFileCacheService,
     nodeService
 ) {
+    override fun filePreviewHandle(fileAttribute: FileAttribute) {
+        when {
+            !fileAttribute.embeddedPartPath.isNullOrBlank() -> pptxEmbeddedMediaService.streamPart(fileAttribute)
+            !LivePptxPreview.shouldStreamOriginal(fileAttribute) -> super.filePreviewHandle(fileAttribute)
+            LivePptxPreview.isOoxml(fileAttribute.suffix) -> pptxEmbeddedMediaService.streamSlimPackage(fileAttribute)
+            else -> fileTransferService.sendOriginalFileAsResponse(fileAttribute)
+        }
+    }
+
     /**
      * 转换文件，比如docx转成pdf
      */
@@ -102,8 +114,11 @@ class OfficeFilePreviewImpl(
     }
 
     private fun isNeedConvert(fileAttribute: FileAttribute): Boolean {
-        val suffix = fileAttribute.suffix
-        return suffix!!.lowercase() !in listOf("xlsx")
+        val suffix = fileAttribute.suffix?.lowercase() ?: return true
+        if (suffix == "xlsx") {
+            return false
+        }
+        return !LivePptxPreview.shouldSkipOfficeConvert(fileAttribute)
     }
 
     /**
