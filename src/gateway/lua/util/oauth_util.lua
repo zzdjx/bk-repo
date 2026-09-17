@@ -227,24 +227,6 @@ function _M:verify_bk_token_muti_tenant(auth_url, token, force_refresh)
             return
         end
 
-        --- 判断返回码：HTTP 200 不代表验票成功，bk-login 对无效 token 也可能带用户字段
-        if result.code ~= 0 then
-            if result.code == 1302403 then
-                ngx.log(ngx.ERR, "is_login code is 1302403 , need Authentication")
-                ngx.header["X-DEVOPS-ERROR-RETURN"] = '{"code": 440,"message": "' .. result.message .. '", "data": 1302403,"traceId":null }'
-                ngx.header["X-DEVOPS-ERROR-STATUS"] = 440
-                ngx.exit(401)
-            end
-            ngx.log(ngx.INFO, "invalid user token: ", result.message)
-            ngx.exit(401)
-            return
-        end
-        if result.data == nil or result.data.bk_username == nil or result.data.bk_username == "" then
-            ngx.log(ngx.ERR, "invalid apigw userinfo response, missing bk_username: ", res.body)
-            ngx.exit(401)
-            return
-        end
-
         local cache_data = {
             ["bk_username"] = result.data.bk_username,
             ["display_name"] = result.data.display_name,
