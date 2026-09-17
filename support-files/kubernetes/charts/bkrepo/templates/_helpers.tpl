@@ -161,42 +161,51 @@ Decode a Platform auth header ("Platform " + base64(accessKey:secretKey)) to
 {{- end -}}
 
 {{/*
+True when "accessKey:secretKey" uses the publicly known default pair.
+*/}}
+{{- define "bkrepo.platformAuth.isDefault" -}}
+{{- $parts := splitn ":" 2 (. | toString) -}}
+{{- if or (eq $parts._0 "18b61c9c-901b-4ea3-89c3-1f74be944b66") (eq $parts._1 "Us8ZGDXPqk86cwMukYABQqCZLAkM3K") -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fail when "accessKey:secretKey" uses the publicly known default pair.
 */}}
 {{- define "bkrepo.platformAuth.rejectDefault" -}}
-{{- $parts := splitn ":" 2 (. | toString) -}}
-{{- if or (eq $parts._0 "18b61c9c-901b-4ea3-89c3-1f74be944b66") (eq $parts._1 "Us8ZGDXPqk86cwMukYABQqCZLAkM3K") -}}
-{{- fail "gateway accessKey/secretKey must not use the publicly known default pair. Set unique values via gateway.accessKey/gateway.secretKey, or a gateway.authorization built from them." -}}
+{{- if include "bkrepo.platformAuth.isDefault" . -}}
+{{- fail "gateway accessKey/secretKey must not use the publicly known default pair. Set unique values via gateway.authorization, or via gateway.accessKey/gateway.secretKey." -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
 Return "accessKey:secretKey" for the gateway platform account.
 
-gateway.accessKey + gateway.secretKey win. Otherwise fall back to
-gateway.authorization, which must decode to a pair; new installs additionally
-reject the publicly known default pair.
+gateway.authorization wins, as long as it decodes to a pair and is not the
+default shipped in values.yaml. Otherwise gateway.accessKey + gateway.secretKey
+are used. New installs reject the publicly known default pair either way.
 */}}
 {{- define "bkrepo.platformCredential" -}}
 {{- $ak := .Values.gateway.accessKey | toString | trim -}}
 {{- $sk := .Values.gateway.secretKey | toString | trim -}}
-{{- if and $ak $sk -}}
+{{- $authPair := include "bkrepo.platformAuth.decode" (.Values.gateway.authorization | toString) -}}
+{{- if and $authPair (not (include "bkrepo.platformAuth.isDefault" $authPair)) -}}
+{{- $authPair -}}
+{{- else if and $ak $sk -}}
 {{- $pair := printf "%s:%s" $ak $sk -}}
 {{- include "bkrepo.platformAuth.rejectDefault" $pair -}}
 {{- $pair -}}
-{{- else -}}
-{{- $pair := include "bkrepo.platformAuth.decode" (.Values.gateway.authorization | toString) -}}
-{{- if not $pair -}}
+{{- else if not $authPair -}}
 {{- if .Release.IsInstall -}}
-{{- fail "New installs must set both gateway.accessKey and gateway.secretKey, or a gateway.authorization of the form 'Platform <base64(accessKey:secretKey)>'. Example: --set gateway.accessKey=<ak> --set gateway.secretKey=<sk>" -}}
+{{- fail "New installs must set gateway.authorization ('Platform <base64(accessKey:secretKey)>'), or both gateway.accessKey and gateway.secretKey. Example: --set gateway.accessKey=<ak> --set gateway.secretKey=<sk>" -}}
 {{- else -}}
 {{- fail "Upgrade requires a valid gateway.authorization (Platform <base64(accessKey:secretKey)>) or both gateway.accessKey and gateway.secretKey." -}}
 {{- end -}}
-{{- end -}}
-{{- if .Release.IsInstall -}}
-{{- include "bkrepo.platformAuth.rejectDefault" $pair -}}
-{{- end -}}
-{{- $pair -}}
+{{- else if .Release.IsInstall -}}
+{{- include "bkrepo.platformAuth.rejectDefault" $authPair -}}
+{{- else -}}
+{{- $authPair -}}
 {{- end -}}
 {{- end -}}
 

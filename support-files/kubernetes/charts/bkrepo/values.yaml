@@ -340,11 +340,12 @@ gateway:
   ## dns服务器地址，用于配置nginx resolver。local=on为openrestry语法，取本机/etc/resolv.conf配置
   dnsServer: local=on
   ## 网关访问微服务认证信息，形如 Platform <base64(accessKey:secretKey)>。
-  ## 新安装也可只配这一项，但必须能解析出 accessKey/secretKey，且不能是下面这个公开默认值。
+  ## 改成自己的值后优先于 accessKey/secretKey 生效；保持下面这个公开默认值则回落到
+  ## accessKey/secretKey，且新安装会被拒绝。
   authorization: "Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="
-  ## 网关平台账号 accessKey（与 secretKey 同时配置时优先于 authorization，禁止使用仓库内公开默认值）
+  ## 网关平台账号 accessKey（authorization 仍为默认值时生效，需与 secretKey 同时配置）
   accessKey: ""
-  ## 网关平台账号 secretKey（与 accessKey 同时配置时优先于 authorization，禁止使用仓库内公开默认值）
+  ## 网关平台账号 secretKey（authorization 仍为默认值时生效，需与 accessKey 同时配置）
   secretKey: ""
   ## 部署模式，standalone: 独立模式，ci: 与ci搭配模式 , saas模式: 蓝鲸saas部署模式
   deployMode: standalone
