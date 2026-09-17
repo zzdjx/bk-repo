@@ -87,7 +87,8 @@ agent:
     # state:
     #   require-redis: true
     # 灰度总闸：只回答"这个项目/用户能不能进"，不区分能用哪些子 Agent 或工具（那需要更大的改造）。
-    # 默认关闭；开启后项目名单与用户名单是 OR 关系，任一命中即放行，改名单需要重启或重建配置 Bean
+    # 默认关闭；开启后项目名单与用户名单是 OR 关系，任一命中即放行。判断点读的是 live 的配置 bean，
+    # 配置中心（Consul）推送变更后无需重启即可生效；本地开发不接配置中心时改这里仍需重启进程。
     # gray:
     #   enabled: true
     #   allowed-project-ids: [ "project-a", "project-b" ]

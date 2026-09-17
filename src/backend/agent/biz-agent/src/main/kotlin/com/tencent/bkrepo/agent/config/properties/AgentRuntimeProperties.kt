@@ -195,6 +195,18 @@ data class AgentRuntimeProperties(
      *
      * 默认 [enabled] = false：不开灰度时对现有部署零影响，与 `read-only-mode`/`require-redis` 同样是
      * "限制性功能默认关闭"。
+     *
+     * ## 运行时热更新
+     *
+     * [AgentRunOrchestrator][com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 直接持有这个
+     * 类所属的 [AgentRuntimeProperties] bean（而不是启动期就拍平固化的
+     * [EffectiveAgentRuntimeProperties]），每次请求都调用 [isAllowed] 现读当前字段值。`@ConfigurationProperties`
+     * bean 本身在配置中心（Consul）推送变更后会被 Spring Cloud Context 的 `ConfigurationPropertiesRebinder`
+     * 原地重新绑定（同一个单例实例、字段被新值覆盖），因此改名单不需要重启，也不需要 `@RefreshScope`——
+     * 这条链路依赖配置中心的 watch 机制真的把变更同步到了这个副本的 Environment，本地开发不接配置中心时
+     * 改配置仍然要重启。只读模式（[Features.readOnlyMode]）没有做同样的处理：它被烘焙进了
+     * `PermissionContextState`/`FrontendToolRegistrar` 注册的工具集/`HarnessAgent` 系统提示词这三处启动期
+     * 缓存，要热更新还需要额外重建这几个 Bean，改造面明显更大，这次没有做。
      */
     data class Gray(
         var enabled: Boolean = DEFAULT_ENABLED,
@@ -203,6 +215,12 @@ data class AgentRuntimeProperties(
         /** 用户名单，用于内部测试/白名单用户跨项目验证；与项目名单是 OR 关系，任一命中即放行。 */
         var allowedUserIds: Set<String> = emptySet(),
     ) {
+        /** 灰度关闭时永远放行；开启时项目或用户命中任一名单即放行（OR 语义），与 [EffectiveAgentGray.isAllowed] 语义一致。 */
+        fun isAllowed(userId: String, projectId: String): Boolean {
+            if (!enabled) return true
+            return projectId in allowedProjectIds || userId in allowedUserIds
+        }
+
         companion object {
             const val DEFAULT_ENABLED = false
         }
@@ -390,7 +408,15 @@ data class EffectiveAgentRetention(
     }
 }
 
-/** 见 [AgentRuntimeProperties.Gray]。 */
+/**
+ * 见 [AgentRuntimeProperties.Gray]。
+ *
+ * 这是启动期拍平出来的一份不可变快照，随 [EffectiveAgentRuntimeProperties] 一起在 Bean 创建时算一次、
+ * 之后不会跟着配置中心的推送变化——真正参与放行判定的是 [AgentRuntimeProperties.Gray] 的同名
+ * `isAllowed`（[com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 直接持有 live 的
+ * [AgentRuntimeProperties]），这里的 [isAllowed] 只保留给需要"启动时那份配置长什么样"的场景（比如
+ * 日志/展示），不要用来做热更新相关的放行判定。
+ */
 data class EffectiveAgentGray(
     val enabled: Boolean,
     val allowedProjectIds: Set<String>,

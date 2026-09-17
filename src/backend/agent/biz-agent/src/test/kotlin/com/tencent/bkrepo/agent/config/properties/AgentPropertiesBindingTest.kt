@@ -336,6 +336,22 @@ class AgentPropertiesBindingTest {
     }
 
     @Test
+    fun `AgentRuntimeProperties_Gray的isAllowed语义应与EffectiveAgentGray一致_支撑灰度热更新读live properties`() {
+        val gray = AgentRuntimeProperties.Gray(
+            enabled = true,
+            allowedProjectIds = setOf("project-1"),
+            allowedUserIds = setOf("user-1"),
+        )
+
+        assertTrue(gray.isAllowed("stranger", "project-1"), "项目命中名单应放行")
+        assertTrue(gray.isAllowed("user-1", "stranger-project"), "用户命中名单应放行")
+        assertFalse(gray.isAllowed("stranger", "stranger-project"), "两者都不命中应拒绝")
+
+        // 灰度关闭时不管名单内容，任何项目/用户都应该放行。
+        assertTrue(AgentRuntimeProperties.Gray(enabled = false).isAllowed("stranger", "stranger-project"))
+    }
+
+    @Test
     fun `未配置 sys-prompt 时应默认使用 AgentSystemPrompts`() {
         val runtime = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
 

@@ -1508,16 +1508,26 @@ gray:
 命中失败时抛 `PermissionException`（HTTP 403，`system.request.denied`），与会话归属校验失败用的是
 同一个异常类型——语义上都是"这个请求不该被这个身份发起"，客户端不需要再新增一种错误处理分支。
 
+**运行时热更新（已完成）**：`AgentRunOrchestrator` 判断灰度时读的是 live 的 `AgentRuntimeProperties`
+bean（`runtimeProperties.gray.isAllowed(...)`），不是启动期拍平一次的 `EffectiveAgentRuntimeProperties`
+快照。`AgentRuntimeProperties` 是标准的可变 `@ConfigurationProperties` bean（字段都是 `var`），生产环境
+接的 Consul 配置中心在 KV 变更后会通过 Spring Cloud Consul 的 Config Watch 触发
+`EnvironmentChangeEvent`，进而由 `ConfigurationPropertiesRebinder` 原地重新绑定这个 bean 的字段——
+`AgentRunOrchestrator` 持有的是同一个单例引用，下一次请求读到的就是新名单，不需要重启，也不需要
+`@RefreshScope`（`EffectiveAgentRuntimeProperties`/`EffectiveAgentGray` 是 Kotlin `data class`，默认
+`final`，`@RefreshScope` 依赖 CGLIB 子类化会直接报错，所以没有走这条路）。这条链路依赖配置中心的
+watch 机制确实把变更同步到了这个副本的 Environment；本地开发不接 Consul 时改配置仍然要重启，
+或者手动触发 `/actuator/refresh`。
+
 **已知边界**：
 
-- 只做总闸，不做按 Agent/工具的细粒度灰度——这是刻意的取舍，见上文。
-- 名单是 `agent.runtime` 的一部分，改名单需要改配置中心 + 重启（或重建
-  `EffectiveAgentRuntimeProperties` 这个 Bean），不是运行时热更新；`AgentRunOrchestrator` 里存的是
-  单例 `properties` 的引用，热更新需要额外接一个能在不重启的前提下刷新配置的机制（比如 Spring Cloud
-  的 `@RefreshScope`），本次没有引入。放量频率不高、按项目/批次推进的场景下，重启生效是可接受的
-  代价；如果将来需要分钟级调整名单，再评估要不要为此单独接一套动态配置存储。
+- 只做总闸，不做按 Agent/工具的细粒度灰度——这是刻意的取舍，见上文；这部分依然是启动期固化的全局
+  单例，不受上面的热更新影响。
 - 名单外的请求收到的是通用的"未开通"提示，不会告诉调用方具体是哪条名单没命中——避免把配置细节
   泄露给客户端。
+- 只读模式（`agent.runtime.features.read-only-mode`）没有做同样的热更新处理：它被烘焙进了
+  `PermissionContextState`/`FrontendToolRegistrar` 注册的工具集/`HarnessAgent` 系统提示词这三处启动期
+  缓存，要热更新还需要额外重建这几个 Bean，改造面明显更大，本次没有做，仍需重启才能生效。
 
 **Redis 依赖的生产强制校验（已完成）**
 
@@ -1669,7 +1679,10 @@ override 里某一项留空表示不覆盖，沿用全局默认值。
 全局默认值），天然支持按每条记录单独决定过期时刻。`task`/`memory` 是 Redis key 级、Bean 构造时一次性配置
 TTL，要做到差异化需要把"构造 store 时固定 TTL"改成"每次写入时动态传入"，改造面完全不同，这次没有做。
 
-和灰度总闸一样，override 名单本身也是启动期固化的配置，改名单要走配置中心 + 重启，不支持运行时热更新。
+override 名单本身走的是 `EffectiveAgentRuntimeProperties` 这层启动期固化快照（`AgentRetentionPolicy`
+持有的是 `Effective*` 类型），改名单要走配置中心 + 重启，不支持运行时热更新——这点和灰度总闸不同：
+灰度总闸后来改成直接读 live 的 `AgentRuntimeProperties`（见上文"灰度分流总闸"的"运行时热更新"），
+retention override 目前还没有做同样的改造，仍是已知边界。
 
 **模型调用预算与备用模型（已完成）**
 

@@ -9,6 +9,7 @@
 package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
+import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.context.AgentChatContextResolver
 import com.tencent.bkrepo.agent.hitl.AguiPermissionResumeAdapter
@@ -79,6 +80,7 @@ class AgentRunOrchestratorShutdownTest {
 
     private fun orchestrator(): AgentRunOrchestrator = AgentRunOrchestrator(
         properties = EffectiveAgentRuntimeProperties.defaults(),
+        runtimeProperties = AgentRuntimeProperties(),
         permissionManager = mock<PermissionManager>(),
         inputValidator = inputValidator,
         aguiResumeValidator = mock<AguiResumeValidator>(),

@@ -16,6 +16,7 @@ import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESU
 import com.tencent.bkrepo.agent.tool.frontend.FrontendToolSanitizer
 import com.tencent.bkrepo.agent.context.AgentChatContext
 import com.tencent.bkrepo.agent.context.AgentChatContextResolver
+import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.constant.AGENT_RUN_ID_PREFIX
 import com.tencent.bkrepo.agent.model.TAgentRun
@@ -53,6 +54,7 @@ import reactor.core.publisher.Flux
 @Component
 class AgentRunOrchestrator(
     private val properties: EffectiveAgentRuntimeProperties,
+    private val runtimeProperties: AgentRuntimeProperties,
     private val permissionManager: PermissionManager,
     private val inputValidator: RunAgentInputValidator,
     private val aguiResumeValidator: AguiResumeValidator,
@@ -120,9 +122,14 @@ class AgentRunOrchestrator(
      * 放在 [assertAcceptingRequests] 之后、`prepareInput` 之前：比停机检查晚一步是因为停机是更紧急的
      * 拒绝信号（关系到能不能启动新 run），比输入校验、会话归属检查早是为了不白做那些校验——名单外的
      * 项目/用户应该尽快拿到明确的"未开通"反馈，而不是先看到别的校验错误。
+     *
+     * 故意读 [runtimeProperties]（live 的 `@ConfigurationProperties` bean）而不是 [properties]
+     * （启动期拍平一次的 [EffectiveAgentRuntimeProperties] 快照）：前者的字段会在配置中心推送变更后被
+     * Spring Cloud Context 原地 rebind，这样改名单/开关灰度不需要重启服务，见
+     * [com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties.Gray] 的"运行时热更新"说明。
      */
     private fun assertGrayAllowed(userId: String, projectId: String) {
-        if (properties.gray.isAllowed(userId, projectId)) {
+        if (runtimeProperties.gray.isAllowed(userId, projectId)) {
             return
         }
         logger.info("Rejecting agent run: project[$projectId] user[$userId] is not in the gray release allowlist")
