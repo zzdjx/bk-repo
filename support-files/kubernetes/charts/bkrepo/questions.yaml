@@ -33,12 +33,12 @@ questions:
     label: "内置 MongoDB 密码"
     type: password
     required: true
-    description: "mongodb.enabled=true 时必填，禁止使用默认口令 bkrepo"
+    description: "mongodb.enabled=true 时必填"
     group: "mongodb配置"
   - variable: externalMongodb.uri
     label: "外部mongodb服务连接字符串"
     type: string
-    description: "仅当mongodb.enabled=false时必填，禁止使用默认凭据 bkrepo/bkrepo"
+    description: "仅当mongodb.enabled=false时必填"
     group: "mongodb配置"
   - variable: init.mongodb.enabled
     label: "是否初始化数据库，支持幂等执行"

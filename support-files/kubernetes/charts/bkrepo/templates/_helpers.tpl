@@ -399,25 +399,24 @@ Must be explicitly set and must not be a publicly known default.
 
 {{/*
 Return the in-cluster MongoDB password.
-Must be explicitly set when mongodb.enabled=true and must not be the public default.
+Must be set, otherwise the URI does not match the password the subchart generates.
 */}}
 {{- define "bkrepo.mongodb.password" -}}
 {{- $password := .Values.mongodb.auth.password | toString -}}
-{{- if or (eq $password "") (eq $password "bkrepo") -}}
-{{- fail "mongodb.auth.password must be set to a strong value when mongodb.enabled=true (do not use empty or 'bkrepo'). Example: --set mongodb.auth.password=<your-password>" -}}
+{{- if eq $password "" -}}
+{{- fail "mongodb.auth.password must be set when mongodb.enabled=true. Example: --set mongodb.auth.password=<your-password>" -}}
 {{- else -}}
 {{- $password -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Return the external MongoDB URI.
-Required when mongodb.enabled=false; reject the hardcoded default credentials.
+Return the external MongoDB URI. Required when mongodb.enabled=false.
 */}}
 {{- define "bkrepo.externalMongodb.uri" -}}
 {{- $uri := .Values.externalMongodb.uri | toString -}}
-{{- if or (eq $uri "") (contains "bkrepo:bkrepo@" $uri) -}}
-{{- fail "externalMongodb.uri must be set to a real MongoDB URI when mongodb.enabled=false (do not use default credentials bkrepo/bkrepo)." -}}
+{{- if eq $uri "" -}}
+{{- fail "externalMongodb.uri must be set when mongodb.enabled=false. Example: --set externalMongodb.uri=mongodb://<user>:<password>@<host>:27017/bkrepo" -}}
 {{- else -}}
 {{- $uri -}}
 {{- end -}}

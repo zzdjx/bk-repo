@@ -103,7 +103,7 @@ mongodb:
     enabled: true
     database: bkrepo
     username: bkrepo
-    ## 必须通过 --set / 自定义 values 显式指定，禁止使用默认口令 bkrepo
+    ## 必须通过 --set / 自定义 values 显式指定，留空无法与子 chart 生成的口令对上
     password: ""
   persistence:
     subPath: mongodb
@@ -154,7 +154,7 @@ tls:
 
 ## 如果mongodb.enabled为false，bkrepo将使用下面的参数连接外部mongodb
 externalMongodb:
-  ## mongodb 标准连接字符串（mongodb.enabled=false 时必填，禁止使用默认凭据 bkrepo/bkrepo）
+  ## mongodb 标准连接字符串（mongodb.enabled=false 时必填）
   uri: ""
 
 ## 数据持久化配置, 当使用filesystem方式存储时需要配置

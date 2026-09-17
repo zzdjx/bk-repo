@@ -137,8 +137,8 @@ $ helm uninstall bkrepo
 | `mongodb.auth.enabled` | 是否开启认证 | `true` |
 | `mongodb.auth.database` | mongodb数据库名称 | `bkrepo` |
 | `mongodb.auth.username` | mongodb认证用户名 | `bkrepo` |
-| `mongodb.auth.password` | mongodb密码（`mongodb.enabled=true` 时必填，禁止使用 `bkrepo`） | 无默认值，需 `--set mongodb.auth.password=<password>` |
-| `externalMongodb.uri` | 外部mongodb连接地址。当`mongodb.enabled=false`时必填，禁止使用默认凭据 `bkrepo/bkrepo` | 无默认值 |
+| `mongodb.auth.password` | mongodb密码（`mongodb.enabled=true` 时必填） | 无默认值，需 `--set mongodb.auth.password=<password>` |
+| `externalMongodb.uri` | 外部mongodb连接地址。当`mongodb.enabled=false`时必填 | 无默认值 |
 
 > 如果需要持久化mongodb数据，请参考[bitnami/mongodb](https://github.com/bitnami/charts/blob/master/bitnami/mongodb)配置存储卷
 
