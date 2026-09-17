@@ -157,6 +157,8 @@ class AgentPermissionRulesConfigurationTest {
             requireRedis = false,
             taskStoreKeyPrefix = "bkrepo:agent:task-store:",
             memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
+            memoryDailyLedgerRetention = java.time.Duration.ofDays(90),
+            memoryMaintenanceInterval = java.time.Duration.ofHours(24),
             frontendToolsEnabled = true,
             readOnlyMode = readOnly,
             retention = EffectiveAgentRetention.defaults(),

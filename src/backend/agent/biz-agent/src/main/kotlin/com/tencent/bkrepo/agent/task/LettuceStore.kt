@@ -34,6 +34,8 @@ import io.agentscope.harness.agent.filesystem.remote.store.StoreItem
 import io.lettuce.core.Limit
 import io.lettuce.core.Range
 import io.lettuce.core.RedisClient
+import io.lettuce.core.ScanArgs
+import io.lettuce.core.ScanCursor
 import io.lettuce.core.ScriptOutputType
 import io.lettuce.core.api.StatefulRedisConnection
 import io.lettuce.core.api.sync.RedisCommands
@@ -195,6 +197,38 @@ class LettuceStore(
     }
 
     /**
+     * 反查这个 store 里存在过数据的命名空间，只保留匹配 [namespaceGlobPattern] 的部分。
+     *
+     * 用途很窄：批处理任务需要"这个 store 里一共有哪些命名空间"（比如长期记忆定期整理任务要知道
+     * "所有保存过 daily ledger 的用户"，见 [com.tencent.bkrepo.agent.memory.AgentMemoryMaintenanceJob]），
+     * 而常规读写路径永远是调用方已经知道 namespace（由业务侧的 userId/agentId 拼出来），不需要反查，
+     * 也不应该依赖这个方法——它的开销是"这个 store 前缀下全部命名空间"量级，不是 O(1) 的。
+     *
+     * 实现上用游标式 `SCAN`（不是阻塞式 `KEYS`）遍历这个 store 前缀下的全部命名空间索引 key（`idx:` 段），
+     * 避免大 keyspace 下卡住 Redis；`SCAN ... MATCH` 只用来把范围收窄到 `idx:` 段本身（避免扫到 `item:`
+     * 段），真正按 [namespaceGlobPattern] 做的 glob 过滤——`*` 通配一个或多个 `\u0000` 分隔的段——在客户端
+     * 用它自己转的正则完成，不依赖 Redis `MATCH` 的 glob 语义，这样脱离真实 Redis 也能测试这条过滤逻辑。
+     */
+    fun scanNamespaces(namespaceGlobPattern: String): List<String> {
+        val idxPrefix = keyPrefix + "idx:"
+        val matcher = globToRegex(namespaceGlobPattern)
+        val scanArgs = ScanArgs.Builder.limit(SCAN_BATCH_SIZE).match(idxPrefix + "*")
+        val result = mutableListOf<String>()
+        var cursor: ScanCursor = ScanCursor.INITIAL
+        do {
+            val scanResult = commands.scan(cursor, scanArgs)
+            scanResult.keys.forEach { key ->
+                val namespace = key.removePrefix(idxPrefix)
+                if (matcher.matches(namespace)) {
+                    result.add(namespace)
+                }
+            }
+            cursor = scanResult
+        } while (!cursor.isFinished)
+        return result
+    }
+
+    /**
      * 把过期时刻往后推一个完整保留期。只有同时配了 TTL 且开启 [refreshTtlOnRead] 才生效，
      * 用于长期记忆那种"最后一次使用之后再放多久"的语义。
      */
@@ -286,6 +320,25 @@ class LettuceStore(
                 return DEFAULT_KEY_PREFIX
             }
             return if (prefix.endsWith(":")) prefix else "$prefix:"
+        }
+
+        /** [scanNamespaces] 每次 `SCAN` 请求的建议批量，只影响往返次数，不影响最终结果。 */
+        private const val SCAN_BATCH_SIZE = 200L
+
+        /** glob 里除 `*` 之外会被当作正则特殊字符转义的字符集合。 */
+        private const val REGEX_SPECIAL_CHARS = "\\.^$|?+()[]{}"
+
+        /** 把只支持 `*` 通配符的 glob 转成等价的完全匹配正则；[glob] 里的正则特殊字符会被转义成字面值。 */
+        private fun globToRegex(glob: String): Regex {
+            val pattern = StringBuilder()
+            glob.forEach { ch ->
+                when {
+                    ch == '*' -> pattern.append(".*")
+                    REGEX_SPECIAL_CHARS.contains(ch) -> pattern.append('\\').append(ch)
+                    else -> pattern.append(ch)
+                }
+            }
+            return Regex(pattern.toString())
         }
     }
 }

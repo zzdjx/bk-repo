@@ -27,6 +27,7 @@
 
 package com.tencent.bkrepo.agent.task
 
+import io.lettuce.core.KeyScanCursor
 import io.lettuce.core.Limit
 import io.lettuce.core.RedisClient
 import io.lettuce.core.api.StatefulRedisConnection
@@ -69,6 +70,14 @@ class LettuceStoreTest {
     /** key -> 最后一次设置的过期毫秒数，模拟 PEXPIRE；没有条目表示该 key 当前不会过期。 */
     private val expirations = mutableMapOf<String, Long>()
 
+    /**
+     * [scanNamespaces] 多页游标测试专用：预先铺好每一页 `SCAN` 应该返回的 key 列表与是否是最后一页，
+     * `scan` 每被调用一次就消费一页。为空时退化成"一次性把 [sortedSets] 里全部 idx: key 当作单页返回"，
+     * 这样不关心分页细节的测试不用逐个铺页。
+     */
+    private val scanPages = mutableListOf<Pair<List<String>, Boolean>>()
+    private var scanPageIndex = 0
+
     private lateinit var client: RedisClient
     private lateinit var store: LettuceStore
 
@@ -77,6 +86,8 @@ class LettuceStoreTest {
         hashes.clear()
         sortedSets.clear()
         expirations.clear()
+        scanPages.clear()
+        scanPageIndex = 0
         val commands: RedisCommands<String, String> =
             mock(defaultAnswer = Answer { invocation -> fakeRedis(invocation) })
         val connection = mock<StatefulRedisConnection<String, String>>()
@@ -163,8 +174,31 @@ class LettuceStoreTest {
                 }
             }
 
+            "scan" -> fakeScan()
+
             else -> null
         }
+    }
+
+    /**
+     * 模拟 `SCAN(cursor, ScanArgs)`：不解析 [io.lettuce.core.ScanArgs] 里的 `MATCH` 模式（它没有公开的
+     * getter 可供反查），直接把 [sortedSets] 里现存的全部 idx: key 当作候选——真正的 `MATCH agents...`
+     * 前缀收窄发生在真实 Redis 里，这里只需要验证 [LettuceStore.scanNamespaces] 拿到候选 key 之后的
+     * 前缀剥离 + glob 过滤 + 多页游标聚合逻辑是否正确。[scanPages] 非空时按顺序消费预置的分页，用于
+     * 单独验证游标循环不会在还有下一页时提前退出。
+     */
+    private fun fakeScan(): KeyScanCursor<String> {
+        val (keys, finished) = if (scanPages.isNotEmpty()) {
+            val page = scanPages[scanPageIndex.coerceAtMost(scanPages.size - 1)]
+            scanPageIndex++
+            page
+        } else {
+            sortedSets.keys.toList() to true
+        }
+        val cursor = mock<KeyScanCursor<String>>()
+        whenever(cursor.keys).thenReturn(keys)
+        whenever(cursor.isFinished).thenReturn(finished)
+        return cursor
     }
 
     /** 模拟 Lua 里 `if ttl > 0 then PEXPIRE ... end` 那段。 */
@@ -370,6 +404,65 @@ class LettuceStoreTest {
         assertNull(memoryStore.get(ns, "MEMORY.md"))
 
         assertTrue(expirations.isEmpty())
+    }
+
+    @Test
+    fun `scanNamespaces应按通配符过滤命中的命名空间并剥离idx前缀`() {
+        store.put(
+            mutableListOf("agents", "coordinator", "users", "alice", "memory"),
+            "2026-01-01.md",
+            mutableMapOf<String, Any>("content" to "a"),
+        )
+        store.put(
+            mutableListOf("agents", "coordinator", "users", "bob", "memory"),
+            "2026-01-01.md",
+            mutableMapOf<String, Any>("content" to "b"),
+        )
+        // 同一用户的 root 段（MEMORY.md）不该被 users/*/memory 这个模式匹配到。
+        store.put(
+            mutableListOf("agents", "coordinator", "users", "alice", "root"),
+            "MEMORY.md",
+            mutableMapOf<String, Any>("content" to "c"),
+        )
+
+        val namespaces = store.scanNamespaces("agents\u0000coordinator\u0000users\u0000*\u0000memory")
+
+        assertEquals(
+            setOf(
+                "agents\u0000coordinator\u0000users\u0000alice\u0000memory",
+                "agents\u0000coordinator\u0000users\u0000bob\u0000memory",
+            ),
+            namespaces.toSet(),
+        )
+    }
+
+    @Test
+    fun `scanNamespaces在没有命中的命名空间时返回空列表`() {
+        store.put(
+            mutableListOf("agents", "coordinator", "users", "alice", "root"),
+            "MEMORY.md",
+            mutableMapOf<String, Any>("content" to "c"),
+        )
+
+        val namespaces = store.scanNamespaces("agents\u0000coordinator\u0000users\u0000*\u0000memory")
+
+        assertTrue(namespaces.isEmpty())
+    }
+
+    @Test
+    fun `scanNamespaces应聚合完所有游标页且不提前退出`() {
+        scanPages.add(listOf("test:task-store:idx:agents\u0000coordinator\u0000users\u0000alice\u0000memory") to false)
+        scanPages.add(listOf("test:task-store:idx:agents\u0000coordinator\u0000users\u0000bob\u0000memory") to true)
+
+        val namespaces = store.scanNamespaces("agents\u0000coordinator\u0000users\u0000*\u0000memory")
+
+        assertEquals(
+            setOf(
+                "agents\u0000coordinator\u0000users\u0000alice\u0000memory",
+                "agents\u0000coordinator\u0000users\u0000bob\u0000memory",
+            ),
+            namespaces.toSet(),
+        )
     }
 
     companion object {

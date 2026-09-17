@@ -1291,7 +1291,17 @@ key TTL，用的是 `sessionTtl`（默认 30 天）。也就是说一张写操�
 代价：`disableMemoryHooks()` 是一个粗粒度开关，关掉自动 flush 的同时也关掉了
 `MemoryMaintenanceMiddleware` 提供的每日文件归档、`MEMORY.md` 定期整理、旧会话日志清理——阶段 10
 窄范围内暂不补，TTL/定期整理留给后续阶段用独立的定时任务实现（不依赖框架这个和自动 flush 绑在一起的
-每轮 hook）。
+每轮 hook）。旧会话日志清理不需要补：那份 `agents/<agentId>/sessions/*.log.jsonl` 本来就是
+`MemoryFlushMiddleware` 自己顺带写的，flush 已经无条件关闭，这份文件从这次改动之后就不会再产生。
+
+**每日文件归档（已完成）**：`com.tencent.bkrepo.agent.memory.AgentMemoryMaintenanceJob` 用独立的单线程
+`ScheduledExecutorService`（默认每 `agent.runtime.memory.maintenance-interval`，24 小时一次）清理超过
+`agent.runtime.memory.daily-ledger-retention`（默认 90 天）的 `memory/YYYY-MM-DD.md` daily ledger 文件；
+配成 `0`/负值表示不清理。反查"这个 agent 有哪些用户存过记忆"靠新增的
+`com.tencent.bkrepo.agent.task.LettuceStore.scanNamespaces`（游标式 `SCAN`，避免阻塞式 `KEYS`）。
+`MEMORY.md` 本身的合并/去重/裁剪（框架原本的 `MemoryConsolidator`）没有补——那需要另起一次 LLM 调用
+静默改写用户长期记忆，与"记忆写入需用户明确同意"的产品策略冲突，需要独立评估，仍是已知边界，见该类
+KDoc。
 
 **存储实现**
 

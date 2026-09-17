@@ -71,6 +71,12 @@ agent:
     #       user-ids: [ "internal-tester-1" ]
     #       message: 7d
     #       session: 7d
+    # 长期记忆定期整理：只清理超期的 memory/YYYY-MM-DD.md 日志文件，不改写 MEMORY.md 本身——那需要另起
+    # 一次 LLM 调用做语义合并/去重，出于"不能悄悄用 LLM 改写用户记忆"的产品策略未启用，见
+    # AgentMemoryMaintenanceJob 类注释。daily-ledger-retention 配 0（或负值）表示不清理。
+    # memory:
+    #   daily-ledger-retention: 90d
+    #   maintenance-interval: 24h
     features:
       frontend-tools-enabled: true
       # 生产应急阀：置为 true 后 Agent 的写能力整体停用（客户端写工具不再注册给模型，

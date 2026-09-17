@@ -96,6 +96,8 @@ class UsageTrackingMiddlewareTest {
             requireRedis = false,
             taskStoreKeyPrefix = "bkrepo:agent:task-store:",
             memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
+            memoryDailyLedgerRetention = Duration.ofDays(90),
+            memoryMaintenanceInterval = Duration.ofHours(24),
             frontendToolsEnabled = false,
             readOnlyMode = false,
             retention = EffectiveAgentRetention.defaults(),

@@ -82,9 +82,26 @@ data class AgentRuntimeProperties(
      */
     data class Memory(
         var keyPrefix: String = DEFAULT_KEY_PREFIX,
+        /**
+         * 长期记忆定期整理任务（[com.tencent.bkrepo.agent.memory.AgentMemoryMaintenanceJob]）的执行间隔与
+         * daily ledger（`memory/YYYY-MM-DD.md`）保留期。
+         *
+         * 只清理 daily ledger 文件本身，不处理 `MEMORY.md` 的合并/去重/裁剪——后者是框架
+         * `MemoryMaintenanceMiddleware`/`MemoryConsolidator` 的职责，需要另起一次 LLM 调用改写用户长期
+         * 记忆，随 [com.tencent.bkrepo.agent.config.AgentHarnessConfigurer] 里的 `disableMemoryHooks()`
+         * 被整体关闭（不经过 HITL，产品策略上不能悄悄用 LLM 改写用户保存的内容），这里不重新实现，
+         * 属于已知边界，见该处与 [com.tencent.bkrepo.agent.memory.AgentMemoryMaintenanceJob] 的注释。
+         *
+         * [dailyLedgerRetention] 配成 `0`（或负值）表示不清理，与 [Retention] 的
+         * "0/负值=永不过期"约定保持一致；此时任务在 `@PostConstruct` 阶段直接不启动调度。
+         */
+        var dailyLedgerRetention: Duration = DEFAULT_DAILY_LEDGER_RETENTION,
+        var maintenanceInterval: Duration = DEFAULT_MAINTENANCE_INTERVAL,
     ) {
         companion object {
             const val DEFAULT_KEY_PREFIX = "bkrepo:agent:memory-store:"
+            val DEFAULT_DAILY_LEDGER_RETENTION: Duration = Duration.ofDays(90)
+            val DEFAULT_MAINTENANCE_INTERVAL: Duration = Duration.ofHours(24)
         }
     }
 
@@ -413,6 +430,8 @@ data class EffectiveAgentRuntimeProperties(
     val requireRedis: Boolean,
     val taskStoreKeyPrefix: String,
     val memoryStoreKeyPrefix: String,
+    val memoryDailyLedgerRetention: Duration,
+    val memoryMaintenanceInterval: Duration,
     val frontendToolsEnabled: Boolean,
     val readOnlyMode: Boolean,
     val retention: EffectiveAgentRetention,
@@ -444,6 +463,8 @@ object AgentRuntimePropertiesResolver {
             requireRedis = runtime.state.requireRedis,
             taskStoreKeyPrefix = runtime.task.keyPrefix,
             memoryStoreKeyPrefix = runtime.memory.keyPrefix,
+            memoryDailyLedgerRetention = runtime.memory.dailyLedgerRetention,
+            memoryMaintenanceInterval = runtime.memory.maintenanceInterval,
             frontendToolsEnabled = runtime.features.frontendToolsEnabled,
             readOnlyMode = runtime.features.readOnlyMode,
             retention = EffectiveAgentRetention.from(runtime.retention),

@@ -381,4 +381,22 @@ class AgentPropertiesBindingTest {
         assertTrue(enabled.topology.agents.governance.enabled)
         assertEquals(6, enabled.topology.agents.governance.maxSteps)
     }
+
+    @Test
+    fun `长期记忆daily ledger保留期与整理间隔默认值应有限且可配置覆盖`() {
+        val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
+        assertEquals(Duration.ofDays(90), defaults.memoryDailyLedgerRetention)
+        assertEquals(Duration.ofHours(24), defaults.memoryMaintenanceInterval)
+
+        val overridden = AgentRuntimePropertiesResolver.resolve(
+            AgentRuntimeProperties().apply {
+                memory = AgentRuntimeProperties.Memory(
+                    dailyLedgerRetention = Duration.ofDays(30),
+                    maintenanceInterval = Duration.ofHours(6),
+                )
+            },
+        )
+        assertEquals(Duration.ofDays(30), overridden.memoryDailyLedgerRetention)
+        assertEquals(Duration.ofHours(6), overridden.memoryMaintenanceInterval)
+    }
 }
