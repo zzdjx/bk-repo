@@ -19,10 +19,10 @@ $ helm install bkrepo bkee/bkrepo --set common.password=<your-password> --set mo
 
 网关平台账号有两种配法，新安装任选其一：
 
-- 配 `gateway.accessKey` 与 `gateway.secretKey`（推荐，两者必须同时配）
-- 只配 `gateway.authorization`，格式为 `Platform <base64(accessKey:secretKey)>`
+- 配 `gateway.authorization`，格式为 `Platform <base64(accessKey:secretKey)>`
+- 配 `gateway.accessKey` 与 `gateway.secretKey`（两者必须同时配）
 
-新安装两种配法都不接受仓库内那对公开默认凭证。存量升级可继续使用已有且格式正确的 `gateway.authorization`。
+`gateway.authorization` 改成自定义值后优先生效；保持为 `values.yaml` 里的公开默认值时，回落到 `gateway.accessKey`/`gateway.secretKey`。新安装两种配法都不接受仓库内那对公开默认凭证。存量升级可继续使用已有且格式正确的 `gateway.authorization`。
 
 ## 卸载Chart
 使用以下命令卸载`bkrepo`:
@@ -137,8 +137,8 @@ $ helm uninstall bkrepo
 | `mongodb.auth.enabled` | 是否开启认证 | `true` |
 | `mongodb.auth.database` | mongodb数据库名称 | `bkrepo` |
 | `mongodb.auth.username` | mongodb认证用户名 | `bkrepo` |
-| `mongodb.auth.password` | mongodb密码（`mongodb.enabled=true` 时必填，禁止使用 `bkrepo`） | 无默认值，需 `--set mongodb.auth.password=<password>` |
-| `externalMongodb.uri` | 外部mongodb连接地址。当`mongodb.enabled=false`时必填，禁止使用默认凭据 `bkrepo/bkrepo` | 无默认值 |
+| `mongodb.auth.password` | mongodb密码（`mongodb.enabled=true` 时必填） | 无默认值，需 `--set mongodb.auth.password=<password>` |
+| `externalMongodb.uri` | 外部mongodb连接地址。当`mongodb.enabled=false`时必填 | 无默认值 |
 
 > 如果需要持久化mongodb数据，请参考[bitnami/mongodb](https://github.com/bitnami/charts/blob/master/bitnami/mongodb)配置存储卷
 
@@ -196,9 +196,9 @@ $ helm uninstall bkrepo
 | `gateway.service.nodePort` | 服务类型为`NodePort`时端口设置 | `80` |
 | `gateway.host` | bkrepo 地址 | `bkrepo.example.com` |
 | `gateway.dnsServer` | dns服务器地址，用于配置nginx resolver | `local=on`(openrestry语法，取本机`/etc/resolv.conf`配置) |
-| `gateway.authorization` | 网关访问微服务认证信息，`Platform <base64(ak:sk)>`。新安装可只配这一项，但必须能解析出 ak/sk 且不是公开默认值 | `"Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="` |
-| `gateway.accessKey` | 网关平台账号 accessKey，与 secretKey 同时配置时优先于 authorization（禁止公开默认值） | `""` |
-| `gateway.secretKey` | 网关平台账号 secretKey，与 accessKey 同时配置时优先于 authorization（禁止公开默认值） | `""` |
+| `gateway.authorization` | 网关访问微服务认证信息，`Platform <base64(ak:sk)>`。改成自定义值后优先于 accessKey/secretKey；仍为公开默认值则回落，且新安装会被拒绝 | `"Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="` |
+| `gateway.accessKey` | 网关平台账号 accessKey，authorization 仍为默认值时生效，需与 secretKey 同时配置（禁止公开默认值） | `""` |
+| `gateway.secretKey` | 网关平台账号 secretKey，authorization 仍为默认值时生效，需与 accessKey 同时配置（禁止公开默认值） | `""` |
 | `gateway.deployMode` | 部署模式，standalone: 独立模式，ci: 与ci搭配模式 | `standalone` |
 
 ### repository服务配置
