@@ -32,6 +32,7 @@ import com.tencent.bkrepo.common.artifact.stream.Range
 import com.tencent.bkrepo.common.lock.service.LockOperation
 import com.tencent.bkrepo.common.metadata.service.node.NodeService
 import com.tencent.bkrepo.pypi.artifact.PypiProperties
+import com.tencent.bkrepo.pypi.exception.PypiSimpleNotFoundException
 import com.tencent.bkrepo.pypi.util.PypiSimpleIndexUtils
 import com.tencent.bkrepo.repository.pojo.node.NodeDetail
 import com.tencent.bkrepo.repository.pojo.node.NodeInfo
@@ -44,6 +45,7 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
@@ -84,7 +86,8 @@ class PypiSimpleIndexCacheServiceTest {
 
         val result = service.load(PROJECT, REPO, "My_Package", null)
 
-        assertEquals(html, result)
+        assertEquals(html, result!!.html)
+        assertFalse(result.expired)
         verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
     }
 
@@ -98,14 +101,20 @@ class PypiSimpleIndexCacheServiceTest {
     }
 
     @Test
-    @DisplayName("缓存超过 TTL 时按 miss 处理")
-    fun loadReturnsNullWhenExpired() {
+    @DisplayName("缓存超过 TTL 时仍返回旧 HTML")
+    fun loadReturnsHtmlWhenExpired() {
+        val html = "<html>stale</html>"
         val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
         val node = nodeDetail(fullPath, lastModifiedDate = LocalDateTime.now().minusMinutes(2))
         every { nodeService.getNodeDetail(any(), any()) } returns node
+        every {
+            storageManager.loadFullArtifactInputStream(node, null)
+        } returns ArtifactInputStream(html.byteInputStream(), Range.full(html.length.toLong()))
 
-        assertNull(service.load(PROJECT, REPO, "demo", null))
-        verify(exactly = 0) { storageManager.loadFullArtifactInputStream(any(), any()) }
+        val result = service.load(PROJECT, REPO, "demo", null)
+
+        assertEquals(html, result!!.html)
+        assertTrue(result.expired)
     }
 
     @Test
@@ -120,7 +129,9 @@ class PypiSimpleIndexCacheServiceTest {
             storageManager.loadFullArtifactInputStream(node, null)
         } returns ArtifactInputStream(html.byteInputStream(), Range.full(html.length.toLong()))
 
-        assertEquals(html, service.load(PROJECT, REPO, "demo", null))
+        val result = service.load(PROJECT, REPO, "demo", null)
+        assertEquals(html, result!!.html)
+        assertFalse(result.expired)
     }
 
     @Test
@@ -131,6 +142,7 @@ class PypiSimpleIndexCacheServiceTest {
         every { lockOperation.getLock(any()) } returns lock
         every { lockOperation.acquireLock(any(), lock) } returns true
         every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } returns null
         every { storageManager.storeArtifactFile(any(), any(), any()) } returns nodeDetail(fullPath)
 
         val stored = service.tryStore(PROJECT, REPO, "My.Package", "<html>new</html>", "user", null)
@@ -146,6 +158,22 @@ class PypiSimpleIndexCacheServiceTest {
             )
         }
         verify { lockOperation.close(any(), lock) }
+    }
+
+    @Test
+    @DisplayName("tryStore 发现缓存节点已存在则不覆盖")
+    fun tryStoreSkipsWriteWhenCacheNodeExists() {
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        val lock = Any()
+        every { lockOperation.getLock(any()) } returns lock
+        every { lockOperation.acquireLock(any(), lock) } returns true
+        every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } returns nodeDetail(fullPath)
+
+        val stored = service.tryStore(PROJECT, REPO, "demo", "<html>stale</html>", "user", null)
+
+        assertFalse(stored)
+        verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
     }
 
     @Test
@@ -171,6 +199,181 @@ class PypiSimpleIndexCacheServiceTest {
 
         assertFalse(stored)
         verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
+    }
+
+    @Test
+    @DisplayName("tryRefresh 获锁且过期时重建并写入")
+    fun tryRefreshStoresWhenLockAcquiredAndExpired() {
+        val stale = "<html>stale</html>"
+        val html = "<html>new</html>"
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        val lock = Any()
+        val expiredNode = nodeDetail(fullPath, lastModifiedDate = LocalDateTime.now().minusMinutes(2))
+        every { lockOperation.getLock(any()) } returns lock
+        every { lockOperation.acquireLock(any(), lock) } returns true
+        every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } returns expiredNode
+        every {
+            storageManager.loadFullArtifactInputStream(expiredNode, null)
+        } returns ArtifactInputStream(stale.byteInputStream(), Range.full(stale.length.toLong()))
+        every { storageManager.storeArtifactFile(any(), any(), any()) } returns nodeDetail(fullPath)
+
+        val result = service.tryRefresh(PROJECT, REPO, "demo", "user", null) { html }
+
+        assertEquals(html, result)
+        verify {
+            storageManager.storeArtifactFile(
+                match<NodeCreateRequest> { it.fullPath == fullPath && it.overwrite },
+                any(),
+                null
+            )
+        }
+    }
+
+    @Test
+    @DisplayName("tryRefresh 未获锁时不重建不写缓存")
+    fun tryRefreshReturnsNullWhenLockNotAcquired() {
+        val lock = Any()
+        every { lockOperation.getLock(any()) } returns lock
+        every { lockOperation.acquireLock(any(), lock) } returns false
+        var rebuilt = 0
+
+        val result = service.tryRefresh(PROJECT, REPO, "demo", "user", null) {
+            rebuilt++
+            "<html>new</html>"
+        }
+
+        assertNull(result)
+        assertEquals(0, rebuilt)
+        verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
+    }
+
+    @Test
+    @DisplayName("tryRefresh 获锁后发现未过期则直接返回，不重建")
+    fun tryRefreshReturnsCurrentWhenNotExpiredAfterLock() {
+        val html = "<html>fresh</html>"
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        val lock = Any()
+        val node = nodeDetail(fullPath)
+        every { lockOperation.getLock(any()) } returns lock
+        every { lockOperation.acquireLock(any(), lock) } returns true
+        every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } returns node
+        every {
+            storageManager.loadFullArtifactInputStream(node, null)
+        } returns ArtifactInputStream(html.byteInputStream(), Range.full(html.length.toLong()))
+        var rebuilt = 0
+
+        val result = service.tryRefresh(PROJECT, REPO, "demo", "user", null) {
+            rebuilt++
+            "<html>new</html>"
+        }
+
+        assertEquals(html, result)
+        assertEquals(0, rebuilt)
+        verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
+    }
+
+    @Test
+    @DisplayName("tryRefresh 重建期间 lastModified 变化则不覆盖写")
+    fun tryRefreshSkipsStoreWhenLastModifiedChanged() {
+        val stale = "<html>stale</html>"
+        val uploaded = "<html>uploaded</html>"
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        val lock = Any()
+        val expiredNode = nodeDetail(fullPath, lastModifiedDate = LocalDateTime.now().minusMinutes(2))
+        val uploadedNode = nodeDetail(fullPath, lastModifiedDate = LocalDateTime.now())
+        var lookups = 0
+        every { lockOperation.getLock(any()) } returns lock
+        every { lockOperation.acquireLock(any(), lock) } returns true
+        every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } answers {
+            lookups++
+            if (lookups == 1) expiredNode else uploadedNode
+        }
+        every {
+            storageManager.loadFullArtifactInputStream(expiredNode, null)
+        } returns ArtifactInputStream(stale.byteInputStream(), Range.full(stale.length.toLong()))
+        every {
+            storageManager.loadFullArtifactInputStream(uploadedNode, null)
+        } returns ArtifactInputStream(uploaded.byteInputStream(), Range.full(uploaded.length.toLong()))
+
+        val result = service.tryRefresh(PROJECT, REPO, "demo", "user", null) { "<html>rebuilt</html>" }
+
+        assertEquals(uploaded, result)
+        verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
+    }
+
+    @Test
+    @DisplayName("tryRefresh 重建期间缓存被删则不写回")
+    fun tryRefreshSkipsStoreWhenNodeDeletedDuringRebuild() {
+        val stale = "<html>stale</html>"
+        val rebuilt = "<html>rebuilt</html>"
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        val lock = Any()
+        val expiredNode = nodeDetail(fullPath, lastModifiedDate = LocalDateTime.now().minusMinutes(2))
+        var lookups = 0
+        every { lockOperation.getLock(any()) } returns lock
+        every { lockOperation.acquireLock(any(), lock) } returns true
+        every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } answers {
+            lookups++
+            if (lookups == 1) expiredNode else null
+        }
+        every {
+            storageManager.loadFullArtifactInputStream(expiredNode, null)
+        } returns ArtifactInputStream(stale.byteInputStream(), Range.full(stale.length.toLong()))
+
+        val result = service.tryRefresh(PROJECT, REPO, "demo", "user", null) { rebuilt }
+
+        assertEquals(rebuilt, result)
+        verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
+    }
+
+    @Test
+    @DisplayName("tryRefresh 包不存在时删除缓存并抛 NotFound")
+    fun tryRefreshInvalidatesWhenRebuildNotFound() {
+        val stale = "<html>stale</html>"
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        val lock = Any()
+        val expiredNode = nodeDetail(fullPath, lastModifiedDate = LocalDateTime.now().minusMinutes(2))
+        every { lockOperation.getLock(any()) } returns lock
+        every { lockOperation.acquireLock(any(), lock) } returns true
+        every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } returns expiredNode
+        every { nodeService.deleteNode(any()) } returns mockk(relaxed = true)
+        every {
+            storageManager.loadFullArtifactInputStream(expiredNode, null)
+        } returns ArtifactInputStream(stale.byteInputStream(), Range.full(stale.length.toLong()))
+
+        assertThrows(PypiSimpleNotFoundException::class.java) {
+            service.tryRefresh(PROJECT, REPO, "demo", "user", null) {
+                throw PypiSimpleNotFoundException("demo")
+            }
+        }
+        verify {
+            nodeService.deleteNode(match<NodeDeleteRequest> { it.fullPath == fullPath })
+        }
+        verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
+    }
+
+    @Test
+    @DisplayName("overwrite 不抢锁，listing 后直接写")
+    fun overwriteWritesWithoutLock() {
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        every { storageManager.storeArtifactFile(any(), any(), any()) } returns nodeDetail(fullPath)
+
+        service.overwrite(PROJECT, REPO, "demo", "user", null) { "<html>new</html>" }
+
+        verify {
+            storageManager.storeArtifactFile(
+                match<NodeCreateRequest> { it.fullPath == fullPath && it.overwrite },
+                any(),
+                null
+            )
+        }
+        verify(exactly = 0) { lockOperation.getLock(any()) }
+        verify(exactly = 0) { lockOperation.acquireLock(any(), any()) }
     }
 
     @Test
@@ -225,25 +428,31 @@ class PypiSimpleIndexCacheServiceTest {
     }
 
     @Test
-    @DisplayName("invalidate 后旧 HTML 仍可被 tryStore 写回，但过期后 load 按 miss")
+    @DisplayName("invalidate 后旧 HTML 仍可被 tryStore 写回，过期后 load 仍返回内容")
     fun staleStoreAfterInvalidateExpiresByTtl() {
         val packageName = "demo"
+        val html = "<html>stale</html>"
         val fullPath = PypiSimpleIndexUtils.packageCacheFullPath(packageName)
         val lock = Any()
         every { lockOperation.getLock(any()) } returns lock
         every { lockOperation.acquireLock(any(), lock) } returns true
         every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } returns null
         every { storageManager.storeArtifactFile(any(), any(), any()) } returns nodeDetail(fullPath)
         every { nodeService.deleteNode(any()) } returns mockk(relaxed = true)
 
         service.invalidate(PROJECT, REPO, packageName)
-        assertTrue(service.tryStore(PROJECT, REPO, packageName, "<html>stale</html>", "user", null))
+        assertTrue(service.tryStore(PROJECT, REPO, packageName, html, "user", null))
 
         val expiredNode = nodeDetail(fullPath, lastModifiedDate = LocalDateTime.now().minusMinutes(2))
         every { nodeService.getNodeDetail(any(), any()) } returns expiredNode
+        every {
+            storageManager.loadFullArtifactInputStream(expiredNode, null)
+        } returns ArtifactInputStream(html.byteInputStream(), Range.full(html.length.toLong()))
 
-        assertNull(service.load(PROJECT, REPO, packageName, null))
-        verify(exactly = 0) { storageManager.loadFullArtifactInputStream(any(), any()) }
+        val result = service.load(PROJECT, REPO, packageName, null)
+        assertEquals(html, result!!.html)
+        assertTrue(result.expired)
     }
 
     @Test

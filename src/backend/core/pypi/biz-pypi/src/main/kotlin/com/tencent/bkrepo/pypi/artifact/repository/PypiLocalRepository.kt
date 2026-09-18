@@ -38,6 +38,7 @@ import com.tencent.bkrepo.common.artifact.audit.ActionAuditContent
 import com.tencent.bkrepo.common.artifact.audit.NODE_DELETE_ACTION
 import com.tencent.bkrepo.common.artifact.audit.NODE_RESOURCE
 import com.tencent.bkrepo.common.artifact.path.PathUtils.ROOT
+import com.tencent.bkrepo.common.artifact.repository.context.ArtifactContext
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactDownloadContext
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactQueryContext
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactRemoveContext
@@ -157,7 +158,7 @@ class PypiLocalRepository(
             HttpContextHolder.getClientAddress()
         )
         store(nodeCreateRequest, artifactFile, context.storageCredentials)
-        invalidateSimpleIndexCache(context.projectId, context.repoName, name)
+        overwriteSimpleIndexCache(context, name)
     }
 
     override fun onDownloadBefore(context: ArtifactDownloadContext) {
@@ -295,7 +296,7 @@ class PypiLocalRepository(
                 contentPath,
             )
         }
-        invalidateSimpleIndexCache(context.projectId, context.repoName, name)
+        overwriteSimpleIndexCache(context, name)
     }
 
     /**
@@ -312,12 +313,36 @@ class PypiLocalRepository(
     private fun querySimpleHtml(context: ArtifactQueryContext, artifactInfo: PypiSimpleArtifactInfo): String? {
         val packageName = artifactInfo.packageName
         if (packageName != null && pypiProperties.enableSimpleIndexCache) {
-            simpleIndexCacheService.load(
+            val cache = simpleIndexCacheService.load(
                 projectId = artifactInfo.projectId,
                 repoName = artifactInfo.repoName,
                 packageName = packageName,
                 storageCredentials = context.storageCredentials,
-            )?.let { return it }
+            )
+            if (cache != null) {
+                if (!cache.expired) {
+                    return cache.html
+                }
+                val refreshed = simpleIndexCacheService.tryRefresh(
+                    projectId = artifactInfo.projectId,
+                    repoName = artifactInfo.repoName,
+                    packageName = packageName,
+                    userId = context.userId,
+                    storageCredentials = context.storageCredentials,
+                ) { getSimpleHtml(artifactInfo) }
+                if (refreshed != null) {
+                    return refreshed
+                }
+                val again = simpleIndexCacheService.load(
+                    projectId = artifactInfo.projectId,
+                    repoName = artifactInfo.repoName,
+                    packageName = packageName,
+                    storageCredentials = context.storageCredentials,
+                )
+                if (again != null) {
+                    return again.html
+                }
+            }
         }
         val html = getSimpleHtml(artifactInfo)
         if (packageName != null && html != null && pypiProperties.enableSimpleIndexCache) {
@@ -333,11 +358,29 @@ class PypiLocalRepository(
         return html
     }
 
-    private fun invalidateSimpleIndexCache(projectId: String, repoName: String, packageName: String) {
+    /** 上传/删版本后覆盖写该包索引；包已空则删缓存。 */
+    private fun overwriteSimpleIndexCache(context: ArtifactContext, packageName: String) {
         if (!pypiProperties.enableSimpleIndexCache) {
             return
         }
-        simpleIndexCacheService.invalidate(projectId, repoName, packageName)
+        val artifactInfo = PypiSimpleArtifactInfo(context.projectId, context.repoName, packageName)
+        try {
+            simpleIndexCacheService.overwrite(
+                projectId = context.projectId,
+                repoName = context.repoName,
+                packageName = packageName,
+                userId = context.userId,
+                storageCredentials = context.storageCredentials,
+            ) { getSimpleHtml(artifactInfo) }
+        } catch (_: PypiSimpleNotFoundException) {
+            simpleIndexCacheService.invalidate(context.projectId, context.repoName, packageName)
+        } catch (e: Exception) {
+            logger.error(
+                "Failed to overwrite pypi simple index cache" +
+                    "[${context.projectId}/${context.repoName}/$packageName]",
+                e
+            )
+        }
     }
 
     // TODO 产品页面需要重新设计，支持同个版本包含多个制品
@@ -390,7 +433,7 @@ class PypiLocalRepository(
             if (packageName == null) {
                 val nodeList = nodeService.listNode(
                     ArtifactInfo(projectId, repoName, ROOT),
-                    NodeListOption(includeFolder = true)
+                    NodeListOption(includeFolder = true, includeTotalRecords = false)
                 ).filter { it.folder && !PypiSimpleIndexUtils.isSimpleIndexCacheFolder(it.name) }
                     .takeIf { it.isNotEmpty() } ?: throw PypiSimpleNotFoundException(StringPool.SLASH)
                 // 过滤掉'根节点'与 simple 索引缓存目录
@@ -402,6 +445,7 @@ class PypiLocalRepository(
                 NodeListOption(
                     includeFolder = false,
                     deep = true,
+                    includeTotalRecords = false,
                 ),
                 listOf(VERSION, REQUIRES_PYTHON),
             )
