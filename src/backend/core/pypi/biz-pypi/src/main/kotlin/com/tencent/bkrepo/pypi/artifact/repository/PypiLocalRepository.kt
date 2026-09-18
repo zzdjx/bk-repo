@@ -333,15 +333,7 @@ class PypiLocalRepository(
                 if (refreshed != null) {
                     return refreshed
                 }
-                val again = simpleIndexCacheService.load(
-                    projectId = artifactInfo.projectId,
-                    repoName = artifactInfo.repoName,
-                    packageName = packageName,
-                    storageCredentials = context.storageCredentials,
-                )
-                if (again != null) {
-                    return again.html
-                }
+                return cache.html
             }
         }
         val html = getSimpleHtml(artifactInfo)
@@ -371,7 +363,7 @@ class PypiLocalRepository(
                 packageName = packageName,
                 userId = context.userId,
                 storageCredentials = context.storageCredentials,
-            ) { getSimpleHtml(artifactInfo) }
+            ) { getSimpleHtml(artifactInfo, useRegexQuery = false) }
         } catch (_: PypiSimpleNotFoundException) {
             simpleIndexCacheService.invalidate(context.projectId, context.repoName, packageName)
         } catch (e: Exception) {
@@ -426,7 +418,10 @@ class PypiLocalRepository(
     }
 
     // https://packaging.python.org/en/latest/specifications/simple-repository-api/
-    fun getSimpleHtml(artifactInfo: PypiSimpleArtifactInfo): String? {
+    fun getSimpleHtml(
+        artifactInfo: PypiSimpleArtifactInfo,
+        useRegexQuery: Boolean = true,
+    ): String? {
         with(artifactInfo) {
             logger.info("Get simple html, artifactInfo: $this")
             // 请求不带包名，返回包名列表.
@@ -455,7 +450,7 @@ class PypiLocalRepository(
                     buildPackageFileListContent(nodes)
                 )
             }
-            if (!pypiProperties.enableRegexQuery) {
+            if (!useRegexQuery || !pypiProperties.enableRegexQuery) {
                 throw PypiSimpleNotFoundException(packageName!!)
             }
             logger.info("not found nodeList by packageName[$packageName], use regex query")
