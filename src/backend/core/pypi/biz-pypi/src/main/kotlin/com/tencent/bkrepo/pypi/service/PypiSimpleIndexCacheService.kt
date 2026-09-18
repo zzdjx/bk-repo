@@ -177,6 +177,7 @@ class PypiSimpleIndexCacheService(
             throw e
         } catch (e: Exception) {
             logger.error("Failed to overwrite pypi simple index cache[$projectId/$repoName$fullPath]", e)
+            invalidate(projectId, repoName, packageName)
         }
     }
 
