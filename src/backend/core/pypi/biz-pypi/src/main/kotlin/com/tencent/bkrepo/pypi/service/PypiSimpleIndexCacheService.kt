@@ -108,6 +108,12 @@ class PypiSimpleIndexCacheService(
             } catch (e: PypiSimpleNotFoundException) {
                 invalidate(projectId, repoName, packageName)
                 throw e
+            } catch (e: Exception) {
+                logger.error(
+                    "Failed to rebuild pypi simple index cache[$projectId/$repoName$fullPath], return stale html",
+                    e,
+                )
+                return@tryWithLock current?.html
             } ?: return@tryWithLock null
             val latest = nodeService.getNodeDetail(ArtifactInfo(projectId, repoName, fullPath))
             if (latest == null || latest.folder) {
