@@ -358,6 +358,30 @@ class PypiSimpleIndexCacheServiceTest {
     }
 
     @Test
+    @DisplayName("tryRefresh listing 非 NotFound 异常时回退旧 HTML")
+    fun tryRefreshReturnsStaleWhenRebuildFails() {
+        val stale = "<html>stale</html>"
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        val lock = Any()
+        val expiredNode = nodeDetail(fullPath, lastModifiedDate = LocalDateTime.now().minusMinutes(2))
+        every { lockOperation.getLock(any()) } returns lock
+        every { lockOperation.acquireLock(any(), lock) } returns true
+        every { lockOperation.close(any(), lock) } returns Unit
+        every { nodeService.getNodeDetail(any(), any()) } returns expiredNode
+        every {
+            storageManager.loadFullArtifactInputStream(expiredNode, null)
+        } returns ArtifactInputStream(stale.byteInputStream(), Range.full(stale.length.toLong()))
+
+        val result = service.tryRefresh(PROJECT, REPO, "demo", "user", null) {
+            throw RuntimeException("db timeout")
+        }
+
+        assertEquals(stale, result)
+        verify(exactly = 0) { nodeService.deleteNode(any()) }
+        verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
+    }
+
+    @Test
     @DisplayName("overwrite 不抢锁，listing 后直接写")
     fun overwriteWritesWithoutLock() {
         val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
@@ -374,6 +398,34 @@ class PypiSimpleIndexCacheServiceTest {
         }
         verify(exactly = 0) { lockOperation.getLock(any()) }
         verify(exactly = 0) { lockOperation.acquireLock(any(), any()) }
+    }
+
+    @Test
+    @DisplayName("overwrite 写入失败时删除旧缓存")
+    fun overwriteInvalidatesWhenStoreFails() {
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        every { storageManager.storeArtifactFile(any(), any(), any()) } throws RuntimeException("store error")
+        every { nodeService.deleteNode(any()) } returns mockk(relaxed = true)
+
+        service.overwrite(PROJECT, REPO, "demo", "user", null) { "<html>new</html>" }
+
+        verify {
+            nodeService.deleteNode(match<NodeDeleteRequest> { it.fullPath == fullPath })
+        }
+    }
+
+    @Test
+    @DisplayName("overwrite rebuild 返回 null 时删除缓存")
+    fun overwriteInvalidatesWhenRebuildNull() {
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath("demo")
+        every { nodeService.deleteNode(any()) } returns mockk(relaxed = true)
+
+        service.overwrite(PROJECT, REPO, "demo", "user", null) { null }
+
+        verify {
+            nodeService.deleteNode(match<NodeDeleteRequest> { it.fullPath == fullPath })
+        }
+        verify(exactly = 0) { storageManager.storeArtifactFile(any(), any(), any()) }
     }
 
     @Test
