@@ -120,7 +120,14 @@ class DefaultPreloadPlanExecutorTest @Autowired constructor(
 
     @Test
     fun testExecutorFull() {
-        properties.preloadConcurrency = 1
+        // 独立线程池：共享 Bean 从 8 缩到 1 时多余 worker 不会立刻退出，第二个任务会被接走
+        val executor = DefaultPreloadPlanExecutor(
+            properties.copy(preloadConcurrency = 1),
+            storageService,
+            storageCredentialService,
+            fileLocator,
+            storageProperties,
+        )
         val plan = buildPlan()
         val startLatch = CountDownLatch(1)
         val listener = object : PreloadListener {
@@ -142,11 +149,9 @@ class DefaultPreloadPlanExecutorTest @Autowired constructor(
                 Thread.sleep(5000)
             }
         }
-        assertTrue(preloadPlanExecutor.execute(plan, listener))
-        // 等待第一个任务真正开始执行
-        startLatch.await(1, TimeUnit.SECONDS)
-        Assertions.assertFalse(preloadPlanExecutor.execute(plan, listener))
-        properties.preloadConcurrency = 8
+        assertTrue(executor.execute(plan, listener))
+        assertTrue(startLatch.await(5, TimeUnit.SECONDS))
+        Assertions.assertFalse(executor.execute(plan, listener))
     }
 
     @Test
