@@ -33,6 +33,7 @@ import com.tencent.bkrepo.common.lock.service.LockOperation
 import com.tencent.bkrepo.common.metadata.service.node.NodeService
 import com.tencent.bkrepo.common.storage.credentials.StorageCredentials
 import com.tencent.bkrepo.pypi.artifact.PypiProperties
+import com.tencent.bkrepo.pypi.exception.PypiSimpleNotFoundException
 import com.tencent.bkrepo.pypi.util.PypiSimpleIndexUtils
 import com.tencent.bkrepo.repository.constant.SYSTEM_USER
 import com.tencent.bkrepo.repository.pojo.node.NodeDetail
@@ -58,28 +59,76 @@ class PypiSimpleIndexCacheService(
 ) {
 
     /**
-     * 读取单包 simple HTML 缓存；不存在或已过期返回 null（不缓存 miss）。
+     * 读取单包 simple HTML 缓存。文件不存在返回 null；过期仍返回 HTML 并标记 expired。
      */
     fun load(
         projectId: String,
         repoName: String,
         packageName: String,
         storageCredentials: StorageCredentials?,
-    ): String? {
+    ): PypiSimpleIndexCache? {
         val fullPath = PypiSimpleIndexUtils.packageCacheFullPath(packageName)
         val node = nodeService.getNodeDetail(ArtifactInfo(projectId, repoName, fullPath)) ?: return null
         if (node.folder) {
             return null
         }
-        if (isExpired(node)) {
+        val html = readHtml(node, storageCredentials) ?: return null
+        val expired = isExpired(node)
+        if (expired) {
             logger.info(
                 "Pypi simple index cache expired[$projectId/$repoName$fullPath], " +
                     "lastModifiedDate[${node.lastModifiedDate}], ttl[${pypiProperties.simpleIndexCacheTtl}]"
             )
-            return null
         }
-        return storageManager.loadFullArtifactInputStream(node, storageCredentials)?.use { input ->
-            input.bufferedReader(StandardCharsets.UTF_8).readText()
+        return PypiSimpleIndexCache(html, expired, node.lastModifiedDate)
+    }
+
+    /**
+     * 过期后抢到锁才重建。获锁后先复查，未过期则直接返回。
+     * 重建后若缓存节点 lastModified 已变或已被删，放弃 store，避免盖住上传/删除结果。
+     * 未抢到返回 null，由调用方返回旧 HTML。
+     */
+    fun tryRefresh(
+        projectId: String,
+        repoName: String,
+        packageName: String,
+        userId: String,
+        storageCredentials: StorageCredentials?,
+        rebuild: () -> String?,
+    ): String? {
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath(packageName)
+        return tryWithLock(projectId, repoName, fullPath) {
+            val current = load(projectId, repoName, packageName, storageCredentials)
+            if (current != null && !current.expired) {
+                return@tryWithLock current.html
+            }
+            val snapshot = current?.lastModifiedDate
+            val html = try {
+                rebuild()
+            } catch (e: PypiSimpleNotFoundException) {
+                invalidate(projectId, repoName, packageName)
+                throw e
+            } catch (e: Exception) {
+                logger.error(
+                    "Failed to rebuild pypi simple index cache[$projectId/$repoName$fullPath], return stale html",
+                    e,
+                )
+                return@tryWithLock current?.html
+            } ?: return@tryWithLock null
+            val latest = nodeService.getNodeDetail(ArtifactInfo(projectId, repoName, fullPath))
+            if (latest == null || latest.folder) {
+                return@tryWithLock html
+            }
+            // ponytail: check-then-store 仍有极短窗口；覆盖 listing 期间的丢失更新。
+            if (snapshot != null && latest.lastModifiedDate == snapshot) {
+                try {
+                    storeHtml(projectId, repoName, fullPath, html, userId, storageCredentials)
+                } catch (e: Exception) {
+                    logger.error("Failed to store pypi simple index cache[$projectId/$repoName$fullPath]", e)
+                }
+                return@tryWithLock html
+            }
+            readHtml(latest, storageCredentials) ?: html
         }
     }
 
@@ -95,34 +144,40 @@ class PypiSimpleIndexCacheService(
         storageCredentials: StorageCredentials?,
     ): Boolean {
         val fullPath = PypiSimpleIndexUtils.packageCacheFullPath(packageName)
-        val lockKey = lockKey(projectId, repoName, fullPath)
-        val lock = try {
-            lockOperation.getLock(lockKey)
-        } catch (e: Exception) {
-            logger.error("Failed to get lock for pypi simple index cache[$projectId/$repoName$fullPath]", e)
-            return false
-        }
-        val locked = try {
-            lockOperation.acquireLock(lockKey, lock)
-        } catch (e: Exception) {
-            logger.error("Failed to acquire lock for pypi simple index cache[$projectId/$repoName$fullPath]", e)
-            return false
-        }
-        if (!locked) {
-            return false
-        }
-        try {
-            storeHtml(projectId, repoName, fullPath, html, userId, storageCredentials)
-            return true
-        } catch (e: Exception) {
-            logger.error("Failed to store pypi simple index cache[$projectId/$repoName$fullPath]", e)
-            return false
-        } finally {
-            try {
-                lockOperation.close(lockKey, lock)
-            } catch (e: Exception) {
-                logger.error("Failed to release lock for pypi simple index cache[$lockKey]", e)
+        return tryWithLock(projectId, repoName, fullPath) {
+            val existing = nodeService.getNodeDetail(ArtifactInfo(projectId, repoName, fullPath))
+            if (existing != null && !existing.folder) {
+                return@tryWithLock false
             }
+            try {
+                storeHtml(projectId, repoName, fullPath, html, userId, storageCredentials)
+                true
+            } catch (e: Exception) {
+                logger.error("Failed to store pypi simple index cache[$projectId/$repoName$fullPath]", e)
+                false
+            }
+        } ?: false
+    }
+
+    /**
+     * 覆盖写缓存，不抢锁、不睡线程。与 tryRefresh 靠 lastModified 错开，避免 GET 排队。
+     */
+    fun overwrite(
+        projectId: String,
+        repoName: String,
+        packageName: String,
+        userId: String,
+        storageCredentials: StorageCredentials?,
+        rebuild: () -> String?,
+    ) {
+        val fullPath = PypiSimpleIndexUtils.packageCacheFullPath(packageName)
+        try {
+            writeRebuilt(projectId, repoName, packageName, fullPath, userId, storageCredentials, rebuild)
+        } catch (e: PypiSimpleNotFoundException) {
+            throw e
+        } catch (e: Exception) {
+            logger.error("Failed to overwrite pypi simple index cache[$projectId/$repoName$fullPath]", e)
+            invalidate(projectId, repoName, packageName)
         }
     }
 
@@ -142,6 +197,62 @@ class PypiSimpleIndexCacheService(
             )
         } catch (e: Exception) {
             logger.error("Failed to invalidate pypi simple index cache[$projectId/$repoName$fullPath]", e)
+        }
+    }
+
+    private fun writeRebuilt(
+        projectId: String,
+        repoName: String,
+        packageName: String,
+        fullPath: String,
+        userId: String,
+        storageCredentials: StorageCredentials?,
+        rebuild: () -> String?,
+    ) {
+        val html = rebuild()
+        if (html == null) {
+            invalidate(projectId, repoName, packageName)
+            return
+        }
+        storeHtml(projectId, repoName, fullPath, html, userId, storageCredentials)
+    }
+
+    private fun <T> tryWithLock(
+        projectId: String,
+        repoName: String,
+        fullPath: String,
+        action: () -> T,
+    ): T? {
+        val lockKey = lockKey(projectId, repoName, fullPath)
+        val lock = try {
+            lockOperation.getLock(lockKey)
+        } catch (e: Exception) {
+            logger.error("Failed to get lock for pypi simple index cache[$projectId/$repoName$fullPath]", e)
+            return null
+        }
+        val locked = try {
+            lockOperation.acquireLock(lockKey, lock)
+        } catch (e: Exception) {
+            logger.error("Failed to acquire lock for pypi simple index cache[$projectId/$repoName$fullPath]", e)
+            return null
+        }
+        if (!locked) {
+            return null
+        }
+        try {
+            return action()
+        } finally {
+            try {
+                lockOperation.close(lockKey, lock)
+            } catch (e: Exception) {
+                logger.error("Failed to release lock for pypi simple index cache[$lockKey]", e)
+            }
+        }
+    }
+
+    private fun readHtml(node: NodeDetail, storageCredentials: StorageCredentials?): String? {
+        return storageManager.loadFullArtifactInputStream(node, storageCredentials)?.use { input ->
+            input.bufferedReader(StandardCharsets.UTF_8).readText()
         }
     }
 
@@ -205,3 +316,9 @@ class PypiSimpleIndexCacheService(
         private const val LOCK_KEY_PREFIX = "pypi:simple:lock:"
     }
 }
+
+data class PypiSimpleIndexCache(
+    val html: String,
+    val expired: Boolean,
+    val lastModifiedDate: String,
+)

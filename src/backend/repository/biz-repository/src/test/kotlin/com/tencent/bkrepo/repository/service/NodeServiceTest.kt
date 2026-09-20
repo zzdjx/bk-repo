@@ -237,6 +237,64 @@ class NodeServiceTest @Autowired constructor(
     }
 
     @Test
+    @DisplayName("listNode skip-count 用 nodeNum 决定是否截断")
+    fun testListNodeSkipCountUsesNodeNum() {
+        val originalLimit = repositoryProperties.listCountLimit
+        try {
+            repositoryProperties.listCountLimit = 2
+            repeat(5) { i -> nodeService.createNode(createRequest("/pkg/$i.txt", false)) }
+            val skipCount = NodeListOption(
+                includeFolder = false,
+                deep = true,
+                includeTotalRecords = false,
+            )
+            setNodeNum("/pkg", 5)
+            assertEquals(2, nodeService.listNode(node("/pkg"), skipCount).size)
+            setNodeNum("/pkg", 1)
+            assertEquals(5, nodeService.listNode(node("/pkg"), skipCount).size)
+        } finally {
+            repositoryProperties.listCountLimit = originalLimit
+        }
+    }
+
+    @Test
+    @DisplayName("listNode skip-count 时 nodeNum 缺失按 MAX 截断")
+    fun testListNodeSkipCountNullNodeNumTruncates() {
+        val originalLimit = repositoryProperties.listCountLimit
+        try {
+            repositoryProperties.listCountLimit = 2
+            repeat(5) { i -> nodeService.createNode(createRequest("/pkg/$i.txt", false)) }
+            setNodeNum("/pkg", null)
+            val skipCount = NodeListOption(
+                includeFolder = false,
+                deep = true,
+                includeTotalRecords = false,
+            )
+            assertEquals(2, nodeService.listNode(node("/pkg"), skipCount).size)
+        } finally {
+            repositoryProperties.listCountLimit = originalLimit
+        }
+    }
+
+    @Test
+    @DisplayName("listNode skip-count 根路径 metrics 缺失时截断")
+    fun testListNodeSkipCountRootWithoutMetricsTruncates() {
+        val originalLimit = repositoryProperties.listCountLimit
+        try {
+            repositoryProperties.listCountLimit = 2
+            repeat(5) { i -> nodeService.createNode(createRequest("/root-$i.txt", false)) }
+            val skipCount = NodeListOption(
+                includeFolder = false,
+                deep = false,
+                includeTotalRecords = false,
+            )
+            assertEquals(2, nodeService.listNode(node("/"), skipCount).size)
+        } finally {
+            repositoryProperties.listCountLimit = originalLimit
+        }
+    }
+
+    @Test
     @DisplayName("测试分页查询")
     fun testListNodePage() {
         val size = 51L
@@ -930,6 +988,21 @@ class NodeServiceTest @Autowired constructor(
                 .and(TNode::deleted.name).isEqualTo(null)
         )
         nodeDao.updateFirst(query, Update().set(TNode::createdDate.name, createdDate))
+    }
+
+    private fun setNodeNum(fullPath: String, nodeNum: Long?) {
+        val query = Query(
+            Criteria.where(TNode::projectId.name).isEqualTo(UT_PROJECT_ID)
+                .and(TNode::repoName.name).isEqualTo(UT_REPO_NAME)
+                .and(TNode::fullPath.name).isEqualTo(fullPath)
+                .and(TNode::deleted.name).isEqualTo(null)
+        )
+        val update = if (nodeNum == null) {
+            Update().unset(TNode::nodeNum.name)
+        } else {
+            Update().set(TNode::nodeNum.name, nodeNum)
+        }
+        nodeDao.updateFirst(query, update)
     }
 
     private fun createRequest(
