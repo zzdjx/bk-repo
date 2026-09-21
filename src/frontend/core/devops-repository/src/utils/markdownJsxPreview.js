@@ -5,13 +5,39 @@ import { appendPreviewTokenToUrl } from '@repository/utils/previewOfficeFile'
 import { isCode, isHtmlFile, isJsx, isMarkdown } from '@repository/utils/file'
 import {
     buildJsxSandboxSrcdoc as buildJsxSandboxSrcdocCore,
+    isMathFenceLanguage,
+    isMermaidFenceLanguage,
     normalizeCodeText as normalizeCodeTextCore,
     normalizeMarkdownText as normalizeMarkdownTextCore,
     normalizePreviewPath,
     resolveMonacoLanguage,
     resolveRelativePath,
-    rewriteMarkdownImageUrls
+    rewriteMarkdownImageUrls,
+    rewriteMarkdownMath,
+    wrapMathSource,
+    wrapMermaidSource,
+    extractMarkdownAbbreviations,
+    extractMarkdownFootnotes,
+    applyMarkdownAbbreviations,
+    appendMarkdownFootnotes,
+    isPlantumlFenceLanguage,
+    wrapPlantumlSource
 } from '@repository/utils/markdownJsxPreviewCore'
+import {
+    extractMarkdownFrontMatter,
+    fillMarkdownToc,
+    renderMarkdownHeading,
+    rewriteMarkdownAlerts,
+    rewriteMarkdownDefinitionLists,
+    rewriteMarkdownDetails,
+    rewriteMarkdownEmoji,
+    rewriteMarkdownHighlight,
+    rewriteMarkdownImageSize,
+    rewriteMarkdownParagraphAttrs,
+    rewriteMarkdownSubSup,
+    rewriteMarkdownTocPlaceholder,
+    rewriteMarkdownWikilinks
+} from '@repository/utils/markdownSyntaxExtras'
 
 export {
     normalizePreviewPath,
@@ -22,6 +48,12 @@ export {
 } from '@repository/utils/markdownJsxPreviewCore'
 
 export { prepareJsxSource } from '@repository/utils/markdownJsxPreviewCore'
+
+export { renderMermaidCharts } from '@repository/utils/markdownMermaidPreview'
+
+export { renderMathFormulas } from '@repository/utils/markdownMathPreview'
+
+export { renderPlantumlDiagrams } from '@repository/utils/markdownPlantumlPreview'
 
 export { buildHtmlSandboxSrcdoc } from '@repository/utils/htmlFilePreview'
 
@@ -56,12 +88,46 @@ export function normalizeCodeText (text) {
     return normalizeCodeTextCore(text, (value) => Base64.decode(value))
 }
 
+function createMarkdownRenderer () {
+    const renderer = new marked.Renderer()
+    const originalCode = renderer.code.bind(renderer)
+    renderer.code = function (code, infostring, escaped) {
+        if (isMermaidFenceLanguage(infostring)) {
+            return wrapMermaidSource(code)
+        }
+        if (isMathFenceLanguage(infostring)) {
+            return wrapMathSource(code, true)
+        }
+        if (isPlantumlFenceLanguage(infostring)) {
+            return wrapPlantumlSource(code)
+        }
+        return originalCode(code, infostring, escaped)
+    }
+    renderer.heading = function (text, level, raw, slugger) {
+        return renderMarkdownHeading(text, level, raw, slugger)
+    }
+    renderer.listitem = function (text, task) {
+        if (task) {
+            return `<li class="task-list-item">${text}</li>\n`
+        }
+        return `<li>${text}</li>\n`
+    }
+    renderer.list = function (body, ordered, start) {
+        const type = ordered ? 'ol' : 'ul'
+        const taskClass = /class="task-list-item"/.test(body) ? ' class="contains-task-list"' : ''
+        const startAttr = (ordered && start !== 1) ? (` start="${start}"`) : ''
+        return `<${type}${taskClass}${startAttr}>\n${body}</${type}>\n`
+    }
+    return renderer
+}
+
 export function renderMarkdownToSafeHtml (markdown, { resolveAssetUrl, highlight } = {}) {
     marked.setOptions({
         gfm: true,
         breaks: true,
+        renderer: createMarkdownRenderer(),
         highlight: (code, language) => {
-            if (!highlight) {
+            if (isMermaidFenceLanguage(language) || isMathFenceLanguage(language) || isPlantumlFenceLanguage(language) || !highlight) {
                 return code
             }
             if (language && highlight.getLanguage(language)) {
@@ -70,9 +136,35 @@ export function renderMarkdownToSafeHtml (markdown, { resolveAssetUrl, highlight
             return highlight.highlightAuto(code).value
         }
     })
-    const rawHtml = marked.parse(markdown)
-    const htmlWithAssets = rewriteMarkdownImageUrls(rawHtml, resolveAssetUrl)
-    return DOMPurify.sanitize(htmlWithAssets)
+    const frontMatter = extractMarkdownFrontMatter(markdown)
+    const { markdown: withoutFootnoteDefs, footnotes } = extractMarkdownFootnotes(frontMatter.markdown)
+    const { markdown: withoutAbbrDefs, abbreviations } = extractMarkdownAbbreviations(withoutFootnoteDefs)
+    const renderFragment = (body) => {
+        return marked.parse(applyMarkdownAbbreviations(rewriteMarkdownMath(body), abbreviations))
+    }
+    const renderInline = (text) => {
+        return marked.parseInline(applyMarkdownAbbreviations(rewriteMarkdownMath(text), abbreviations))
+    }
+    let next = rewriteMarkdownAlerts(withoutAbbrDefs, renderFragment)
+    next = rewriteMarkdownDefinitionLists(next, renderInline)
+    next = rewriteMarkdownImageSize(next)
+    next = rewriteMarkdownMath(next)
+    next = applyMarkdownAbbreviations(next, abbreviations)
+    next = rewriteMarkdownHighlight(next)
+    next = rewriteMarkdownEmoji(next)
+    next = rewriteMarkdownTocPlaceholder(next)
+    next = rewriteMarkdownWikilinks(next)
+    next = rewriteMarkdownSubSup(next)
+    next = rewriteMarkdownParagraphAttrs(next)
+    next = rewriteMarkdownDetails(next, renderFragment, renderInline)
+    const rawHtml = marked.parse(next)
+    const htmlWithToc = fillMarkdownToc(rawHtml)
+    const htmlWithFootnotes = appendMarkdownFootnotes(htmlWithToc, footnotes, renderFragment)
+    const htmlWithAssets = rewriteMarkdownImageUrls(htmlWithFootnotes, resolveAssetUrl)
+    return DOMPurify.sanitize(`${frontMatter.html}${htmlWithAssets}`, {
+        ADD_TAGS: ['mark'],
+        ADD_ATTR: ['open', 'width', 'height', 'align']
+    })
 }
 
 export function getPreviewLibBaseUrl () {

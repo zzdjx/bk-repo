@@ -12,6 +12,7 @@
             </div>
             <div
                 v-else-if="fileKind === 'markdown'"
+                ref="markdownBody"
                 class="markdown-preview-body"
                 v-html="previewHtml"
             />
@@ -48,6 +49,15 @@
     import xml from 'highlight.js/lib/languages/xml'
     import kotlin from 'highlight.js/lib/languages/kotlin'
     import java from 'highlight.js/lib/languages/java'
+    import go from 'highlight.js/lib/languages/go'
+    import typescript from 'highlight.js/lib/languages/typescript'
+    import yaml from 'highlight.js/lib/languages/yaml'
+    import sql from 'highlight.js/lib/languages/sql'
+    import rust from 'highlight.js/lib/languages/rust'
+    import c from 'highlight.js/lib/languages/c'
+    import cpp from 'highlight.js/lib/languages/cpp'
+    import css from 'highlight.js/lib/languages/css'
+    import markdown from 'highlight.js/lib/languages/markdown'
     import 'highlight.js/styles/github-dark.min.css'
     import {
         buildHtmlSandboxSrcdoc,
@@ -56,7 +66,10 @@
         getPreviewFileKind,
         normalizeCodeText,
         normalizeMarkdownText,
-        renderMarkdownToSafeHtml
+        renderMarkdownToSafeHtml,
+        renderMathFormulas,
+        renderMermaidCharts,
+        renderPlantumlDiagrams
     } from '@repository/utils/markdownJsxPreview'
 
     hljs.registerLanguage('javascript', javascript)
@@ -66,6 +79,18 @@
     hljs.registerLanguage('xml', xml)
     hljs.registerLanguage('kotlin', kotlin)
     hljs.registerLanguage('java', java)
+    hljs.registerLanguage('go', go)
+    hljs.registerLanguage('typescript', typescript)
+    hljs.registerLanguage('ts', typescript)
+    hljs.registerLanguage('yaml', yaml)
+    hljs.registerLanguage('yml', yaml)
+    hljs.registerLanguage('sql', sql)
+    hljs.registerLanguage('rust', rust)
+    hljs.registerLanguage('c', c)
+    hljs.registerLanguage('cpp', cpp)
+    hljs.registerLanguage('css', css)
+    hljs.registerLanguage('markdown', markdown)
+    hljs.registerLanguage('md', markdown)
 
     export default {
         name: 'SourcePreviewTabs',
@@ -96,7 +121,8 @@
                 previewError: '',
                 jsxSrcdoc: '',
                 htmlSrcdoc: '',
-                editor: null
+                editor: null,
+                previewToken: 0
             }
         },
         computed: {
@@ -145,10 +171,13 @@
             }
         },
         beforeDestroy () {
+            this.previewToken += 1
             this.disposeEditor()
         },
         methods: {
             async renderPreview () {
+                const previewToken = this.previewToken + 1
+                this.previewToken = previewToken
                 this.previewError = ''
                 this.previewHtml = ''
                 this.jsxSrcdoc = ''
@@ -162,6 +191,15 @@
                             resolveAssetUrl: this.resolveAssetUrl,
                             highlight: hljs
                         })
+                        await this.$nextTick()
+                        if (previewToken !== this.previewToken) {
+                            return
+                        }
+                        await Promise.all([
+                            this.renderMermaidPreview(),
+                            this.renderMathPreview(),
+                            this.renderPlantumlPreview()
+                        ])
                     } else if (this.fileKind === 'jsx') {
                         this.jsxSrcdoc = buildJsxSandboxSrcdoc(this.normalizedSource)
                     } else if (this.fileKind === 'html') {
@@ -170,7 +208,30 @@
                         })
                     }
                 } catch (error) {
-                    this.previewError = error && error.message ? error.message : String(error)
+                    if (previewToken === this.previewToken) {
+                        this.previewError = error && error.message ? error.message : String(error)
+                    }
+                }
+            },
+            async renderMermaidPreview () {
+                try {
+                    await renderMermaidCharts(this.$refs.markdownBody)
+                } catch (error) {
+                    console.warn('[MarkdownPreview] mermaid chart render failed', error)
+                }
+            },
+            async renderMathPreview () {
+                try {
+                    await renderMathFormulas(this.$refs.markdownBody)
+                } catch (error) {
+                    console.warn('[MarkdownPreview] math formula render failed', error)
+                }
+            },
+            async renderPlantumlPreview () {
+                try {
+                    await renderPlantumlDiagrams(this.$refs.markdownBody)
+                } catch (error) {
+                    console.warn('[MarkdownPreview] plantuml render failed', error)
                 }
             },
             ensureEditor () {
@@ -405,7 +466,15 @@
 
     li.task-list-item {
         list-style-type: none;
-        margin-left: -20px;
+    }
+
+    .contains-task-list {
+        list-style: none;
+    }
+
+    .task-list-item input[type='checkbox'] {
+        margin: 0 8px 0 -20px;
+        vertical-align: middle;
     }
 
     hr {
@@ -479,6 +548,266 @@
 
     tr:hover {
         background: #f1f5f9;
+    }
+
+    .mermaid,
+    .mermaidChart {
+        margin: 16px 0;
+        overflow-x: auto;
+        text-align: center;
+
+        svg {
+            max-width: 100%;
+            height: auto;
+        }
+    }
+
+    .markdown-math-display {
+        margin: 12px 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        text-align: center;
+    }
+
+    .markdown-math-inline {
+        display: inline;
+    }
+
+    .katex-display {
+        margin: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    abbr.markdown-abbr {
+        text-decoration: underline dotted;
+        text-underline-offset: 2px;
+        cursor: help;
+    }
+
+    .markdown-footnote-ref {
+        font-size: 0.75em;
+        line-height: 0;
+
+        a {
+            color: #5c8ef2;
+            text-decoration: none;
+            font-weight: 400;
+        }
+    }
+
+    .markdown-footnotes {
+        margin-top: 24px;
+        font-size: 13px;
+        color: #475569;
+
+        hr {
+            margin: 16px 0 12px;
+        }
+
+        ol {
+            padding-left: 20px;
+        }
+
+        li {
+            margin: 6px 0;
+        }
+
+        p {
+            display: inline;
+        }
+    }
+
+    .markdown-footnote-backref {
+        margin-left: 4px;
+        color: #5c8ef2;
+        text-decoration: none;
+        font-weight: 400;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        .markdown-heading-anchor {
+            float: left;
+            margin-left: -14px;
+            padding-right: 4px;
+            color: #94a3b8;
+            text-decoration: none;
+            font-weight: 400;
+            opacity: 0;
+
+            &:hover {
+                color: #5c8ef2;
+            }
+        }
+
+        &:hover .markdown-heading-anchor {
+            opacity: 1;
+        }
+    }
+
+    .markdown-toc {
+        margin: 8px 0 16px;
+        padding: 10px 14px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f8fafc;
+        font-size: 13px;
+
+        ol {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .markdown-toc-h1 { margin-left: 0; }
+        .markdown-toc-h3 { margin-left: 12px; }
+        .markdown-toc-h4 { margin-left: 24px; }
+        .markdown-toc-h5,
+        .markdown-toc-h6 { margin-left: 36px; }
+    }
+
+    .markdown-frontmatter {
+        margin: 0 0 20px;
+        padding: 10px 14px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f8fafc;
+        overflow: auto;
+
+        .markdown-frontmatter-title {
+            margin: 0 0 8px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #64748b;
+            letter-spacing: 0.04em;
+        }
+
+        table {
+            width: 100%;
+            margin: 0;
+            background: #fff;
+        }
+
+        th {
+            width: 120px;
+            background: #f1f5f9;
+        }
+
+        pre {
+            margin: 0;
+            padding: 10px 12px;
+            background: #fff;
+            color: #334155;
+            border: 1px solid #e5e7eb;
+        }
+    }
+
+    .markdown-alert {
+        margin: 10px 0;
+        padding: 8px 12px;
+        border-left: 4px solid #94a3b8;
+        border-radius: 6px;
+        background: #f8fafc;
+    }
+
+    .markdown-alert-title {
+        margin: 0 0 4px;
+        font-weight: 700;
+        color: #1e293b;
+    }
+
+    .markdown-alert-note {
+        border-left-color: #3b82f6;
+        background: #eff6ff;
+    }
+
+    .markdown-alert-tip {
+        border-left-color: #22c55e;
+        background: #f0fdf4;
+    }
+
+    .markdown-alert-important {
+        border-left-color: #8b5cf6;
+        background: #f5f3ff;
+    }
+
+    .markdown-alert-warning {
+        border-left-color: #f59e0b;
+        background: #fffbeb;
+    }
+
+    .markdown-alert-caution {
+        border-left-color: #ef4444;
+        background: #fef2f2;
+    }
+
+    mark {
+        background: #fef08a;
+        color: inherit;
+        padding: 0 2px;
+        border-radius: 2px;
+    }
+
+    dl.markdown-deflist {
+        margin: 8px 0;
+
+        dt {
+            font-weight: 700;
+            color: #1e293b;
+            margin-top: 6px;
+        }
+
+        dd {
+            margin: 2px 0 6px 20px;
+            color: #475569;
+        }
+    }
+
+    details {
+        margin: 8px 0;
+        padding: 8px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fafbfc;
+    }
+
+    details summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: #1e293b;
+    }
+
+    .markdown-wikilink {
+        color: #5c8ef2;
+        text-decoration: none;
+        border-bottom: 1px dashed #5c8ef2;
+    }
+
+    p.lead {
+        font-size: 15px;
+        color: #334155;
+    }
+
+    sub,
+    sup {
+        font-size: 11px;
+    }
+
+    .plantuml {
+        margin: 16px 0;
+        overflow-x: auto;
+        text-align: center;
+    }
+
+    .plantuml-frame {
+        border: 0;
+        display: block;
+        margin: 0 auto;
+        background: transparent;
     }
 }
 </style>
