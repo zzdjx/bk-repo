@@ -2,13 +2,20 @@ package com.tencent.bkrepo.fs.service.drive
 
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.artifact.message.ArtifactMessageCode
+import com.tencent.bkrepo.common.metadata.model.TMetadata
 import com.tencent.bkrepo.common.metadata.model.drive.TDriveNode
 import com.tencent.bkrepo.common.metadata.model.drive.TDriveNode.Companion.TYPE_DIRECTORY
 import com.tencent.bkrepo.common.metadata.model.drive.TDriveNode.Companion.TYPE_FILE
+import com.tencent.bkrepo.common.storage.config.StorageProperties
+import com.tencent.bkrepo.common.storage.config.UploadProperties
+import com.tencent.bkrepo.common.storage.credentials.FileSystemCredentials
+import com.tencent.bkrepo.common.storage.monitor.StorageHealthMonitorHelper
+import com.tencent.bkrepo.fs.server.config.properties.drive.DriveThumbnailProperties
 import com.tencent.bkrepo.fs.server.repository.drive.RDriveNodeDao
 import com.tencent.bkrepo.fs.server.request.drive.DriveBlockWriteRequest
 import com.tencent.bkrepo.fs.server.request.drive.DriveNodeCreateRequest
 import com.tencent.bkrepo.fs.server.request.drive.DriveNodeDeleteRequest
+import com.tencent.bkrepo.fs.server.request.drive.DriveNodeUpdateRequest
 import com.tencent.bkrepo.fs.server.request.drive.DriveNodeUploadRequest
 import com.tencent.bkrepo.fs.server.response.drive.DriveBlockNode
 import com.tencent.bkrepo.fs.server.response.drive.DriveNode
@@ -17,20 +24,33 @@ import com.tencent.bkrepo.fs.server.service.drive.DriveInoAllocator
 import com.tencent.bkrepo.fs.server.service.drive.DriveNodeService
 import com.tencent.bkrepo.fs.server.service.drive.DriveRepositoryInitService
 import com.tencent.bkrepo.fs.server.service.drive.DriveUploadService
+import com.tencent.bkrepo.fs.server.service.drive.thumbnail.ArtifactThumbnailGenerateService
+import com.tencent.bkrepo.fs.server.utils.ArtifactThumbnailTypes
+import com.tencent.bkrepo.fs.server.service.drive.thumbnail.DriveArtifactThumbnailBinder
+import com.tencent.bkrepo.fs.server.service.drive.thumbnail.ThumbnailGenerateResult
 import com.tencent.bkrepo.fs.server.storage.CoArtifactFile
+import com.tencent.bkrepo.fs.server.storage.CoArtifactFileFactory
 import com.tencent.bkrepo.fs.server.utils.DriveNodeQueryHelper
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.inOrder
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.LocalDateTime
+import java.util.concurrent.ConcurrentHashMap
 
 @DisplayName("Drive 完整文件上传")
 class DriveUploadServiceTest {
@@ -40,6 +60,7 @@ class DriveUploadServiceTest {
     private val driveFileOperationService: DriveFileOperationService = mock()
     private val driveRepositoryInitService: DriveRepositoryInitService = mock()
     private val driveInoAllocator: DriveInoAllocator = mock()
+    private val driveArtifactThumbnailBinder: DriveArtifactThumbnailBinder = mock()
 
     private val driveUploadService = DriveUploadService(
         driveNodeService = driveNodeService,
@@ -47,6 +68,7 @@ class DriveUploadServiceTest {
         driveFileOperationService = driveFileOperationService,
         driveRepositoryInitService = driveRepositoryInitService,
         driveInoAllocator = driveInoAllocator,
+        driveArtifactThumbnailBinder = driveArtifactThumbnailBinder,
     )
 
     @Test
@@ -137,6 +159,7 @@ class DriveUploadServiceTest {
         assertEquals(ArtifactMessageCode.DIGEST_CHECK_FAILED, exception.messageCode)
         runBlocking {
             verify(driveRepositoryInitService, never()).ensureInitialized(any(), any(), any())
+            verify(driveArtifactThumbnailBinder, never()).render(any(), anyOrNull(), any())
         }
     }
 
@@ -211,6 +234,7 @@ class DriveUploadServiceTest {
             verify(driveNodeService).createNode(any<DriveNodeCreateRequest>(), anyOrNull(), anyOrNull())
             verify(driveFileOperationService).write(any<CoArtifactFile>(), any<DriveBlockWriteRequest>(), any())
             verify(driveNodeService, never()).update(any(), anyOrNull(), anyOrNull())
+            verify(driveArtifactThumbnailBinder).render(any(), anyOrNull(), any())
         }
     }
 
@@ -251,7 +275,227 @@ class DriveUploadServiceTest {
         assertEquals(fileIno, result.ino)
         runBlocking {
             verify(driveFileOperationService).write(any<CoArtifactFile>(), any<DriveBlockWriteRequest>(), any())
+            verify(driveArtifactThumbnailBinder).render(any(), anyOrNull(), any())
         }
+    }
+
+    @Test
+    fun `writes thumbnail path only to source metadata`(@TempDir tempDir: Path) {
+        initCoArtifactFileFactory(tempDir)
+        val generateService: ArtifactThumbnailGenerateService = mock()
+        val uploadService = uploadServiceWithBinder(generateService)
+        val sourcePath = tempDir.resolve("hero.png")
+        Files.write(sourcePath, byteArrayOf(1, 2, 3, 4))
+        val artifactFile = artifactFile(sha256 = "abc", size = 4)
+        whenever(artifactFile.getFile()).thenReturn(sourcePath.toFile())
+        val artifactMetadata = imageMetadata().apply {
+            add(TMetadata(key = "imate_artifact_thumbnail", value = "/stolen/.other.thumb.jpg"))
+            add(TMetadata(key = ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL_INO, value = "999"))
+        }
+        val sourceIno = 2002L
+        val sidecarIno = 3003L
+        val createdSource = driveNode(ino = sourceIno).copy(name = "hero.png", metadata = artifactMetadata)
+        val createdSidecar = driveNode(ino = sidecarIno).copy(name = ".hero.png.thumb.jpg", metadata = null)
+        val sidecarPath = "/.hero.png.thumb.jpg"
+        val updatedSource = createdSource.copy(
+            metadata = artifactMetadata + TMetadata(
+                key = ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL,
+                value = sidecarPath,
+            ),
+        )
+        val uploadRequest = DriveNodeUploadRequest(
+            projectId = PROJECT_ID,
+            repoName = REPO_NAME,
+            fullPath = "/hero.png",
+            overwrite = false,
+        )
+
+        runBlocking {
+            whenever(generateService.generate(any(), any(), any())).thenReturn(ThumbnailGenerateResult.Success)
+            whenever(driveNodeDao.findCurrentNode(any(), any(), any(), any())).thenReturn(null)
+            whenever(driveInoAllocator.allocate(PROJECT_ID, REPO_NAME)).thenReturn(sourceIno, sidecarIno)
+            whenever(driveNodeService.createNode(any<DriveNodeCreateRequest>(), anyOrNull(), anyOrNull()))
+                .thenAnswer { invocation ->
+                    val request = invocation.getArgument<DriveNodeCreateRequest>(0)
+                    if (ArtifactThumbnailTypes.isSidecarFileName(request.name)) createdSidecar else createdSource
+                }
+            whenever(
+                driveFileOperationService.write(any<CoArtifactFile>(), any<DriveBlockWriteRequest>(), any()),
+            ).thenReturn(mock<DriveBlockNode>())
+            whenever(driveNodeService.update(any(), anyOrNull(), anyOrNull())).thenReturn(updatedSource)
+        }
+
+        val result = runBlocking {
+            uploadService.uploadCompleteFile(uploadRequest, artifactFile, artifactMetadata, USER_ID)
+        }
+
+        assertEquals(sourceIno, result.ino)
+        val createCaptor = argumentCaptor<DriveNodeCreateRequest>()
+        val updateCaptor = argumentCaptor<DriveNodeUpdateRequest>()
+        runBlocking {
+            verify(driveNodeService, times(2)).createNode(createCaptor.capture(), anyOrNull(), anyOrNull())
+            verify(driveNodeService).update(updateCaptor.capture(), anyOrNull(), anyOrNull())
+            val order = inOrder(generateService, driveFileOperationService)
+            order.verify(generateService).generate(any(), any(), any())
+            order.verify(driveFileOperationService, times(2)).write(
+                any<CoArtifactFile>(),
+                any<DriveBlockWriteRequest>(),
+                any(),
+            )
+        }
+        val sourceCreate = createCaptor.allValues.single { it.name == "hero.png" }
+        val sidecarCreate = createCaptor.allValues.single { it.name == ".hero.png.thumb.jpg" }
+        assertEquals(
+            "封面",
+            ArtifactThumbnailTypes.metadataValue(sourceCreate.metadata, ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME),
+        )
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(
+                sourceCreate.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL,
+            ),
+        )
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(
+                sourceCreate.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL_INO,
+            ),
+        )
+        assertNull(sidecarCreate.metadata)
+        assertEquals(sourceIno, updateCaptor.firstValue.ino)
+        assertEquals(true, updateCaptor.firstValue.touchLastModified)
+        assertEquals(
+            sidecarPath,
+            ArtifactThumbnailTypes.metadataValue(
+                updateCaptor.firstValue.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL,
+            ),
+        )
+        assertEquals(
+            sidecarIno.toString(),
+            ArtifactThumbnailTypes.metadataValue(
+                updateCaptor.firstValue.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL_INO,
+            ),
+        )
+        assertEquals(
+            "封面",
+            ArtifactThumbnailTypes.metadataValue(
+                updateCaptor.firstValue.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME,
+            ),
+        )
+    }
+
+    @Test
+    fun `drops client thumbnail metadata when generate does not produce jpeg`() {
+        val forged = imageMetadata().apply {
+            add(TMetadata(key = "IMATE_ARTIFACT_THUMBNAIL", value = "/docs/.victim.thumb.jpg"))
+            add(TMetadata(key = "imate_artifact_thumbnail_ino", value = "42"))
+        }
+        val sourceIno = 2004L
+        val uploadRequest = DriveNodeUploadRequest(
+            projectId = PROJECT_ID,
+            repoName = REPO_NAME,
+            fullPath = "/hero.png",
+            overwrite = false,
+        )
+        val artifactFile = artifactFile(sha256 = "abc", size = 4)
+        runBlocking {
+            whenever(driveArtifactThumbnailBinder.render(any(), anyOrNull(), any())).thenReturn(null)
+            whenever(driveNodeDao.findCurrentNode(any(), any(), any(), any())).thenReturn(null)
+            whenever(driveInoAllocator.allocate(PROJECT_ID, REPO_NAME)).thenReturn(sourceIno)
+            whenever(driveNodeService.createNode(any<DriveNodeCreateRequest>(), anyOrNull(), anyOrNull()))
+                .thenAnswer { invocation ->
+                    val request = invocation.getArgument<DriveNodeCreateRequest>(0)
+                    driveNode(sourceIno).copy(name = request.name, metadata = request.metadata)
+                }
+            whenever(
+                driveFileOperationService.write(any<CoArtifactFile>(), any<DriveBlockWriteRequest>(), any()),
+            ).thenReturn(mock<DriveBlockNode>())
+        }
+
+        val result = runBlocking {
+            driveUploadService.uploadCompleteFile(uploadRequest, artifactFile, forged, USER_ID)
+        }
+
+        assertEquals(sourceIno, result.ino)
+        assertEquals(
+            "封面",
+            ArtifactThumbnailTypes.metadataValue(result.metadata, ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME),
+        )
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(result.metadata, ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL),
+        )
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(
+                result.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL_INO,
+            ),
+        )
+        runBlocking {
+            verify(driveNodeService, never()).update(any(), anyOrNull(), anyOrNull())
+            val createCaptor = argumentCaptor<DriveNodeCreateRequest>()
+            verify(driveNodeService).createNode(createCaptor.capture(), anyOrNull(), anyOrNull())
+            assertNull(
+                ArtifactThumbnailTypes.metadataValue(
+                    createCaptor.firstValue.metadata,
+                    ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `persistThumbnail backfill does not touch lastModifiedBy or lastModifiedDate`(@TempDir tempDir: Path) {
+        initCoArtifactFileFactory(tempDir)
+        val jpeg = tempDir.resolve("thumb.jpg")
+        Files.write(jpeg, byteArrayOf(1, 2, 3, 4))
+        val source = driveNode(ino = 2002L).copy(name = "hero.png")
+        val sidecar = driveNode(ino = 3003L).copy(name = ".hero.png.thumb.jpg", metadata = null)
+        runBlocking {
+            whenever(driveNodeDao.findCurrentNode(any(), any(), any(), any())).thenReturn(null)
+            whenever(driveInoAllocator.allocate(PROJECT_ID, REPO_NAME)).thenReturn(3003L)
+            whenever(driveNodeService.createNode(any<DriveNodeCreateRequest>(), anyOrNull(), anyOrNull()))
+                .thenReturn(sidecar)
+            whenever(
+                driveFileOperationService.write(any<CoArtifactFile>(), any<DriveBlockWriteRequest>(), any()),
+            ).thenReturn(mock<DriveBlockNode>())
+            whenever(driveNodeService.update(any(), anyOrNull(), anyOrNull())).thenReturn(source)
+        }
+
+        runBlocking {
+            driveUploadService.persistThumbnail(source, "/hero.png", jpeg, USER_ID, touchLastModified = false)
+        }
+
+        val updateCaptor = argumentCaptor<DriveNodeUpdateRequest>()
+        runBlocking {
+            verify(driveNodeService).update(updateCaptor.capture(), anyOrNull(), anyOrNull())
+        }
+        assertEquals(false, updateCaptor.firstValue.touchLastModified)
+        assertEquals(null, updateCaptor.firstValue.name)
+        assertEquals(null, updateCaptor.firstValue.size)
+    }
+
+    private fun uploadServiceWithBinder(generateService: ArtifactThumbnailGenerateService): DriveUploadService {
+        return DriveUploadService(
+            driveNodeService = driveNodeService,
+            driveNodeDao = driveNodeDao,
+            driveFileOperationService = driveFileOperationService,
+            driveRepositoryInitService = driveRepositoryInitService,
+            driveInoAllocator = driveInoAllocator,
+            driveArtifactThumbnailBinder = DriveArtifactThumbnailBinder(
+                generateService,
+                DriveThumbnailProperties().apply { enabled = true },
+            ),
+        )
+    }
+
+    private fun imageMetadata(): MutableList<TMetadata> {
+        return mutableListOf(
+            TMetadata(key = ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME, value = "封面"),
+            TMetadata(key = ArtifactThumbnailTypes.METADATA_ARTIFACT_TYPE, value = "image"),
+        )
     }
 
     private fun existingFileNode(): TDriveNode {
@@ -342,6 +586,14 @@ class DriveUploadServiceTest {
         whenever(artifactFile.getFileSha256()).thenReturn(sha256)
         whenever(artifactFile.getSize()).thenReturn(size)
         return artifactFile
+    }
+
+    private fun initCoArtifactFileFactory(tempDir: Path) {
+        val storageProperties = StorageProperties().apply {
+            filesystem = FileSystemCredentials(upload = UploadProperties(location = tempDir.toString()))
+        }
+        CoArtifactFileFactory.storageProperties = storageProperties
+        CoArtifactFileFactory.storageHealthMonitorHelper = StorageHealthMonitorHelper(ConcurrentHashMap())
     }
 
     companion object {

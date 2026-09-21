@@ -39,6 +39,7 @@ import com.tencent.bkrepo.common.query.handler.impl.BeforeHandler
 import com.tencent.bkrepo.common.query.handler.impl.ContainsHandler
 import com.tencent.bkrepo.common.query.handler.impl.DefaultMongoNestedRuleHandler
 import com.tencent.bkrepo.common.query.handler.impl.EqualHandler
+import com.tencent.bkrepo.common.query.handler.impl.ExistsHandler
 import com.tencent.bkrepo.common.query.handler.impl.GreaterThanHandler
 import com.tencent.bkrepo.common.query.handler.impl.GreaterThanOrEqualHandler
 import com.tencent.bkrepo.common.query.handler.impl.InHandler
@@ -97,6 +98,7 @@ open class MongoQueryInterpreter {
         defaultQueryRuleHandlerMap[OperationType.REGEX_I] = RegexIHandler()
         defaultQueryRuleHandlerMap[OperationType.NULL] = NullHandler()
         defaultQueryRuleHandlerMap[OperationType.NOT_NULL] = NotNullHandler()
+        defaultQueryRuleHandlerMap[OperationType.EXISTS] = ExistsHandler()
     }
 
     open fun interpret(queryModel: QueryModel): QueryContext {

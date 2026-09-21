@@ -49,6 +49,7 @@ import com.tencent.bkrepo.fs.server.handler.drive.DriveOperationHandler
 import com.tencent.bkrepo.fs.server.handler.drive.DriveRepositoryHandler
 import com.tencent.bkrepo.fs.server.handler.drive.DriveSnapshotHandler
 import com.tencent.bkrepo.fs.server.handler.drive.DriveTemporaryAccessHandler
+import com.tencent.bkrepo.fs.server.handler.drive.DriveThumbnailBackfillHandler
 import com.tencent.bkrepo.fs.server.handler.service.FsNodeHandler
 import com.tencent.bkrepo.fs.server.metrics.ServerMetrics
 import org.slf4j.LoggerFactory
@@ -82,6 +83,7 @@ class RouteConfiguration(
     private val driveSnapshotHandler: DriveSnapshotHandler,
     private val driveOperateLogHandler: DriveOperateLogHandler,
     private val driveTemporaryAccessHandler: DriveTemporaryAccessHandler,
+    private val driveThumbnailBackfillHandler: DriveThumbnailBackfillHandler,
     private val authHandlerFilterFunction: AuthHandlerFilterFunction,
     private val serverMetrics: ServerMetrics,
     private val devXAccessFilter: DevXAccessFilter,
@@ -175,6 +177,9 @@ class RouteConfiguration(
                 filter(artifactFileCleanupFilterFunction::filter)
                 PUT("/upload/{projectId}/{repoName}/**", driveTemporaryAccessHandler::upload)
                 addMetrics(serverMetrics.uploadingCount)
+            }
+            "/admin".nest {
+                POST("/thumbnail/backfill", driveThumbnailBackfillHandler::backfill)
             }
             accept(APPLICATION_OCTET_STREAM).nest {
                 GET("/temporary/download/{projectId}/{repoName}/**", driveTemporaryAccessHandler::download)

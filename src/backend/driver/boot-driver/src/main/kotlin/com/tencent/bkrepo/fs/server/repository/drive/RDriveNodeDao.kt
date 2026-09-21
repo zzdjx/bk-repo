@@ -2,11 +2,14 @@ package com.tencent.bkrepo.fs.server.repository.drive
 
 import com.mongodb.client.result.UpdateResult
 import com.tencent.bkrepo.common.metadata.condition.ReactiveCondition
+import com.tencent.bkrepo.common.metadata.model.TMetadata
 import com.tencent.bkrepo.common.metadata.model.drive.TDriveNode
 import com.tencent.bkrepo.common.metadata.pojo.drive.DriveMetadataQueryRule
 import com.tencent.bkrepo.common.metadata.pojo.drive.DriveNameQueryRule
 import com.tencent.bkrepo.common.metadata.util.drive.DriveNodeDaoHelper
 import com.tencent.bkrepo.common.metadata.util.drive.DriveNodeSeriesCountHelper
+import com.tencent.bkrepo.common.query.enums.OperationType
+import com.tencent.bkrepo.fs.server.utils.ArtifactThumbnailTypes
 import org.springframework.context.annotation.Conditional
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.core.mapping.Field
@@ -82,6 +85,30 @@ class RDriveNodeDao : DriveHashShardingMongoReactiveDao<TDriveNode>() {
             direction = direction,
         )
         return findCursorPage(criteria, TDriveNode::lastModifiedDate.name, pageSize, direction)
+    }
+
+    /**
+     * 按 ino 升序翻页查询带 [ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME] 的当前文件节点。
+     */
+    suspend fun searchArtifactPageByIno(
+        projectId: String,
+        repoName: String,
+        pageSize: Int,
+        lastIno: Long? = null,
+    ): List<TDriveNode> {
+        val criteria = DriveNodeDaoHelper.searchCriteria(
+            projectId = projectId,
+            repoName = repoName,
+            metadata = listOf(
+                DriveMetadataQueryRule(
+                    key = ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME,
+                    operation = OperationType.EXISTS,
+                ),
+            ),
+        )
+        lastIno?.let { criteria.and(TDriveNode::ino.name).gt(it) }
+        val query = Query(criteria).with(Sort.by(Sort.Direction.ASC, TDriveNode::ino.name)).limit(pageSize)
+        return find(query)
     }
 
     suspend fun searchCount(
@@ -323,6 +350,20 @@ class RDriveNodeDao : DriveHashShardingMongoReactiveDao<TDriveNode>() {
             Query(criteria),
             update
         )
+    }
+
+    /**
+     * 只写 metadata，不改 lastModifiedBy / lastModifiedDate 等审计字段。
+     */
+    suspend fun updateMetadataByNodeId(
+        projectId: String,
+        repoName: String,
+        nodeId: String,
+        metadata: MutableList<TMetadata>?,
+    ): UpdateResult {
+        val query = Query(currentNodeIdCriteria(projectId, repoName, nodeId))
+        val update = Update().set(TDriveNode::metadata.name, metadata)
+        return updateFirst(query, update)
     }
 
     private fun currentNodeIdCriteria(projectId: String, repoName: String, nodeId: String): Criteria {

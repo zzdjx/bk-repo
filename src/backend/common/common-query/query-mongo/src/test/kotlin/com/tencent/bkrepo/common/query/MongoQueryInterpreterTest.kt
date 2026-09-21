@@ -38,6 +38,7 @@ import com.tencent.bkrepo.common.query.model.PageLimit
 import com.tencent.bkrepo.common.query.model.QueryModel
 import com.tencent.bkrepo.common.query.model.Rule
 import com.tencent.bkrepo.common.query.model.Sort
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -143,6 +144,17 @@ class MongoQueryInterpreterTest {
         val interpreter = MongoQueryInterpreter()
         interpreter.interpret(queryModel(rule = Rule.QueryRule("metadata", mapOf("env" to "prod"))))
         interpreter.interpret(queryModel(rule = Rule.QueryRule("repoName", listOf("r1", "r2"), OperationType.IN)))
+    }
+
+    @Test
+    fun `exists operation compiles to mongo exists`() {
+        val interpreter = MongoQueryInterpreter()
+        val query = interpreter.interpret(
+            queryModel(rule = Rule.QueryRule("name", "", OperationType.EXISTS)),
+        ).mongoQuery
+        val json = query.queryObject.toJson()
+        assertTrue(json.contains("\$exists"))
+        assertTrue(json.contains("name"))
     }
 
     private fun queryModel(
