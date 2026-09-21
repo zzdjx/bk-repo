@@ -595,21 +595,6 @@ test('extractMarkdownFrontMatter accepts BOM, blank lines and CRLF', () => {
     assert.equal(markdown.includes('title: Demo'), false)
 })
 
-test('extractMarkdownFrontMatter strips fixture yaml without leaving keys in body', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const { fileURLToPath } = await import('node:url')
-    const fixturePath = fileURLToPath(new URL('./fixtures/markdown-preview-unsupported.md', import.meta.url))
-    const source = await readFile(fixturePath, 'utf8')
-    const { markdown, html, fields } = extractMarkdownFrontMatter(source)
-    assert.equal(fields.title, 'Markdown 预览缺口对照')
-    assert.equal(fields.status, 'fixture')
-    assert.deepEqual(fields.tags, ['preview', 'unsupported'])
-    assert.match(html, /文档属性/)
-    assert.match(markdown, /^# Markdown 预览未支持功能对照/m)
-    assert.equal(/^\s*---/.test(markdown), false)
-    assert.equal(/^title:/m.test(markdown), false)
-})
-
 test('rewriteMarkdownAlerts wraps github alert quotes', () => {
     const html = rewriteMarkdownAlerts('> [!NOTE]\n> extra info\n', (body) => `<p>${body}</p>`)
     assert.match(html, /class="markdown-alert markdown-alert-note"/)

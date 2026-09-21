@@ -288,9 +288,11 @@
     background: transparent !important;
     border-width: 2px !important;
 }
+/* 切页或滚动会整段重建缩略图，内联 zoom 会丢。变量挂在侧栏上，新节点立刻吃到同一比例。 */
 .pptx-live-thumbs.is-sized ::v-deep .pptxv-thumb-frame > .pptxv-stage {
     transform: none !important;
     transform-origin: 0 0 !important;
+    zoom: var(--pptx-thumb-scale);
 }
 .pptx-live-thumbs ::v-deep .pptxv-thumb.is-active .pptxv-thumb-frame {
     border-color: #3a84ff;
