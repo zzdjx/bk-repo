@@ -2,8 +2,6 @@ package com.tencent.bkrepo.fs.server.service.drive.thumbnail
 
 import com.tencent.bkrepo.fs.server.config.properties.drive.DriveThumbnailProperties
 import com.tencent.bkrepo.fs.server.utils.ArtifactThumbnailTypes
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.rendering.ImageType
 import org.apache.pdfbox.rendering.PDFRenderer
@@ -17,6 +15,7 @@ import org.springframework.stereotype.Component
 import org.w3c.dom.Element
 import org.w3c.dom.Node
 import java.awt.image.BufferedImage
+import java.nio.file.Files
 import java.nio.file.Path
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
@@ -40,36 +39,44 @@ class InternalArtifactThumbnailGenerator(
     private val htmlRenderer: HtmlThumbnailRenderer,
 ) : ArtifactThumbnailGenerator {
 
-    override suspend fun generate(
+    override fun generate(
         input: Path,
         artifactType: String,
         output: Path,
     ): ThumbnailGenerateResult {
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                when (artifactType) {
-                    ArtifactThumbnailTypes.TYPE_IMAGE -> renderImage(input, output)
-                    ArtifactThumbnailTypes.TYPE_PDF -> renderPdf(input, output)
-                    ArtifactThumbnailTypes.TYPE_SLIDES -> renderSlides(input, output)
-                    ArtifactThumbnailTypes.TYPE_TABLE ->
-                        renderPreview(input, output, artifactType, properties.documentMaxEdge, preserveChroma = true) {
-                            TableThumbnailRenderer.render(it, properties.documentMaxEdge)
-                        }
-                    ArtifactThumbnailTypes.TYPE_VIDEO -> renderVideo(input, output)
-                    ArtifactThumbnailTypes.TYPE_MARKDOWN ->
-                        renderPreview(input, output, artifactType, properties.documentMaxEdge, preserveChroma = true) {
-                            MarkdownThumbnailRenderer.render(it)
-                        }
-                    ArtifactThumbnailTypes.TYPE_HTML ->
-                        renderPreview(input, output, artifactType, properties.htmlMaxEdge, preserveChroma = true) {
-                            htmlRenderer.render(it)
-                        }
-                    else -> ThumbnailGenerateResult.Failed("internal engine does not support type[$artifactType]")
-                }
-            }.getOrElse { e ->
-                logger.warn("Internal thumbnail failed type[$artifactType] for [$input]: ${e.message}")
-                ThumbnailGenerateResult.Failed(e.message ?: "internal generate failed")
+        if (ThumbnailAbort.isCancelled()) {
+            return ThumbnailGenerateResult.Failed("timeout")
+        }
+        return runCatching {
+            when (artifactType) {
+                ArtifactThumbnailTypes.TYPE_IMAGE -> renderImage(input, output)
+                ArtifactThumbnailTypes.TYPE_PDF -> renderPdf(input, output)
+                ArtifactThumbnailTypes.TYPE_SLIDES -> renderSlides(input, output)
+                ArtifactThumbnailTypes.TYPE_TABLE ->
+                    renderPreview(input, output, artifactType, properties.documentMaxEdge, preserveChroma = true) {
+                        TableThumbnailRenderer.render(it, properties.documentMaxEdge)
+                    }
+                ArtifactThumbnailTypes.TYPE_VIDEO -> renderVideo(input, output)
+                ArtifactThumbnailTypes.TYPE_MARKDOWN ->
+                    renderPreview(input, output, artifactType, properties.documentMaxEdge, preserveChroma = true) {
+                        MarkdownThumbnailRenderer.render(it)
+                    }
+                ArtifactThumbnailTypes.TYPE_HTML ->
+                    renderPreview(input, output, artifactType, properties.htmlMaxEdge, preserveChroma = true) {
+                        htmlRenderer.render(it)
+                    }
+                else -> ThumbnailGenerateResult.Failed("internal engine does not support type[$artifactType]")
             }
+        }.getOrElse { e ->
+            if (e is InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            if (ThumbnailAbort.isCancelled() || e is InterruptedException) {
+                Files.deleteIfExists(output)
+                return ThumbnailGenerateResult.Failed("timeout")
+            }
+            logger.warn("Internal thumbnail failed type[$artifactType] for [$input]: ${e.message}")
+            ThumbnailGenerateResult.Failed(e.message ?: "internal generate failed")
         }
     }
 
@@ -81,6 +88,9 @@ class InternalArtifactThumbnailGenerator(
         preserveChroma: Boolean = false,
         render: (Path) -> BufferedImage?,
     ): ThumbnailGenerateResult {
+        if (ThumbnailAbort.isCancelled()) {
+            return ThumbnailGenerateResult.Failed("timeout")
+        }
         val rendered = render(input) ?: return ThumbnailGenerateResult.Failed("empty $artifactType[$input]")
         return writeScaledJpeg(rendered, output, maxEdge, preserveChroma)
     }
@@ -102,8 +112,8 @@ class InternalArtifactThumbnailGenerator(
     private fun readSubsampled(input: Path, maxEdge: Int): BufferedImage? {
         ImageIO.setUseCache(false)
         val stream = ImageIO.createImageInputStream(input.toFile()) ?: return null
-        return stream.use {
-            val reader = ImageIO.getImageReaders(it).asSequence().firstOrNull() ?: return@use null
+        return stream.useAbortable {
+            val reader = ImageIO.getImageReaders(it).asSequence().firstOrNull() ?: return@useAbortable null
             try {
                 reader.setInput(it, true, true)
                 val param = reader.defaultReadParam
@@ -128,7 +138,7 @@ class InternalArtifactThumbnailGenerator(
     }
 
     private fun renderPdf(input: Path, output: Path): ThumbnailGenerateResult {
-        return PDDocument.load(input.toFile()).use { document ->
+        return PDDocument.load(input.toFile()).useAbortable { document ->
             if (document.numberOfPages < 1) {
                 ThumbnailGenerateResult.Failed("empty pdf[$input]")
             } else {
@@ -143,10 +153,10 @@ class InternalArtifactThumbnailGenerator(
     }
 
     private fun renderSlides(input: Path, output: Path): ThumbnailGenerateResult {
-        return SlideShowFactory.create(input.toFile(), null, true).use { show ->
+        return SlideShowFactory.create(input.toFile(), null, true).useAbortable { show ->
             val slides = show.slides
             if (slides.isEmpty()) {
-                return@use ThumbnailGenerateResult.Failed("empty slides[$input]")
+                return@useAbortable ThumbnailGenerateResult.Failed("empty slides[$input]")
             }
             val page = show.pageSize
             val size = scaledSize(page.width.coerceAtLeast(1), page.height.coerceAtLeast(1), properties.documentMaxEdge)
@@ -157,17 +167,25 @@ class InternalArtifactThumbnailGenerator(
                 graphics.scale(size.scale, size.scale)
                 slides[0].draw(graphics)
             }
-            writeJpeg(image, output, preserveChroma = true)
-            ThumbnailGenerateResult.Success
+            finishJpeg(image, output, preserveChroma = true)
         }
     }
 
     private fun renderVideo(input: Path, output: Path): ThumbnailGenerateResult {
         var lastError: String? = null
         for (format in videoInputFormats(input)) {
+            if (ThumbnailAbort.isCancelled()) {
+                return ThumbnailGenerateResult.Failed("timeout")
+            }
             try {
                 return grabVideoFrame(input, output, format)
             } catch (e: Exception) {
+                if (e is InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+                if (ThumbnailAbort.isCancelled() || e is InterruptedException) {
+                    return ThumbnailGenerateResult.Failed("timeout")
+                }
                 lastError = e.message ?: e.javaClass.simpleName
                 logger.warn(
                     "Internal thumbnail failed type[video] format[${format ?: FORMAT_AUTO}] " +
@@ -179,16 +197,16 @@ class InternalArtifactThumbnailGenerator(
     }
 
     private fun grabVideoFrame(input: Path, output: Path, format: String?): ThumbnailGenerateResult {
-        return FFmpegFrameGrabber(input.toFile()).use { grabber ->
+        return FFmpegFrameGrabber(input.toFile()).useAbortable { grabber ->
             format?.let { grabber.format = it }
             grabber.setOption(OPTION_PROBE_SIZE, VIDEO_PROBE_SIZE)
             grabber.setOption(OPTION_ANALYZE_DURATION, VIDEO_ANALYZE_DURATION)
             grabber.start()
             val frame = grabFirstImageFrame(grabber)
-                ?: return@use ThumbnailGenerateResult.Failed("no video frame[$input]")
+                ?: return@useAbortable ThumbnailGenerateResult.Failed("no video frame[$input]")
             val source = Java2DFrameConverter().use { converter ->
                 converter.convert(frame)
-            } ?: return@use ThumbnailGenerateResult.Failed("unreadable video frame[$input]")
+            } ?: return@useAbortable ThumbnailGenerateResult.Failed("unreadable video frame[$input]")
             writeScaledJpeg(source, output)
         }
     }
@@ -209,6 +227,9 @@ class InternalArtifactThumbnailGenerator(
 
     private fun grabFirstImageFrame(grabber: FFmpegFrameGrabber): Frame? {
         repeat(MAX_VIDEO_FRAME_ATTEMPTS) {
+            if (ThumbnailAbort.isCancelled()) {
+                return null
+            }
             val frame = grabber.grabImage() ?: return null
             if (frame.image != null) {
                 return frame
@@ -274,11 +295,27 @@ class InternalArtifactThumbnailGenerator(
         maxEdge: Int = properties.maxEdge,
         preserveChroma: Boolean = false,
     ): ThumbnailGenerateResult {
-        writeJpeg(scaleToMaxEdge(image, maxEdge), output, preserveChroma)
+        return finishJpeg(scaleToMaxEdge(image, maxEdge), output, preserveChroma)
+    }
+
+    private fun finishJpeg(image: BufferedImage, output: Path, preserveChroma: Boolean): ThumbnailGenerateResult {
+        if (ThumbnailAbort.isCancelled()) {
+            Files.deleteIfExists(output)
+            return ThumbnailGenerateResult.Failed("timeout")
+        }
+        writeJpeg(image, output, preserveChroma)
+        if (ThumbnailAbort.isCancelled()) {
+            Files.deleteIfExists(output)
+            return ThumbnailGenerateResult.Failed("timeout")
+        }
         return ThumbnailGenerateResult.Success
     }
 
     private fun writeJpeg(image: BufferedImage, output: Path, preserveChroma: Boolean = false) {
+        if (ThumbnailAbort.isCancelled()) {
+            Files.deleteIfExists(output)
+            return
+        }
         val writer = ImageIO.getImageWritersByFormatName("jpeg").asSequence().firstOrNull()
             ?: error("no jpeg ImageWriter available")
         ImageIO.createImageOutputStream(output.toFile()).use { stream ->

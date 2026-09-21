@@ -288,7 +288,10 @@ class DriveUploadServiceTest {
         Files.write(sourcePath, byteArrayOf(1, 2, 3, 4))
         val artifactFile = artifactFile(sha256 = "abc", size = 4)
         whenever(artifactFile.getFile()).thenReturn(sourcePath.toFile())
-        val artifactMetadata = imageMetadata()
+        val artifactMetadata = imageMetadata().apply {
+            add(TMetadata(key = "imate_artifact_thumbnail", value = "/stolen/.other.thumb.jpg"))
+            add(TMetadata(key = ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL_INO, value = "999"))
+        }
         val sourceIno = 2002L
         val sidecarIno = 3003L
         val createdSource = driveNode(ino = sourceIno).copy(name = "hero.png", metadata = artifactMetadata)
@@ -346,6 +349,18 @@ class DriveUploadServiceTest {
             "封面",
             ArtifactThumbnailTypes.metadataValue(sourceCreate.metadata, ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME),
         )
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(
+                sourceCreate.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL,
+            ),
+        )
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(
+                sourceCreate.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL_INO,
+            ),
+        )
         assertNull(sidecarCreate.metadata)
         assertEquals(sourceIno, updateCaptor.firstValue.ino)
         assertEquals(true, updateCaptor.firstValue.touchLastModified)
@@ -370,6 +385,65 @@ class DriveUploadServiceTest {
                 ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME,
             ),
         )
+    }
+
+    @Test
+    fun `drops client thumbnail metadata when generate does not produce jpeg`() {
+        val forged = imageMetadata().apply {
+            add(TMetadata(key = "IMATE_ARTIFACT_THUMBNAIL", value = "/docs/.victim.thumb.jpg"))
+            add(TMetadata(key = "imate_artifact_thumbnail_ino", value = "42"))
+        }
+        val sourceIno = 2004L
+        val uploadRequest = DriveNodeUploadRequest(
+            projectId = PROJECT_ID,
+            repoName = REPO_NAME,
+            fullPath = "/hero.png",
+            overwrite = false,
+        )
+        val artifactFile = artifactFile(sha256 = "abc", size = 4)
+        runBlocking {
+            whenever(driveArtifactThumbnailBinder.render(any(), anyOrNull(), any())).thenReturn(null)
+            whenever(driveNodeDao.findCurrentNode(any(), any(), any(), any())).thenReturn(null)
+            whenever(driveInoAllocator.allocate(PROJECT_ID, REPO_NAME)).thenReturn(sourceIno)
+            whenever(driveNodeService.createNode(any<DriveNodeCreateRequest>(), anyOrNull(), anyOrNull()))
+                .thenAnswer { invocation ->
+                    val request = invocation.getArgument<DriveNodeCreateRequest>(0)
+                    driveNode(sourceIno).copy(name = request.name, metadata = request.metadata)
+                }
+            whenever(
+                driveFileOperationService.write(any<CoArtifactFile>(), any<DriveBlockWriteRequest>(), any()),
+            ).thenReturn(mock<DriveBlockNode>())
+        }
+
+        val result = runBlocking {
+            driveUploadService.uploadCompleteFile(uploadRequest, artifactFile, forged, USER_ID)
+        }
+
+        assertEquals(sourceIno, result.ino)
+        assertEquals(
+            "封面",
+            ArtifactThumbnailTypes.metadataValue(result.metadata, ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME),
+        )
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(result.metadata, ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL),
+        )
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(
+                result.metadata,
+                ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL_INO,
+            ),
+        )
+        runBlocking {
+            verify(driveNodeService, never()).update(any(), anyOrNull(), anyOrNull())
+            val createCaptor = argumentCaptor<DriveNodeCreateRequest>()
+            verify(driveNodeService).createNode(createCaptor.capture(), anyOrNull(), anyOrNull())
+            assertNull(
+                ArtifactThumbnailTypes.metadataValue(
+                    createCaptor.firstValue.metadata,
+                    ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL,
+                ),
+            )
+        }
     }
 
     @Test

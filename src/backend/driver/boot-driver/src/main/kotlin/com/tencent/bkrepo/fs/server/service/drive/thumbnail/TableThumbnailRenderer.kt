@@ -56,14 +56,14 @@ internal object TableThumbnailRenderer {
     }
 
     private fun readXlsxGrid(input: Path): List<List<String>> {
-        OPCPackage.open(input.toFile(), PackageAccess.READ).use { pkg ->
+        OPCPackage.open(input.toFile(), PackageAccess.READ).useAbortable { pkg ->
             val reader = XSSFReader(pkg).apply { setUseReadOnlySharedStringsTable(true) }
             val strings = reader.sharedStringsTable ?: ReadOnlySharedStringsTable(pkg)
             val sheets = reader.sheetsData
             if (!sheets.hasNext()) {
                 return emptyList()
             }
-            sheets.next().use { sheetStream ->
+            sheets.next().useAbortable { sheetStream ->
                 return parseXlsxSheetPreview(reader.stylesTable, strings, sheetStream)
             }
         }
@@ -90,7 +90,7 @@ internal object TableThumbnailRenderer {
     }
 
     private fun readOleWorkbookGrid(input: Path): List<List<String>> {
-        WorkbookFactory.create(input.toFile(), null, true).use { workbook ->
+        WorkbookFactory.create(input.toFile(), null, true).useAbortable { workbook ->
             if (workbook.numberOfSheets < 1) {
                 return emptyList()
             }
@@ -111,7 +111,7 @@ internal object TableThumbnailRenderer {
     }
 
     private fun readCsvGrid(input: Path): List<List<String>> {
-        return Files.newInputStream(input).use { raw ->
+        return Files.newInputStream(input).useAbortable { raw ->
             val stream = BufferedInputStream(raw)
             ThumbnailPreviewText.skipUtf8Bom(stream)
             InputStreamReader(stream, StandardCharsets.UTF_8).buffered().use { reader ->

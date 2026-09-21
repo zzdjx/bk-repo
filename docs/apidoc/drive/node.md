@@ -387,7 +387,7 @@
 
 - 响应体
   返回 `DriveNode`，字段说明见下文「DriveNode 返回字段说明」。
-  若请求元数据包含 `IMATE_ARTIFACT_NAME`（`X-BKREPO-META` 批量头保留大小写），上传成功后会尝试生成同目录隐藏 sidecar `.{name}.thumb.jpg`，并把 sidecar 完整路径写回源文件元数据 `IMATE_ARTIFACT_THUMBNAIL`、把 sidecar inode 写回 `IMATE_ARTIFACT_THUMBNAIL_INO`。两个字段必须同时存在才视为有缩略图。sidecar 节点本身不写元数据。当前服务端可为 `image`、`pdf`、`slides`、`table`、`video`、`markdown`、`html` 生成缩略图（png/jpg/gif/webp/bmp 缩放与 svg 栅格化，支持 SVG2 滤镜如 feDropShadow，按文档长边输出，不修改原文件；pdf/ppt/pptx 取首页，Keynote `.key` 暂不支持；xls/xlsx/csv 按文档长边渲首屏网格；mp4/webm 抽第一帧；md/markdown 渲首屏文本；html 用 Playwright 在 Chromium sandbox + iframe `sandbox="allow-scripts"` 中截首屏，拦截外网与本地文件）。生成失败不影响原文件上传成功。code/audio/other 不生成 sidecar。
+  若请求元数据包含 `IMATE_ARTIFACT_NAME`（`X-BKREPO-META` 批量头保留大小写），上传成功后会尝试生成同目录隐藏 sidecar `.{name}.thumb.jpg`，并把 sidecar 完整路径写回源文件元数据 `IMATE_ARTIFACT_THUMBNAIL`、把 sidecar inode 写回 `IMATE_ARTIFACT_THUMBNAIL_INO`。两个字段必须同时存在才视为有缩略图。客户端提交的 `IMATE_ARTIFACT_THUMBNAIL` / `IMATE_ARTIFACT_THUMBNAIL_INO`（大小写不敏感）入库前丢弃，只允许服务端 sidecar persist 成功后写入。sidecar 节点本身不写元数据。当前服务端可为 `image`、`pdf`、`slides`、`table`、`video`、`markdown`、`html` 生成缩略图（png/jpg/gif/webp/bmp 缩放与 svg 栅格化，支持 SVG2 滤镜如 feDropShadow，按文档长边输出，不修改原文件；pdf/ppt/pptx 取首页，Keynote `.key` 暂不支持；xls/xlsx/csv 按文档长边渲首屏网格；mp4/webm 抽第一帧；md/markdown 渲首屏文本；html 用 Playwright 在 Chromium sandbox + iframe `sandbox="allow-scripts"` 中截首屏，拦截外网与本地文件）。生成失败不影响原文件上传成功。code/audio/other 不生成 sidecar。
   ```json
   {
     "code": 0,

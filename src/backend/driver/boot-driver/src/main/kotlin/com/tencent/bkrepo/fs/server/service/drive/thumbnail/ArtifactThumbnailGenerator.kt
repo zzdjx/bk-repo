@@ -4,11 +4,11 @@ import java.nio.file.Path
 
 /**
  * 作品缩略图生成端口。默认由 JVM 内处理实现。
- * 调用方负责跳过规则、超时和按类型并发；实现只处理「文件进、JPEG 出」。
+ * 调用方负责跳过规则、超时和按类型并发；实现在调用线程上同步处理「文件进、JPEG 出」。
  */
 fun interface ArtifactThumbnailGenerator {
 
-    suspend fun generate(input: Path, artifactType: String, output: Path): ThumbnailGenerateResult
+    fun generate(input: Path, artifactType: String, output: Path): ThumbnailGenerateResult
 }
 
 sealed class ThumbnailGenerateResult {

@@ -6,6 +6,8 @@ import com.tencent.bkrepo.fs.server.utils.ArtifactThumbnailTypes
 import com.tencent.bkrepo.fs.server.service.drive.thumbnail.HtmlSandboxThumbnailRenderer
 import com.tencent.bkrepo.fs.server.service.drive.thumbnail.InternalArtifactThumbnailGenerator
 import com.tencent.bkrepo.fs.server.service.drive.thumbnail.ThumbnailGenerateResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -72,6 +74,7 @@ class HtmlSandboxThumbnailRendererTest {
             maxEdge = 256
             jpegQuality = 0.7f
             htmlChromiumSandbox = true
+            concurrency["html"] = 1
         }
         HtmlSandboxThumbnailRenderer(props).use { renderer ->
             try {
@@ -110,6 +113,7 @@ class HtmlSandboxThumbnailRendererTest {
             htmlDeviceScaleFactor = 2.0
             htmlSettleDelay = Duration.ZERO
             htmlChromiumSandbox = true
+            concurrency["html"] = 1
         }
         HtmlSandboxThumbnailRenderer(props).use { renderer ->
             try {
@@ -137,6 +141,7 @@ class HtmlSandboxThumbnailRendererTest {
             jpegQuality = 0.7f
             htmlChromiumSandbox = true
             htmlSettleDelay = Duration.ofMillis(DELAYED_SETTLE_MS)
+            concurrency["html"] = 1
         }
         HtmlSandboxThumbnailRenderer(props).use { renderer ->
             try {
@@ -161,6 +166,37 @@ class HtmlSandboxThumbnailRendererTest {
             assertEquals(ThumbnailGenerateResult.Success, result)
             val image = ImageIO.read(output.toFile())
             assertTrue(hasGreenPixel(image), "screenshot should wait for delayed first-screen paint")
+        }
+    }
+
+    @Test
+    fun `two html actors can render at the same time`() = runBlocking {
+        val props = DriveThumbnailProperties().apply {
+            timeout = Duration.ofSeconds(HTML_RENDER_TIMEOUT_SECONDS)
+            htmlSettleDelay = Duration.ZERO
+            htmlChromiumSandbox = true
+            concurrency["html"] = 2
+        }
+        HtmlSandboxThumbnailRenderer(props).use { renderer ->
+            try {
+                renderer.start()
+            } catch (e: Exception) {
+                assumeTrue(false, "Playwright Chromium sandbox unavailable: ${e.message}")
+                return@runBlocking
+            }
+            val firstInput = writeGreenHtml()
+            val secondInput = tempDir.resolve("green-b.html")
+            Files.copy(firstInput, secondInput)
+            val first = async(Dispatchers.IO) { renderer.render(firstInput) }
+            val second = async(Dispatchers.IO) { renderer.render(secondInput) }
+            val firstImage = first.await()
+            val secondImage = second.await()
+            if (firstImage == null || secondImage == null) {
+                assumeTrue(false, "Playwright Chromium sandbox unavailable: empty render")
+                return@runBlocking
+            }
+            assertTrue(hasGreenPixel(firstImage), "first actor should paint the first screen")
+            assertTrue(hasGreenPixel(secondImage), "second actor should paint the first screen")
         }
     }
 

@@ -20,7 +20,7 @@ class DriveThumbnailProperties {
     var backfillRepoName: String = "imate-artifact"
 
     /**
-     * PUT / 调用方等待生成器的硬超时，超时视为 Failed。
+     * PUT / 调用方等待生成器的硬超时。到期后中止生成线程并关闭已登记资源，立即 Failed。
      */
     var timeout: Duration = Duration.ofSeconds(5)
 
@@ -52,6 +52,7 @@ class DriveThumbnailProperties {
     /**
      * 按作品类型的最大并发生成数；未列出的类型走 [defaultConcurrency]。
      * 获取不到许可时立即 Failed，不阻塞调用方。
+     * `html` 每个许可对应一条 Playwright 专用线程和一份 Chromium，API 不跨线程。
      * 默认按 driver `-Xmx8G`、各类型同时打满来估：缩略图堆约 2.5–3.5G，其余留给上传与 GC。
      */
     var concurrency: MutableMap<String, Int> = mutableMapOf(

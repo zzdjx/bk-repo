@@ -7,11 +7,11 @@ import com.tencent.bkrepo.fs.server.service.drive.thumbnail.ArtifactThumbnailGen
 import com.tencent.bkrepo.fs.server.utils.ArtifactThumbnailTypes
 import com.tencent.bkrepo.fs.server.service.drive.thumbnail.HtmlThumbnailRenderer
 import com.tencent.bkrepo.fs.server.service.drive.thumbnail.InternalArtifactThumbnailGenerator
+import com.tencent.bkrepo.fs.server.service.drive.thumbnail.ThumbnailAbort
 import com.tencent.bkrepo.fs.server.service.drive.thumbnail.ThumbnailGenerateResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
@@ -28,6 +28,7 @@ import org.bytedeco.ffmpeg.global.avutil
 import org.bytedeco.javacv.FFmpegFrameRecorder
 import org.bytedeco.javacv.Java2DFrameConverter
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -41,6 +42,7 @@ import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.imageio.ImageIO
 
@@ -568,11 +570,9 @@ class ArtifactThumbnailGenerateServiceTest {
         val started = CountDownLatch(1)
         val hold = CountDownLatch(1)
         val generator = ArtifactThumbnailGenerator { _, _, _ ->
-            withContext(Dispatchers.IO) {
-                started.countDown()
-                hold.await(5, TimeUnit.SECONDS)
-                ThumbnailGenerateResult.Success
-            }
+            started.countDown()
+            hold.await(5, TimeUnit.SECONDS)
+            ThumbnailGenerateResult.Success
         }
         val svc = service(generator, properties().apply { concurrency["html"] = 1 })
         val first = async(Dispatchers.IO) {
@@ -594,11 +594,9 @@ class ArtifactThumbnailGenerateServiceTest {
         val started = CountDownLatch(1)
         val hold = CountDownLatch(1)
         val generator = ArtifactThumbnailGenerator { _, _, _ ->
-            withContext(Dispatchers.IO) {
-                started.countDown()
-                hold.await(5, TimeUnit.SECONDS)
-                ThumbnailGenerateResult.Success
-            }
+            started.countDown()
+            hold.await(5, TimeUnit.SECONDS)
+            ThumbnailGenerateResult.Success
         }
         val svc = service(generator, properties().apply { concurrency["html"] = 1 })
         val first = async(Dispatchers.IO) {
@@ -640,13 +638,11 @@ class ArtifactThumbnailGenerateServiceTest {
         val hold = CountDownLatch(1)
         val htmlStarted = CountDownLatch(1)
         val generator = ArtifactThumbnailGenerator { _, type, _ ->
-            withContext(Dispatchers.IO) {
-                if (type == ArtifactThumbnailTypes.TYPE_HTML) {
-                    htmlStarted.countDown()
-                    hold.await(5, TimeUnit.SECONDS)
-                }
-                ThumbnailGenerateResult.Success
+            if (type == ArtifactThumbnailTypes.TYPE_HTML) {
+                htmlStarted.countDown()
+                hold.await(5, TimeUnit.SECONDS)
             }
+            ThumbnailGenerateResult.Success
         }
         val svc = service(
             generator,
@@ -667,6 +663,57 @@ class ArtifactThumbnailGenerateServiceTest {
         assertEquals(ThumbnailGenerateResult.Success, imageResult)
         hold.countDown()
         assertEquals(ThumbnailGenerateResult.Success, htmlJob.await())
+    }
+
+    @Test
+    fun `timeout returns before uninterruptible generate finishes`() = runBlocking {
+        val finished = AtomicBoolean(false)
+        val started = CountDownLatch(1)
+        val generator = ArtifactThumbnailGenerator { _, _, _ ->
+            started.countDown()
+            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            while (System.nanoTime() < until) {
+                // busy-spin: Thread.interrupt cannot unblock this
+            }
+            finished.set(true)
+            ThumbnailGenerateResult.Success
+        }
+        val svc = service(generator, properties().apply { timeout = Duration.ofMillis(200) })
+        val startedAt = System.nanoTime()
+        val result = svc.generate(
+            tempDir.resolve("slow.pdf"),
+            ArtifactThumbnailTypes.TYPE_PDF,
+            tempDir.resolve("slow.jpg"),
+        )
+        val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+        assertEquals(ThumbnailGenerateResult.Failed("timeout"), result)
+        assertTrue(started.await(1, TimeUnit.SECONDS))
+        assertTrue(elapsedMs < 2000, "caller waited ${elapsedMs}ms for 200ms timeout")
+        assertTrue(!finished.get())
+    }
+
+    @Test
+    fun `timeout closes registered abortable resource`() = runBlocking {
+        val closed = CountDownLatch(1)
+        val started = CountDownLatch(1)
+        val generator = ArtifactThumbnailGenerator { _, _, _ ->
+            ThumbnailAbort.register(AutoCloseable { closed.countDown() })
+            started.countDown()
+            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (System.nanoTime() < until && !ThumbnailAbort.isCancelled()) {
+                // wait until abort
+            }
+            ThumbnailGenerateResult.Success
+        }
+        val svc = service(generator, properties().apply { timeout = Duration.ofMillis(200) })
+        val result = svc.generate(
+            tempDir.resolve("slow.html"),
+            ArtifactThumbnailTypes.TYPE_HTML,
+            tempDir.resolve("slow.jpg"),
+        )
+        assertEquals(ThumbnailGenerateResult.Failed("timeout"), result)
+        assertTrue(started.await(1, TimeUnit.SECONDS))
+        assertTrue(closed.await(2, TimeUnit.SECONDS))
     }
 
     @Test
@@ -744,6 +791,26 @@ class ArtifactThumbnailGenerateServiceTest {
             "/docs/.hero.png.thumb.jpg",
             ArtifactThumbnailTypes.metadataValue(replaced, ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL),
         )
+    }
+
+    @Test
+    fun `without thumbnail keys drops client thumbnail path and ino case-insensitively`() {
+        val stripped = ArtifactThumbnailTypes.withoutThumbnailKeys(
+            mutableListOf(
+                TMetadata(key = ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME, value = "封面"),
+                TMetadata(key = "imate_artifact_thumbnail", value = "/stolen.jpg"),
+                TMetadata(key = "IMATE_ARTIFACT_THUMBNAIL_INO", value = "9"),
+            ),
+        )
+        assertEquals(
+            "封面",
+            ArtifactThumbnailTypes.metadataValue(stripped, ArtifactThumbnailTypes.METADATA_ARTIFACT_NAME),
+        )
+        assertNull(ArtifactThumbnailTypes.metadataValue(stripped, ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL))
+        assertNull(
+            ArtifactThumbnailTypes.metadataValue(stripped, ArtifactThumbnailTypes.METADATA_ARTIFACT_THUMBNAIL_INO),
+        )
+        assertNull(ArtifactThumbnailTypes.withoutThumbnailKeys(null))
     }
 
     private fun service(

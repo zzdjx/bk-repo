@@ -68,6 +68,21 @@ object ArtifactThumbnailTypes {
         return result
     }
 
+    /**
+     * 去掉客户端提交的缩略图路径 / ino。这两个字段只允许服务端 persist sidecar 成功后写入。
+     */
+    fun withoutThumbnailKeys(metadata: MutableList<TMetadata>?): MutableList<TMetadata>? {
+        if (metadata == null) {
+            return null
+        }
+        return metadata.filterNot { isThumbnailKey(it.key) }.map { it.copy() }.toMutableList()
+    }
+
+    fun isThumbnailKey(key: String): Boolean {
+        return key.equals(METADATA_ARTIFACT_THUMBNAIL, ignoreCase = true) ||
+            key.equals(METADATA_ARTIFACT_THUMBNAIL_INO, ignoreCase = true)
+    }
+
     fun fromPath(fullPath: String): String? {
         val ext = fullPath.substringAfterLast('/').substringAfterLast('.', "").lowercase()
         return when {

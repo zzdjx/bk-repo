@@ -64,17 +64,18 @@ class DriveUploadService(
             verifySha256(expectedSha256, artifactFile.getFileSha256())
             val (parentIno, fileName) = resolveParentIno(projectId, repoName, fullPath, userId)
             val size = artifactFile.getSize()
+            val persistedMetadata = ArtifactThumbnailTypes.withoutThumbnailKeys(metadata)
             val fileNode = prepareFileNode(
                 projectId = projectId,
                 repoName = repoName,
                 parentIno = parentIno,
                 name = fileName,
                 size = size,
-                metadata = metadata,
+                metadata = persistedMetadata,
                 overwrite = overwrite,
             )
             // cache store 会 move 接收临时文件，必须先渲染缩略图
-            val thumbnailJpeg = driveArtifactThumbnailBinder.render(fullPath, metadata, artifactFile)
+            val thumbnailJpeg = driveArtifactThumbnailBinder.render(fullPath, persistedMetadata, artifactFile)
             try {
                 writeFileContent(artifactFile, fileNode, userId)
                 val result = persistThumbnail(fileNode, fullPath, thumbnailJpeg, userId)

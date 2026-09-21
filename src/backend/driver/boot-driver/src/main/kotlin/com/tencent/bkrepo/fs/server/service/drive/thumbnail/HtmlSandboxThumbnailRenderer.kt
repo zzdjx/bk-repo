@@ -6,6 +6,7 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.options.ScreenshotType
 import com.tencent.bkrepo.fs.server.config.properties.drive.DriveThumbnailProperties
+import com.tencent.bkrepo.fs.server.utils.ArtifactThumbnailTypes
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import org.slf4j.LoggerFactory
@@ -15,13 +16,22 @@ import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import javax.imageio.ImageIO
-import kotlin.concurrent.thread
 
 /**
  * HTML 缩略图：Playwright Chromium 打开隔离页，把文档放进
  * `sandbox="allow-scripts"`（无 `allow-same-origin`）的 iframe，等首屏动画后再截图。
  * 上下文离线并拦截非 `about:` / `data:` 请求，避免不可信 HTML 访问本地文件或外网。
+ *
+ * Playwright Java 不是线程安全的。每个 [DriveThumbnailProperties.concurrency] `html` 许可
+ * 对应一个 actor：独立线程上 create / launch / newContext / screenshot / close。
  *
  * 运行时不会自动下载浏览器；部署机需预先安装 Playwright Chromium。
  * 以 root 运行时 Chromium 会拒绝进程沙箱，自动关闭；非 root 时默认开启，起不来再关闭。
@@ -32,97 +42,46 @@ class HtmlSandboxThumbnailRenderer(
     private val properties: DriveThumbnailProperties,
 ) : HtmlThumbnailRenderer, AutoCloseable {
 
-    @Volatile
-    private var playwright: Playwright? = null
-
-    @Volatile
-    private var browser: Browser? = null
+    private val actors: List<PlaywrightActor> = List(actorCount()) { PlaywrightActor(it) }
+    private val idleActors: BlockingQueue<PlaywrightActor> = LinkedBlockingQueue(actors)
 
     override fun render(input: Path): BufferedImage? {
         val html = ThumbnailPreviewText.read(input, properties.htmlMaxBytes).trim()
         if (html.isEmpty()) {
             return null
         }
-        val running = synchronized(lock) { ensureBrowser() }
-        return screenshotSandbox(running, html)
+        val actor = idleActors.take()
+        try {
+            return actor.call {
+                screenshotSandbox(ensureBrowser(), html)
+            }
+        } finally {
+            idleActors.put(actor)
+        }
     }
 
     @PostConstruct
     fun warmup() {
-        thread(isDaemon = true, name = WARMUP_THREAD) {
-            runCatching { start() }
-                .onFailure { logger.warn("HTML thumbnail Playwright warmup failed: ${it.message}") }
-        }
+        actors.forEach { actor -> actor.warmup() }
     }
 
     /**
      * 启动 Chromium。上传路径依赖预热；测试可在截图前显式调用，避免把下载算进生成超时。
      */
     fun start() {
-        synchronized(lock) {
-            ensureBrowser()
+        actors.forEach { actor ->
+            actor.call { ensureBrowser() }
         }
     }
 
     @PreDestroy
     override fun close() {
-        synchronized(lock) {
-            closeQuietly()
-        }
+        actors.forEach { actor -> actor.shutdown() }
     }
 
-    private fun ensureBrowser(): Browser {
-        browser?.takeIf { it.isConnected }?.let { return it }
-        closeQuietly()
-        val preferSandbox = properties.htmlChromiumSandbox && !runningAsRoot()
-        if (properties.htmlChromiumSandbox && !preferSandbox) {
-            logger.warn(
-                "HTML thumbnail Chromium process sandbox disabled, running as root; iframe sandbox still applies",
-            )
-        }
-        return try {
-            launchBrowser(preferSandbox)
-        } catch (e: Exception) {
-            if (!preferSandbox) {
-                throw e
-            }
-            logger.warn(
-                "HTML thumbnail Chromium sandbox launch failed, retry without process sandbox: ${e.message}",
-            )
-            launchBrowser(false)
-        }
-    }
-
-    private fun launchBrowser(chromiumSandbox: Boolean): Browser {
-        val created = Playwright.create(
-            Playwright.CreateOptions().setEnv(System.getenv() + (SKIP_BROWSER_DOWNLOAD to "1")),
-        )
-        try {
-            val launched = created.chromium().launch(
-                BrowserType.LaunchOptions()
-                    .setHeadless(true)
-                    .setChromiumSandbox(chromiumSandbox)
-                    .setArgs(CHROMIUM_ARGS),
-            )
-            playwright = created
-            browser = launched
-            logger.info("HTML thumbnail Playwright Chromium started sandbox[$chromiumSandbox]")
-            return launched
-        } catch (e: Exception) {
-            runCatching { created.close() }
-            throw e
-        }
-    }
-
-    private fun closeQuietly() {
-        val runningBrowser = browser
-        val runningPlaywright = playwright
-        browser = null
-        playwright = null
-        runCatching { runningBrowser?.close() }
-            .onFailure { logger.warn("Close HTML thumbnail browser failed: ${it.message}") }
-        runCatching { runningPlaywright?.close() }
-            .onFailure { logger.warn("Close HTML thumbnail Playwright failed: ${it.message}") }
+    private fun actorCount(): Int {
+        val configured = properties.concurrency[ArtifactThumbnailTypes.TYPE_HTML] ?: properties.defaultConcurrency
+        return configured.coerceAtLeast(1)
     }
 
     private fun contextOptions() = Browser.NewContextOptions()
@@ -136,6 +95,9 @@ class HtmlSandboxThumbnailRenderer(
         .setOffline(true)
         .setBypassCSP(false)
 
+    /**
+     * 必须在拥有 [running] 的 actor 线程上调用。Context / Page 只在该线程上 close，不登记到跨线程 abort。
+     */
     private fun screenshotSandbox(running: Browser, html: String): BufferedImage? {
         val timeoutMs = properties.timeout.toMillis().coerceAtLeast(1)
         val settleMs = settleWaitMillis(properties.htmlSettleDelay, timeoutMs)
@@ -168,9 +130,104 @@ class HtmlSandboxThumbnailRenderer(
         }
     }
 
+    private inner class PlaywrightActor(index: Int) {
+        private var playwright: Playwright? = null
+        private var browser: Browser? = null
+        private val ownerThread = AtomicReference<Thread>()
+        private val executor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "$PLAYWRIGHT_THREAD_PREFIX$index").apply {
+                isDaemon = true
+                ownerThread.set(this)
+            }
+        }
+
+        fun warmup() {
+            executor.execute {
+                runCatching { ensureBrowser() }
+                    .onFailure { logger.warn("HTML thumbnail Playwright warmup failed: ${it.message}") }
+            }
+        }
+
+        fun <T> call(block: PlaywrightActor.() -> T): T {
+            if (Thread.currentThread() === ownerThread.get()) {
+                return block()
+            }
+            try {
+                return executor.submit(Callable { block() }).get()
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw e
+            } catch (e: ExecutionException) {
+                throw e.cause ?: e
+            }
+        }
+
+        fun ensureBrowser(): Browser {
+            browser?.takeIf { it.isConnected }?.let { return it }
+            closeQuietly()
+            val preferSandbox = properties.htmlChromiumSandbox && !runningAsRoot()
+            if (properties.htmlChromiumSandbox && !preferSandbox) {
+                logger.warn(
+                    "HTML thumbnail Chromium process sandbox disabled, running as root; iframe sandbox still applies",
+                )
+            }
+            return try {
+                launchBrowser(preferSandbox)
+            } catch (e: Exception) {
+                if (!preferSandbox) {
+                    throw e
+                }
+                logger.warn(
+                    "HTML thumbnail Chromium sandbox launch failed, retry without process sandbox: ${e.message}",
+                )
+                launchBrowser(false)
+            }
+        }
+
+        fun shutdown() {
+            runCatching {
+                executor.submit(Callable { closeQuietly() }).get(SHUTDOWN_SECONDS, TimeUnit.SECONDS)
+            }
+            executor.shutdownNow()
+        }
+
+        private fun launchBrowser(chromiumSandbox: Boolean): Browser {
+            val created = Playwright.create(
+                Playwright.CreateOptions().setEnv(System.getenv() + (SKIP_BROWSER_DOWNLOAD to "1")),
+            )
+            try {
+                val launched = created.chromium().launch(
+                    BrowserType.LaunchOptions()
+                        .setHeadless(true)
+                        .setChromiumSandbox(chromiumSandbox)
+                        .setArgs(CHROMIUM_ARGS),
+                )
+                playwright = created
+                browser = launched
+                logger.info("HTML thumbnail Playwright Chromium started sandbox[$chromiumSandbox]")
+                return launched
+            } catch (e: Exception) {
+                runCatching { created.close() }
+                throw e
+            }
+        }
+
+        private fun closeQuietly() {
+            val runningBrowser = browser
+            val runningPlaywright = playwright
+            browser = null
+            playwright = null
+            runCatching { runningBrowser?.close() }
+                .onFailure { logger.warn("Close HTML thumbnail browser failed: ${it.message}") }
+            runCatching { runningPlaywright?.close() }
+                .onFailure { logger.warn("Close HTML thumbnail Playwright failed: ${it.message}") }
+        }
+    }
+
     companion object {
         internal const val IFRAME_SANDBOX_VALUE = "allow-scripts"
-        private const val WARMUP_THREAD = "drive-html-thumb-warmup"
+        private const val PLAYWRIGHT_THREAD_PREFIX = "drive-html-playwright-"
+        private const val SHUTDOWN_SECONDS = 5L
         private const val EMPTY_BASE = "about:blank"
         private const val ABOUT_SRCDOC = "about:srcdoc"
         private const val DATA_URL_PREFIX = "data:"
@@ -192,7 +249,6 @@ class HtmlSandboxThumbnailRenderer(
             <body></body>
             </html>
         """.trimIndent()
-        private val lock = Any()
         private val logger = LoggerFactory.getLogger(HtmlSandboxThumbnailRenderer::class.java)
 
         internal fun loadSandboxJs(): String = """
