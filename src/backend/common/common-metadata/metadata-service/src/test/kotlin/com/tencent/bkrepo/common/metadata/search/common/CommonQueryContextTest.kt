@@ -33,6 +33,7 @@ class CommonQueryContextTest {
             OperationType.NE,
             OperationType.NOT_NULL,
             OperationType.NULL,
+            OperationType.EXISTS,
             OperationType.IN,
             OperationType.NIN,
             OperationType.PREFIX,

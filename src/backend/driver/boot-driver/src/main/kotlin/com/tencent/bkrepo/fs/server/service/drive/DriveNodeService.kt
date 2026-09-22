@@ -6,6 +6,7 @@ import com.tencent.bkrepo.common.api.constant.HttpStatus
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.artifact.message.ArtifactMessageCode
+import com.tencent.bkrepo.common.metadata.model.TMetadata
 import com.tencent.bkrepo.common.metadata.model.drive.TDriveNode
 import com.tencent.bkrepo.common.metadata.model.drive.TDriveNode.Companion.TYPE_DIRECTORY
 import com.tencent.bkrepo.common.metadata.pojo.drive.DriveMetadataQueryRule
@@ -358,12 +359,15 @@ class DriveNodeService(
             val srcNode = queryNodeByIno(projectId, repoName, ino, bypassCache = ifMatch != null)
                 ?: throw ErrorCodeException(ArtifactMessageCode.NODE_NOT_FOUND, ino)
             checkIfMatch(ifMatch, srcNode)
-            val operator = ReactiveSecurityUtils.getUser()
-            val currentSnapSeq = resolveSnapSeq(projectId, repoName, snapSeq)
-            val now = LocalDateTime.now()
-            val updatedNode = buildUpdatedNode(srcNode, updateRequest, operator, now, clientId)
-            val savedNode =
+            val savedNode = if (!touchLastModified) {
+                updateMetadataWithoutTouch(srcNode, metadata)
+            } else {
+                val operator = ReactiveSecurityUtils.getUser()
+                val currentSnapSeq = resolveSnapSeq(projectId, repoName, snapSeq)
+                val now = LocalDateTime.now()
+                val updatedNode = buildUpdatedNode(srcNode, updateRequest, operator, now, clientId)
                 saveUpdatedNode(srcNode, updatedNode, updateRequest, currentSnapSeq, operator, now, clientId)
+            }
             invalidateNodeCache(projectId, repoName, ino)
             logger.info("Update drive node[$projectId/$repoName/$ino] success.")
             return savedNode.toDriveNode()
@@ -661,6 +665,27 @@ class DriveNodeService(
             lastModifiedClientId = clientId,
             lastModifiedDate = now,
         )
+    }
+
+    /**
+     * 历史回填：只写 metadata，不改更新人、更新时间。
+     */
+    private suspend fun updateMetadataWithoutTouch(
+        srcNode: TDriveNode,
+        metadata: MutableList<TMetadata>?,
+    ): TDriveNode {
+        if (metadata == null) {
+            return srcNode
+        }
+        val nodeId = srcNode.id ?: throw ErrorCodeException(ArtifactMessageCode.NODE_NOT_FOUND, srcNode.ino)
+        val result = driveNodeDao.updateMetadataByNodeId(
+            srcNode.projectId,
+            srcNode.repoName,
+            nodeId,
+            metadata,
+        )
+        checkUpdateResult(result.modifiedCount, srcNode.name)
+        return srcNode.copy(metadata = metadata)
     }
 
     companion object {

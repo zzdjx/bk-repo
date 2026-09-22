@@ -7,6 +7,8 @@ import com.tencent.bkrepo.auth.pojo.token.TokenType
 import com.tencent.bkrepo.auth.pojo.token.normalizeOrgIds
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
+import com.tencent.bkrepo.common.api.util.Preconditions
+import com.tencent.bkrepo.common.artifact.path.PathUtils
 import com.tencent.bkrepo.preview.config.ArtifactShareProperties
 import com.tencent.bkrepo.preview.constant.PreviewMessageCode
 import com.tencent.bkrepo.preview.dao.ArtifactShareDao
@@ -14,6 +16,8 @@ import com.tencent.bkrepo.preview.dao.ArtifactShareListCursor
 import com.tencent.bkrepo.preview.model.TArtifactShare
 import com.tencent.bkrepo.preview.pojo.share.AccessibleShareChannel
 import com.tencent.bkrepo.preview.pojo.share.ArtifactShareBatchStatusRequest
+import com.tencent.bkrepo.preview.pojo.share.ArtifactShareDownloadTokenRefreshRequest
+import com.tencent.bkrepo.preview.pojo.share.ArtifactShareDownloadTokenRefreshResult
 import com.tencent.bkrepo.preview.pojo.share.ArtifactShareInfo
 import com.tencent.bkrepo.preview.pojo.share.ArtifactShareKind
 import com.tencent.bkrepo.preview.pojo.share.ArtifactShareOpenInfo
@@ -27,6 +31,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.stereotype.Service
 import org.springframework.web.util.UriUtils
+import java.time.Duration
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -85,6 +90,7 @@ class ArtifactShareService(
             ),
             nodeInfo.fullPath,
         )
+        val thumbnail = driveShareNodeResolver.resolveThumbnail(nodeInfo.node)
         val (authorizedUserSet, authorizedOrgList) = buildTokenAuthorization(
             userId,
             request.visibility,
@@ -115,6 +121,8 @@ class ArtifactShareService(
                 conversationId = conversationId,
                 artifactName = artifactName,
                 artifactType = artifactType,
+                thumbnailIno = thumbnail?.ino,
+                thumbnailFullPath = thumbnail?.fullPath,
             )
         } else {
             revokeStoredTokens(existing)
@@ -133,6 +141,8 @@ class ArtifactShareService(
                 previewToken = null,
                 downloadToken = null,
                 shortShareId = shortShareId,
+                thumbnailIno = thumbnail?.ino,
+                thumbnailFullPath = thumbnail?.fullPath,
             )
         }
         val withTokens = issueAndAttachTokens(draft, authorizedUserSet, authorizedOrgList)
@@ -315,9 +325,40 @@ class ArtifactShareService(
         authorizedUserSet: Set<String>,
         authorizedOrgList: Set<String>,
     ): TArtifactShare {
-        val previewToken = createAccessToken(record, authorizedUserSet, authorizedOrgList, TokenType.PREVIEW)
-        val downloadToken = createAccessToken(record, authorizedUserSet, authorizedOrgList, TokenType.DOWNLOAD)
+        val previewToken = createAccessToken(
+            record,
+            authorizedUserSet,
+            authorizedOrgList,
+            TokenType.PREVIEW,
+            record.fullPath,
+        )
+        val downloadToken = issueDownloadToken(record, authorizedUserSet, authorizedOrgList)
         return record.copy(previewToken = previewToken, downloadToken = downloadToken)
+    }
+
+    private fun issueDownloadToken(
+        record: TArtifactShare,
+        authorizedUserSet: Set<String>,
+        authorizedOrgList: Set<String>,
+    ): String {
+        val tokenPath = ArtifactShareDownloadTokenPath.resolve(
+            record.fullPath,
+            artifactShareProperties.downloadTokenMinParentDepth,
+        )
+        return try {
+            createAccessToken(record, authorizedUserSet, authorizedOrgList, TokenType.DOWNLOAD, tokenPath)
+        } catch (ex: Exception) {
+            val filePath = PathUtils.normalizeFullPath(record.fullPath)
+            if (tokenPath == filePath) {
+                throw ex
+            }
+            logger.warn(
+                "artifact share parent download token failed, fallback to file path, " +
+                    "shareId=[${record.id}], fullPath=[${record.fullPath}]",
+                ex,
+            )
+            createAccessToken(record, authorizedUserSet, authorizedOrgList, TokenType.DOWNLOAD, filePath)
+        }
     }
 
     private fun createAccessToken(
@@ -325,11 +366,12 @@ class ArtifactShareService(
         authorizedUserSet: Set<String>,
         authorizedOrgList: Set<String>,
         type: TokenType,
+        fullPath: String,
     ): String {
         val request = TemporaryTokenCreateRequest(
             projectId = record.projectId,
             repoName = record.repoName,
-            fullPathSet = setOf(record.fullPath),
+            fullPathSet = setOf(fullPath),
             authorizedUserSet = authorizedUserSet,
             authorizedOrgList = authorizedOrgList,
             expireSeconds = NEVER_EXPIRE_SECONDS,
@@ -495,6 +537,8 @@ class ArtifactShareService(
             createdBy = live.createdBy,
             createdDate = live.createdDate,
             lastModifiedDate = live.lastModifiedDate,
+            thumbnailIno = live.thumbnailIno,
+            thumbnailFullPath = live.thumbnailFullPath,
         )
     }
 
@@ -514,6 +558,8 @@ class ArtifactShareService(
             agentId = record.agentId,
             featured = record.featured,
             lastModifiedDate = record.lastModifiedDate,
+            thumbnailIno = record.thumbnailIno,
+            thumbnailFullPath = record.thumbnailFullPath,
         )
     }
 
@@ -649,6 +695,162 @@ class ArtifactShareService(
         throw ErrorCodeException(CommonMessageCode.SYSTEM_ERROR)
     }
 
+    /**
+     * 重签 downloadToken（父目录足够深则绑父目录，否则绑原文件），只写 downloadToken 一个字段。
+     * 不修改 lastModifiedDate，不改 previewToken 与缩略图字段。到 limit 或墙钟后返回计数与游标。
+     */
+    fun refreshDownloadTokens(
+        userId: String,
+        request: ArtifactShareDownloadTokenRefreshRequest,
+    ): ArtifactShareDownloadTokenRefreshResult {
+        val limit = request.limit ?: throw ErrorCodeException(CommonMessageCode.PARAMETER_MISSING, "limit")
+        Preconditions.checkArgument(limit > 0, "limit")
+        val maxDurationSeconds = request.maxDurationSeconds ?: DEFAULT_TOKEN_REFRESH_DURATION_SECONDS
+        Preconditions.checkArgument(maxDurationSeconds in TOKEN_REFRESH_DURATION_RANGE, "maxDurationSeconds")
+        val projectId = request.projectId?.trim()?.takeIf { it.isNotEmpty() }
+        val repoName = request.repoName?.trim()?.takeIf { it.isNotEmpty() }
+        val result = runDownloadTokenRefresh(
+            limit = limit,
+            maxDurationSeconds = maxDurationSeconds,
+            projectId = projectId,
+            repoName = repoName,
+            afterShareId = request.afterShareId?.trim()?.takeIf { it.isNotEmpty() },
+            dryRun = request.dryRun,
+        )
+        logger.info(
+            "artifact share download token refresh finished, user=[$userId], projectId=[${projectId ?: "all"}], " +
+                "repoName=[${repoName ?: "all"}], dryRun=[${request.dryRun}], attempted=[${result.attempted}], " +
+                "succeeded=[${result.succeeded}], skipped=[${result.skipped}], failed=[${result.failed}], " +
+                "lastShareId=[${result.lastShareId}]",
+        )
+        return result
+    }
+
+    private fun runDownloadTokenRefresh(
+        limit: Int,
+        maxDurationSeconds: Int,
+        projectId: String?,
+        repoName: String?,
+        afterShareId: String?,
+        dryRun: Boolean,
+    ): ArtifactShareDownloadTokenRefreshResult {
+        val deadlineNanos = System.nanoTime() + Duration.ofSeconds(maxDurationSeconds.toLong()).toNanos()
+        var afterId = afterShareId
+        var lastShareId: String? = null
+        var attempted = 0
+        var succeeded = 0
+        var skipped = 0
+        var failed = 0
+        while (attempted < limit && System.nanoTime() < deadlineNanos) {
+            val pageSize = minOf(limit - attempted, TOKEN_REFRESH_PAGE_SIZE)
+            val batch = artifactShareDao.listAllById(afterId, pageSize, projectId, repoName)
+            if (batch.isEmpty()) {
+                break
+            }
+            for (record in batch) {
+                if (attempted >= limit || System.nanoTime() >= deadlineNanos) {
+                    break
+                }
+                attempted += 1
+                lastShareId = record.id ?: lastShareId
+                when (refreshOneDownloadToken(record, dryRun)) {
+                    TokenRefreshOutcome.SUCCEEDED -> succeeded += 1
+                    TokenRefreshOutcome.SKIPPED -> skipped += 1
+                    TokenRefreshOutcome.FAILED -> failed += 1
+                }
+            }
+            afterId = batch.last().id
+            if (afterId.isNullOrBlank() || batch.size < pageSize) {
+                break
+            }
+        }
+        return ArtifactShareDownloadTokenRefreshResult(
+            attempted = attempted,
+            succeeded = succeeded,
+            skipped = skipped,
+            failed = failed,
+            lastShareId = lastShareId,
+        )
+    }
+
+    /**
+     * 必须先落库再吊销旧 token，否则写库失败会让记录指向已失效的 token，分享下载直接中断。
+     */
+    private fun refreshOneDownloadToken(record: TArtifactShare, dryRun: Boolean): TokenRefreshOutcome {
+        val shareId = record.id?.trim().orEmpty()
+        if (shareId.isEmpty()) {
+            logger.error("artifact share download token refresh failed, blank shareId, fullPath=[${record.fullPath}]")
+            return TokenRefreshOutcome.FAILED
+        }
+        return try {
+            if (dryRun) {
+                return TokenRefreshOutcome.SUCCEEDED
+            }
+            val (authorizedUserSet, authorizedOrgList) = buildTokenAuthorization(
+                record.createdBy,
+                record.visibility,
+                record.userIds,
+                record.orgIds,
+            )
+            val downloadToken = try {
+                issueDownloadToken(record, authorizedUserSet, authorizedOrgList)
+            } catch (ex: Exception) {
+                logger.warn("artifact share refresh download token failed, keep existing, shareId=[$shareId]", ex)
+                return TokenRefreshOutcome.SKIPPED
+            }
+            if (downloadToken == record.downloadToken) {
+                return TokenRefreshOutcome.SUCCEEDED
+            }
+            persistRefreshedDownloadToken(shareId, record.downloadToken, downloadToken)
+        } catch (ex: Exception) {
+            logger.error("artifact share download token refresh failed, shareId=[$shareId]", ex)
+            TokenRefreshOutcome.FAILED
+        }
+    }
+
+    /**
+     * CAS 写回：仅当 downloadToken 仍是扫描时读到的值才替换，避免覆盖并发 upsert 已签发的新 token。
+     */
+    private fun persistRefreshedDownloadToken(
+        shareId: String,
+        expectedToken: String?,
+        downloadToken: String,
+    ): TokenRefreshOutcome {
+        val replaced = try {
+            artifactShareDao.replaceDownloadToken(shareId, expectedToken, downloadToken)
+        } catch (ex: Exception) {
+            deleteTokenQuietly(shareId, downloadToken, "update failed")
+            throw ex
+        }
+        if (!replaced) {
+            deleteTokenQuietly(shareId, downloadToken, "record changed or missing")
+            logger.warn("artifact share download token changed concurrently, skip write, shareId=[$shareId]")
+            return TokenRefreshOutcome.SKIPPED
+        }
+        deleteTokenQuietly(shareId, expectedToken, "superseded")
+        return TokenRefreshOutcome.SUCCEEDED
+    }
+
+    /**
+     * 收尾清理失败只留下孤儿 token，不应改变本条记录的重签结果，也不能覆盖调用方待抛的异常。
+     */
+    private fun deleteTokenQuietly(shareId: String, token: String?, reason: String) {
+        try {
+            deleteTokenIfPresent(token)
+        } catch (ex: Exception) {
+            logger.warn(
+                "artifact share orphan download token left, shareId=[$shareId], reason=[$reason]",
+                ex,
+            )
+        }
+    }
+
+    private enum class TokenRefreshOutcome {
+        SUCCEEDED,
+        SKIPPED,
+        FAILED,
+    }
+
     companion object {
         private val logger = LoggerFactory.getLogger(ArtifactShareService::class.java)
         private const val MAX_BATCH_RESOURCE_IDS = 500
@@ -658,5 +860,8 @@ class ArtifactShareService(
         private const val MAX_SCOPE_IDS = 500
         private const val MAX_SHORT_SHARE_ID_ATTEMPTS = 8
         private const val SHORT_SHARE_ID_INDEX = "short_share_id_uk"
+        private const val TOKEN_REFRESH_PAGE_SIZE = 200
+        private const val DEFAULT_TOKEN_REFRESH_DURATION_SECONDS = 60
+        private val TOKEN_REFRESH_DURATION_RANGE = 1..300
     }
 }

@@ -3,6 +3,7 @@ package com.tencent.bkrepo.preview.service.share
 import com.tencent.bkrepo.auth.api.ServiceTemporaryTokenClient
 import com.tencent.bkrepo.auth.api.ServiceUserClient
 import com.tencent.bkrepo.auth.pojo.token.OrgScope
+import com.tencent.bkrepo.auth.pojo.token.TemporaryTokenCreateRequest
 import com.tencent.bkrepo.auth.pojo.token.TemporaryTokenInfo
 import com.tencent.bkrepo.auth.pojo.token.TokenType
 import com.tencent.bkrepo.auth.pojo.user.UserOrgMembership
@@ -64,6 +65,7 @@ class ArtifactShareServiceQueryTest {
         every { artifactShareDao.findByShortShareId(any()) } returns null
         every { artifactShareDao.assignShortShareIdIfAbsent(any(), any()) } returns true
         every { artifactShareDao.save(any()) } answers { firstArg() }
+        every { driveShareNodeResolver.resolveThumbnail(any()) } returns null
         every { serviceUserClient.userDeptById(any()) } returns Response(
             0,
             null,
@@ -369,6 +371,39 @@ class ArtifactShareServiceQueryTest {
     }
 
     @Test
+    fun `upsert nested file download token binds parent directory and copies thumbnail`() {
+        val captured = stubUpsertFile(
+            fullPath = DEEP_ARTIFACT_FILE,
+            thumbnail = ArtifactShareThumbnail(ino = 3003L, fullPath = DEEP_ARTIFACT_THUMB),
+        )
+        val saved = slot<TArtifactShare>()
+        every { artifactShareDao.save(capture(saved)) } answers { saved.captured }
+
+        val result = upsertPublicShare()
+
+        assertEquals(setOf(DEEP_ARTIFACT_FILE), captured[0].fullPathSet)
+        assertEquals(TokenType.PREVIEW, captured[0].type)
+        assertEquals(setOf(DEEP_ARTIFACT_PARENT), captured[1].fullPathSet)
+        assertEquals(TokenType.DOWNLOAD, captured[1].type)
+        assertEquals(3003L, saved.captured.thumbnailIno)
+        assertEquals(DEEP_ARTIFACT_THUMB, saved.captured.thumbnailFullPath)
+        assertEquals(3003L, result.thumbnailIno)
+        assertEquals(DEEP_ARTIFACT_THUMB, result.thumbnailFullPath)
+    }
+
+    @Test
+    fun `upsert shallow file download token binds the file itself`() {
+        val captured = stubUpsertFile(fullPath = "/docs/hero.png")
+
+        upsertPublicShare()
+
+        assertEquals(setOf("/docs/hero.png"), captured[0].fullPathSet)
+        assertEquals(TokenType.PREVIEW, captured[0].type)
+        assertEquals(setOf("/docs/hero.png"), captured[1].fullPathSet)
+        assertEquals(TokenType.DOWNLOAD, captured[1].type)
+    }
+
+    @Test
     fun `upsert update keeps existing short share id`() {
         stubUpsertNode()
         every { artifactShareDao.findActiveByProjectRepoResourceId("p", "r", 9L) } returns record(
@@ -662,6 +697,36 @@ class ArtifactShareServiceQueryTest {
         assertEquals(CommonMessageCode.PARAMETER_INVALID, exception.messageCode)
     }
 
+    private fun stubUpsertFile(
+        fullPath: String,
+        thumbnail: ArtifactShareThumbnail? = null,
+    ): MutableList<TemporaryTokenCreateRequest> {
+        val node = mockk<TDriveNode>()
+        every { node.createdBy } returns "alice"
+        every { driveShareNodeResolver.resolveFileByIno("p", "r", 9L) } returns DriveShareNodeInfo(
+            node = node,
+            fullPath = fullPath,
+        )
+        every { driveShareNodeResolver.metadataValue(node, any()) } returns null
+        every { driveShareNodeResolver.resolveThumbnail(node) } returns thumbnail
+        val captured = mutableListOf<TemporaryTokenCreateRequest>()
+        every { temporaryTokenClient.createToken(capture(captured)) } answers {
+            Response(0, null, listOf(tokenInfo("token-${captured.size}")), null)
+        }
+        every { artifactShareDao.findActiveByProjectRepoResourceId("p", "r", 9L) } returns null
+        return captured
+    }
+
+    private fun upsertPublicShare() = service.upsert(
+        "alice",
+        ArtifactShareUpsertRequest(
+            projectId = "p",
+            repoName = "r",
+            resourceId = 9L,
+            visibility = ShareVisibility.PUBLIC,
+        ),
+    )
+
     private fun stubUpsertNode() {
         val node = mockk<TDriveNode>()
         every { node.createdBy } returns "alice"
@@ -670,6 +735,7 @@ class ArtifactShareServiceQueryTest {
             fullPath = "/a.html",
         )
         every { driveShareNodeResolver.metadataValue(node, any()) } returns null
+        every { driveShareNodeResolver.resolveThumbnail(node) } returns null
         every { temporaryTokenClient.createToken(any()) } returnsMany listOf(
             Response(0, null, listOf(tokenInfo("preview-token")), null),
             Response(0, null, listOf(tokenInfo("download-token")), null),
@@ -732,6 +798,12 @@ class ArtifactShareServiceQueryTest {
 
     companion object {
         private const val DEFAULT_PAGE_LIMIT = 100
+        private const val DEEP_ARTIFACT_FILE =
+            "/artifact/agent-ins-9226e33e7d8730d4/default/PSD拆图层场景PPT规划/v1/.PSD拆图层场景PPT规划_v1.md"
+        private const val DEEP_ARTIFACT_PARENT =
+            "/artifact/agent-ins-9226e33e7d8730d4/default/PSD拆图层场景PPT规划/v1/"
+        private const val DEEP_ARTIFACT_THUMB =
+            "/artifact/agent-ins-9226e33e7d8730d4/default/PSD拆图层场景PPT规划/v1/..PSD拆图层场景PPT规划_v1.md.thumb.jpg"
         private val TIME_1 = LocalDateTime.of(2026, 8, 1, 10, 0)
         private val TIME_2 = LocalDateTime.of(2026, 8, 13, 10, 0)
     }

@@ -2,6 +2,7 @@ import { createPptxViewer } from 'pptx-vanilla-viewer'
 import { enablePptxMediaControls } from './pptxLiveAudioControls'
 import { bindPptxMediaStreams } from './pptxLiveMediaStream'
 import { listPptxMediaPaths, stripHeavyPptxMedia } from './pptxStripHeavyMedia'
+import { applyPptxThumbFit, clearPptxThumbFit } from './pptxLiveThumbSize'
 
 function resolveFileName (name) {
     if (!name) {
@@ -295,17 +296,32 @@ export function createPptxLivePlayer (container, options) {
         thumbHost = host || null
         onThumbClick = handleThumbClick
         if (thumbHost && !moveThumbRail()) {
-            window.setTimeout(moveThumbRail, 0)
+            window.setTimeout(function () {
+                moveThumbRail()
+                syncThumbFit()
+            }, 0)
         }
         if (thumbHost) {
             thumbHost.addEventListener('click', onThumbClick, true)
+            syncThumbFit()
         }
+    }
+
+    function syncThumbFit () {
+        const sized = applyPptxThumbFit(thumbHost)
+        if (sized || typeof window === 'undefined' || !thumbHost) {
+            return
+        }
+        window.requestAnimationFrame(function () {
+            applyPptxThumbFit(thumbHost)
+        })
     }
 
     function resize () {
         if (viewer && typeof viewer.zoomToFit === 'function') {
             viewer.zoomToFit()
         }
+        syncThumbFit()
     }
 
     function destroy () {
@@ -327,6 +343,7 @@ export function createPptxLivePlayer (container, options) {
             thumbHost.removeEventListener('click', onThumbClick, true)
         }
         if (thumbHost) {
+            clearPptxThumbFit(thumbHost)
             thumbHost.innerHTML = ''
         }
         thumbHost = null

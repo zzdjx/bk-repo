@@ -56,7 +56,8 @@ enum class OperationType(val valueType: KClass<*>) {
     REGEX(String::class),
     REGEX_I(String::class),
     NULL(Void::class),
-    NOT_NULL(Void::class);
+    NOT_NULL(Void::class),
+    EXISTS(Void::class);
 
     companion object {
         val DEFAULT = EQ
