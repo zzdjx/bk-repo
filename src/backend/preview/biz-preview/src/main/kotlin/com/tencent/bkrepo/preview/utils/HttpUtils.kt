@@ -45,6 +45,7 @@ import org.springframework.retry.annotation.Backoff
 import org.springframework.retry.annotation.Recover
 import org.springframework.retry.annotation.Retryable
 import org.springframework.stereotype.Component
+import java.net.Proxy
 import java.net.URI
 import java.net.URL
 import java.util.concurrent.TimeUnit
@@ -54,7 +55,7 @@ class HttpUtils(
     private val registry: ObservationRegistry,
     private val ssrfGuard: SsrfGuard
 ) {
-    private val okHttpClient: OkHttpClient by lazy {
+    internal val okHttpClient: OkHttpClient by lazy {
         HttpClientBuilderFactory
             .create(registry = registry)
             .readTimeout(72000, TimeUnit.MILLISECONDS)
@@ -63,6 +64,12 @@ class HttpUtils(
             // 关闭自动重定向，改为手动处理，以便在每次跟随前进行 SSRF 校验
             .followRedirects(false)
             .followSslRedirects(false)
+            // 连接前校验本次 DNS 解析结果并复用，消除校验与连接之间的 DNS Rebinding 窗口
+            .dns(PreviewCallbackDns(ssrfGuard))
+            // 固定直连，不继承 JVM 默认 ProxySelector：HTTP 代理下 OkHttp 只解析代理地址、
+            // SOCKS 代理走 createUnresolved，两者都会让 PreviewCallbackDns 失效而由代理解析目标域名。
+            // 若将来需要支持代理，必须在代理侧限制可访问的目标地址，不能只依赖这里的 DNS 校验。
+            .proxy(Proxy.NO_PROXY)
             .build()
     }
 

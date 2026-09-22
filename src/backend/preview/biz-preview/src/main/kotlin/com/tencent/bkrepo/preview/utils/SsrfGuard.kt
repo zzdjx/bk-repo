@@ -51,7 +51,9 @@ import java.net.UnknownHostException
  * - 域名/IP 白名单（可选，空表示不限制）
  * - 内网 / 环回 / 链路本地 / 多播 / 云元数据 / 保留网段黑名单
  *
- * 同时返回已解析的 IP 列表，调用方在实际发起请求时应传入这些 IP 以抵御 DNS Rebinding。
+ * [validate] 只在发起请求前做一次校验，无法覆盖校验与连接之间域名被重解析（DNS Rebinding）的情况。
+ * HTTP 出站请使用 [PreviewCallbackDns]，它在建立 TCP 连接前对本次解析结果调用 [checkResolvedAddresses]，
+ * 并复用该结果，消除"先查后连"的 TOCTOU 窗口。
  * FTP PASV 数据连接请使用 [validateResolvedHost]：只校验地址黑名单，不套用控制连接端口白名单。
  */
 @Component
@@ -131,6 +133,14 @@ class SsrfGuard(private val config: PreviewConfig) {
             logger.warn("Remote preview host [{}] cannot be resolved", host)
             throw PreviewInvalidException(PreviewMessageCode.PREVIEW_PARAMETER_INVALID, "url")
         }
+        checkResolvedAddresses(host, addresses.asList())
+    }
+
+    /**
+     * 校验一批已解析出的地址是否落在禁止网段。
+     * 供 [PreviewCallbackDns] 在连接前复用，避免为了校验再解析一次域名。
+     */
+    fun checkResolvedAddresses(host: String, addresses: List<InetAddress>) {
         addresses.forEach { addr ->
             if (isForbiddenAddress(addr)) {
                 logger.warn("Remote preview host [{}] resolved to forbidden address [{}]", host, addr.hostAddress)
