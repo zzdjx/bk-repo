@@ -63,6 +63,8 @@ class HttpUtils(
             // 关闭自动重定向，改为手动处理，以便在每次跟随前进行 SSRF 校验
             .followRedirects(false)
             .followSslRedirects(false)
+            // 连接前校验本次 DNS 解析结果并复用，消除校验与连接之间的 DNS Rebinding 窗口
+            .dns(PreviewCallbackDns(ssrfGuard))
             .build()
     }
 
