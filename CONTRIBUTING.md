@@ -30,7 +30,7 @@
 
 ## GIT提交规范
 
-因不同团队不同的项目管理下会有不同的代码提交注释，规范化开源下对不同团队提交信息，做了不同的提交标记以规范化区分提交内容：
+因不同团队不同的项目管理下会有不同的代码提交注释，规范化开源下对不同团队提交信息，做了不同的提交标记以规范化区分提交内容。内部工蜂 / TAPD 分支（`--story=` / `--issue=`）见 [docs/specification/commit-spec.md](docs/specification/commit-spec.md)。
 
 ```
 git commit -m '标记: 提交的概要注释 issue #123'

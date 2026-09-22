@@ -66,9 +66,6 @@ data:
     {{- else }}
     oci.domain: {{ .Values.gateway.dockerHost }}
     {{- end }}
-    job.repoRefreshJobProperties.concurrentLevel: COLLECTION
-    job.repoRefreshJobProperties.permitsPerSecond: 512
-    job.repoRefreshJobProperties.types: HELM,OCI
     plugin.path: /data/workspace/plugin/
     management.metrics.collectByLog: true
     multitenant.enabled: {{ .Values.gateway.enableMultiTenantMode }}
