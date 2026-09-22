@@ -110,10 +110,10 @@ class RepositoryProperties {
     var maxDeleteNodeCount: Long = 0
 
     /**
-     * 代理源 URL 校验（SecAPI CheckUrl）
+     * 代理源 URL 校验。默认拦截字面量内网地址；探活还会在建连前校验 DNS 解析结果。
      */
     @NestedConfigurationProperty
-    var proxyChannelUrl: UrlCheckProperties = UrlCheckProperties()
+    var proxyChannelUrl: UrlCheckProperties = UrlCheckProperties(blockPrivateIp = true)
 
     /**
      * 获取指定项目使用的节点删除策略模式，优先使用项目级配置 [projectDeleteMode]，未配置时回退到全局 [deleteMode]
