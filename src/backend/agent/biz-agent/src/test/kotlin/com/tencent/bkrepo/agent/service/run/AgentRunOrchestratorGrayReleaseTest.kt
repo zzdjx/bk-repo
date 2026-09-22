@@ -13,6 +13,7 @@ import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimePropertiesResolver
 import com.tencent.bkrepo.agent.context.AgentChatContextResolver
 import com.tencent.bkrepo.agent.hitl.AguiPermissionResumeAdapter
+import com.tencent.bkrepo.agent.hitl.AguiResumeCoordinatorHydrator
 import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
 import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
@@ -126,6 +127,7 @@ class AgentRunOrchestratorGrayReleaseTest {
             permissionManager = mock<PermissionManager>(),
             inputValidator = inputValidator,
             aguiResumeValidator = mock<AguiResumeValidator>(),
+            aguiResumeCoordinatorHydrator = mock<AguiResumeCoordinatorHydrator>(),
             aguiPermissionResumeAdapter = mock<AguiPermissionResumeAdapter>(),
             frontendToolSanitizer = mock<FrontendToolSanitizer>(),
             agentSessionService = sessionService,

@@ -11,6 +11,7 @@ package com.tencent.bkrepo.agent.service.run
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
 import com.tencent.bkrepo.agent.hitl.AguiPermissionResumeAdapter
+import com.tencent.bkrepo.agent.hitl.AguiResumeCoordinatorHydrator
 import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
 import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS
 import com.tencent.bkrepo.agent.tool.frontend.FrontendToolSanitizer
@@ -58,6 +59,7 @@ class AgentRunOrchestrator(
     private val permissionManager: PermissionManager,
     private val inputValidator: RunAgentInputValidator,
     private val aguiResumeValidator: AguiResumeValidator,
+    private val aguiResumeCoordinatorHydrator: AguiResumeCoordinatorHydrator,
     private val aguiPermissionResumeAdapter: AguiPermissionResumeAdapter,
     private val frontendToolSanitizer: FrontendToolSanitizer,
     private val agentSessionService: AgentSessionService,
@@ -148,6 +150,8 @@ class AgentRunOrchestrator(
         aguiResumeValidator.validateAndPrepare(userId, projectId, input)
         val sanitized = frontendToolSanitizer.sanitize(input)
         val adapted = aguiPermissionResumeAdapter.adapt(sanitized)
+        // 必须在 adapter 之后：审批类 resume 会被剥掉改走 ConfirmResult，不能灌进框架协调器。
+        aguiResumeCoordinatorHydrator.hydrateIfNeeded(aguiRequestProcessor, adapted.input)
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
         agentSessionService.assertActiveSession(userId, projectId, adapted.input.threadId)
         return PreparedInput(
