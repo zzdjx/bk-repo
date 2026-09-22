@@ -77,10 +77,14 @@ class UserProxyChannelController(
     private val repositoryProperties: RepositoryProperties,
 ) {
     private val probeClient = OkHttpClient.Builder()
-        .followRedirects(false)
-        .followSslRedirects(false)
+        // 公共源会 302。下一跳仍走 Dns；跨 host 时 OkHttp 去掉 Authorization。
+        .followRedirects(true)
+        .followSslRedirects(true)
         .dns(object : Dns {
             override fun lookup(hostname: String): List<InetAddress> {
+                if (!repositoryProperties.proxyChannelUrl.blockPrivateIp) {
+                    return Dns.SYSTEM.lookup(hostname)
+                }
                 return OutboundAddressGuard.resolve(hostname)
             }
         })
@@ -123,7 +127,13 @@ class UserProxyChannelController(
             throw AuthenticationException()
         }
         with(checkParam) {
-            if (!SecUrlValidator.isValid(url, repositoryProperties.proxyChannelUrl)) {
+            val targetUrl = try {
+                SecUrlValidator.validate(url, repositoryProperties.proxyChannelUrl)
+            } catch (ignored: Exception) {
+                return ResponseBuilder.success(false)
+            }
+            // OkHttp 把 \ 当成 host 分隔，与 java.net.URL 不一致。
+            if ('\\' in url || '\\' in targetUrl) {
                 return ResponseBuilder.success(false)
             }
             val plainPassword = password?.let {
@@ -143,7 +153,7 @@ class UserProxyChannelController(
             // 暂时只添加了helm类型的校验
             when(type.uppercase()) {
                 RepositoryType.HELM.name -> {
-                    return ResponseBuilder.success(checkHelmValid(url, headers))
+                    return ResponseBuilder.success(checkHelmValid(targetUrl, headers))
                 }
                 else -> {
                     return ResponseBuilder.success(false)
