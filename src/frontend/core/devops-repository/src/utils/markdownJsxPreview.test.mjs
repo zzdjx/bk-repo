@@ -101,6 +101,54 @@ function createPlantumlHostNode (source) {
     return node
 }
 
+let previewDocumentLock = Promise.resolve()
+
+function installPreviewDocument (settleLoad) {
+    let releaseLock
+    const owned = new Promise((resolve) => {
+        releaseLock = resolve
+    })
+    const previousOwner = previewDocumentLock
+    previewDocumentLock = owned
+    return previousOwner.then(() => {
+        const previous = {
+            document: globalThis.document,
+            window: globalThis.window,
+            location: globalThis.location
+        }
+        const win = { BK_SUBPATH: '/' }
+        const counts = { script: 0, link: 0 }
+        globalThis.location = { origin: 'https://example.test' }
+        globalThis.window = win
+        globalThis.document = {
+            head: {
+                appendChild (el) {
+                    const kind = el.tagName === 'link' ? 'link' : 'script'
+                    counts[kind] += 1
+                    const attempt = counts[kind]
+                    queueMicrotask(() => settleLoad(el, kind, attempt))
+                }
+            },
+            createElement (tag) {
+                return { tagName: String(tag).toLowerCase() }
+            },
+            getElementById () {
+                return null
+            }
+        }
+        return {
+            window: win,
+            counts,
+            restore () {
+                globalThis.document = previous.document
+                globalThis.window = previous.window
+                globalThis.location = previous.location
+                releaseLock()
+            }
+        }
+    })
+}
+
 test('resolveRelativePath resolves sibling and parent paths', () => {
     assert.equal(resolveRelativePath('/docs/guide/README.md', './img.png'), '/docs/guide/img.png')
     assert.equal(resolveRelativePath('/docs/guide/README.md', '../assets/logo.png'), '/docs/assets/logo.png')
@@ -319,6 +367,35 @@ test('renderMermaidCharts runs mermaid on pending nodes', async () => {
     assert.equal(ran.suppressErrors, true)
 })
 
+test('renderMermaidCharts tries again after the mermaid script fails', async () => {
+    let ran = false
+    const preview = await installPreviewDocument((el, kind, attempt) => {
+        if (kind !== 'script') {
+            return
+        }
+        if (attempt === 1) {
+            el.onerror()
+            return
+        }
+        preview.window.mermaid = {
+            initialize () {},
+            async run () {
+                ran = true
+            }
+        }
+        el.onload()
+    })
+    const root = { querySelectorAll: () => [{ getAttribute: () => null }] }
+    try {
+        await assert.rejects(() => renderMermaidCharts(root), /Failed to load mermaid/)
+        await renderMermaidCharts(root)
+        assert.equal(preview.counts.script, 2)
+        assert.equal(ran, true)
+    } finally {
+        preview.restore()
+    }
+})
+
 test('isMathFenceLanguage accepts math latex katex', () => {
     assert.equal(isMathFenceLanguage('math'), true)
     assert.equal(isMathFenceLanguage('latex'), true)
@@ -396,6 +473,41 @@ test('renderMathFormulas renders pending nodes with katex', async () => {
     assert.equal(rendered[0].opts.displayMode, true)
     assert.equal(rendered[0].opts.throwOnError, false)
     assert.equal(pending['data-processed'], 'true')
+})
+
+test('renderMathFormulas tries again after the katex script fails', async () => {
+    let rendered = 0
+    const preview = await installPreviewDocument((el, kind, attempt) => {
+        if (kind === 'link') {
+            el.onload()
+            return
+        }
+        if (attempt === 1) {
+            el.onerror()
+            return
+        }
+        preview.window.katex = {
+            render () {
+                rendered += 1
+            }
+        }
+        el.onload()
+    })
+    const pending = {
+        className: 'markdown-math',
+        textContent: 'x',
+        getAttribute: () => null,
+        setAttribute () {}
+    }
+    const root = { querySelectorAll: () => [pending] }
+    try {
+        await assert.rejects(() => renderMathFormulas(root), /Failed to load katex/)
+        await renderMathFormulas(root)
+        assert.equal(preview.counts.script, 2)
+        assert.equal(rendered, 1)
+    } finally {
+        preview.restore()
+    }
 })
 
 test('extractMarkdownFootnotes turns refs into superscripts and drops unused defs', () => {
@@ -546,6 +658,11 @@ test('heading attrs image size paragraph class and details', () => {
     assert.equal(heading.includes('{#'), false)
     assert.match(rewriteMarkdownImageSize('![尺寸图](./assets/logo.png =200x80)'), /width="200" height="80"/)
     assert.match(rewriteMarkdownParagraphAttrs('段落带 class：{.lead}'), /<p class="lead">段落带 class：<\/p>/)
+    const rich = rewriteMarkdownParagraphAttrs('**bold** {.lead}', (text) => `<strong>${text}</strong>`)
+    assert.match(rich, /<p class="lead"><strong>\*\*bold\*\*<\/strong><\/p>/)
+    const raw = rewriteMarkdownParagraphAttrs('a <b> {.lead}')
+    assert.equal(raw.includes('<b>'), false)
+    assert.match(raw, /<p class="lead">a &lt;b&gt;<\/p>/)
     const details = rewriteMarkdownDetails(
         '<details>\n<summary>open</summary>\n\n**x**\n</details>',
         (body) => `<p>${body}</p>`,
@@ -553,6 +670,54 @@ test('heading attrs image size paragraph class and details', () => {
     )
     assert.match(details, /<summary>open<\/summary>/)
     assert.match(details, /<p>\*\*x\*\*<\/p>/)
+})
+
+test('rewriteMarkdownDetails skips code and keeps only the open attribute', () => {
+    const renderBlock = (body) => `BODY[${body}]`
+    const renderInline = (inline) => inline
+    const fenced = rewriteMarkdownDetails(
+        '```html\n<details>\n<summary>x</summary>\nbody\n</details>\n```\n',
+        renderBlock,
+        renderInline
+    )
+    assert.match(fenced, /```html\n<details>/)
+    assert.equal(fenced.includes('BODY['), false)
+
+    const spanning = rewriteMarkdownDetails(
+        '```\n<details>\n```\n后面的正文\n\n</details>\n',
+        renderBlock,
+        renderInline
+    )
+    assert.match(spanning, /```\n<details>\n```/)
+    assert.match(spanning, /后面的正文/)
+    assert.equal(spanning.includes('BODY['), false)
+
+    const inlineCode = rewriteMarkdownDetails(
+        '见 `<details><summary>x</summary>y</details>` 结束',
+        renderBlock,
+        renderInline
+    )
+    assert.match(inlineCode, /`<details><summary>x<\/summary>y<\/details>`/)
+    assert.equal(inlineCode.includes('BODY['), false)
+
+    const nested = rewriteMarkdownDetails(
+        '<details>\n<summary>示例</summary>\n\n```\n</details>\n```\n\n仍然在内\n</details>\n',
+        renderBlock,
+        renderInline
+    )
+    assert.match(nested, /BODY\[[\s\S]*<\/details>[\s\S]*仍然在内\]/)
+
+    const attrs = rewriteMarkdownDetails(
+        '<details onclick="alert(1)" class="open" open>\n<summary style="color:red" open>标题</summary>\n\n正文\n</details>',
+        renderBlock,
+        renderInline
+    )
+    assert.match(attrs, /<details open>/)
+    assert.equal(/<details[^>]*onclick/.test(attrs), false)
+    assert.equal(/<details[^>]*class=/.test(attrs), false)
+    assert.equal(attrs.includes('style'), false)
+    assert.match(attrs, /<summary open>标题<\/summary>/)
+    assert.match(attrs, /BODY\[\s*正文\s*\]/)
 })
 
 test('fillMarkdownToc replaces placeholder from heading ids', () => {
@@ -591,6 +756,22 @@ test('renderPlantumlDiagrams mounts svg in a no-script sandbox iframe', async ()
     assert.equal(node['data-processed'], 'true')
     assert.match(getPlantumlLibUrl(), /ui\/libs\/plantuml\/plantuml\.js$/)
     assert.equal(collectPlantumlNodes(root).length, 0)
+})
+
+test('renderPlantumlDiagrams tries again after the viz script fails', async () => {
+    const preview = await installPreviewDocument((el, kind) => {
+        if (kind === 'script') {
+            el.onerror()
+        }
+    })
+    const root = { querySelectorAll: () => [{ getAttribute: () => null }] }
+    try {
+        await assert.rejects(() => renderPlantumlDiagrams(root), /Failed to load plantuml/)
+        await assert.rejects(() => renderPlantumlDiagrams(root), /Failed to load plantuml/)
+        assert.equal(preview.counts.script, 2)
+    } finally {
+        preview.restore()
+    }
 })
 
 test('buildPlantumlSandboxSrcdoc and parsePlantumlSvgSize', () => {

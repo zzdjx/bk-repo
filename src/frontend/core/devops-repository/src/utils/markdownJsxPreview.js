@@ -155,7 +155,7 @@ export function renderMarkdownToSafeHtml (markdown, { resolveAssetUrl, highlight
     next = rewriteMarkdownTocPlaceholder(next)
     next = rewriteMarkdownWikilinks(next)
     next = rewriteMarkdownSubSup(next)
-    next = rewriteMarkdownParagraphAttrs(next)
+    next = rewriteMarkdownParagraphAttrs(next, renderInline)
     next = rewriteMarkdownDetails(next, renderFragment, renderInline)
     const rawHtml = marked.parse(next)
     const htmlWithToc = fillMarkdownToc(rawHtml)

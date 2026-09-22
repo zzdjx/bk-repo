@@ -36,6 +36,9 @@ function defaultLoadPlantuml () {
                 throw new Error('PlantUML renderer is not available')
             }
             return mod
+        }).catch((error) => {
+            plantumlModulePromise = null
+            throw error
         })
     }
     return plantumlModulePromise

@@ -343,7 +343,8 @@ export function stripMarkdownBraceAttrs (value) {
     return String(value == null ? '' : value).replace(/\s*\{[^}]*\}\s*$/, '')
 }
 
-export function rewriteMarkdownParagraphAttrs (markdown) {
+export function rewriteMarkdownParagraphAttrs (markdown, renderInline) {
+    const render = typeof renderInline === 'function' ? renderInline : (value) => escapeHtml(value)
     return transformMarkdownOutsideCode(markdown, (text) => {
         return text.replace(/^(?!#{1,6}\s)(.+?)\s*\{([^}\n]+)\}[ \t]*$/gm, (match, body, spec) => {
             if (/^[-*+] |\d+[.)] |```/.test(body)) {
@@ -355,7 +356,7 @@ export function rewriteMarkdownParagraphAttrs (markdown) {
             }
             const id = attrs.id ? ` id="${escapeHtml(attrs.id)}"` : ''
             const cls = attrs.className ? ` class="${escapeHtml(attrs.className)}"` : ''
-            return `<p${id}${cls}>${body}</p>`
+            return `<p${id}${cls}>${render(body)}</p>`
         })
     })
 }
@@ -374,22 +375,147 @@ export function rewriteMarkdownImageSize (markdown) {
     })
 }
 
+function hasOpenAttribute (rawAttrs) {
+    const source = String(rawAttrs || '').trim()
+    let i = 0
+    while (i < source.length) {
+        while (i < source.length && /\s/.test(source[i])) {
+            i += 1
+        }
+        if (i >= source.length) {
+            break
+        }
+        const nameStart = i
+        while (i < source.length && source[i] !== '=' && !/\s/.test(source[i])) {
+            i += 1
+        }
+        const name = source.slice(nameStart, i)
+        if (source[i] === '=') {
+            i += 1
+            const quote = source[i]
+            if (quote === '"' || quote === "'") {
+                i += 1
+                while (i < source.length && source[i] !== quote) {
+                    i += 1
+                }
+                if (i < source.length) {
+                    i += 1
+                }
+            } else {
+                while (i < source.length && !/\s/.test(source[i])) {
+                    i += 1
+                }
+            }
+        }
+        if (name.toLowerCase() === 'open') {
+            return true
+        }
+    }
+    return false
+}
+
+function openAttribute (rawAttrs) {
+    return hasOpenAttribute(rawAttrs) ? ' open' : ''
+}
+
+function matchTagOpen (source, index, tagName) {
+    const head = `<${tagName}`
+    if (source.slice(index, index + head.length).toLowerCase() !== head) {
+        return null
+    }
+    const next = source[index + head.length]
+    if (next && next !== '>' && next !== '/' && !/\s/.test(next)) {
+        return null
+    }
+    const close = source.indexOf('>', index + head.length)
+    if (close === -1) {
+        return null
+    }
+    return {
+        attrs: source.slice(index + head.length, close),
+        tagEnd: close + 1
+    }
+}
+
+function findClosingTag (source, from, tagName) {
+    const closer = `</${tagName}>`
+    let i = from
+    while (i < source.length) {
+        const skipped = skipCode(source, i)
+        if (skipped) {
+            i = skipped.end
+            continue
+        }
+        if (source.slice(i, i + closer.length).toLowerCase() === closer) {
+            return i
+        }
+        i += 1
+    }
+    return -1
+}
+
+function readSummary (inner) {
+    let i = 0
+    while (i < inner.length) {
+        const skipped = skipCode(inner, i)
+        if (skipped) {
+            i = skipped.end
+            continue
+        }
+        const open = matchTagOpen(inner, i, 'summary')
+        if (open) {
+            const closeAt = findClosingTag(inner, open.tagEnd, 'summary')
+            if (closeAt !== -1) {
+                return {
+                    attrs: open.attrs,
+                    text: inner.slice(open.tagEnd, closeAt),
+                    start: i,
+                    end: closeAt + '</summary>'.length
+                }
+            }
+        }
+        i += 1
+    }
+    return null
+}
+
 export function rewriteMarkdownDetails (markdown, renderMarkdown, renderInline) {
     if (!markdown) {
         return markdown
     }
     const parseBlock = typeof renderMarkdown === 'function' ? renderMarkdown : ((value) => value)
     const parseInline = typeof renderInline === 'function' ? renderInline : ((value) => value)
-    return String(markdown).replace(/<details(\s[^>]*)?>([\s\S]*?)<\/details>/gi, (match, attrs, inner) => {
-        const summaryMatch = inner.match(/<summary(\s[^>]*)?>([\s\S]*?)<\/summary>/i)
-        let summary = ''
-        let body = inner
-        if (summaryMatch) {
-            summary = `<summary${summaryMatch[1] || ''}>${parseInline(summaryMatch[2].trim())}</summary>`
-            body = inner.replace(summaryMatch[0], '')
+    const source = String(markdown)
+    let i = 0
+    let out = ''
+    while (i < source.length) {
+        const skipped = skipCode(source, i)
+        if (skipped) {
+            out += source.slice(i, skipped.end)
+            i = skipped.end
+            continue
         }
-        return `\n\n<details${attrs || ''}>${summary}${parseBlock(body.trim())}</details>\n\n`
-    })
+        const open = matchTagOpen(source, i, 'details')
+        if (open) {
+            const closeAt = findClosingTag(source, open.tagEnd, 'details')
+            if (closeAt !== -1) {
+                const inner = source.slice(open.tagEnd, closeAt)
+                const summary = readSummary(inner)
+                let summaryHtml = ''
+                let body = inner
+                if (summary) {
+                    summaryHtml = `<summary${openAttribute(summary.attrs)}>${parseInline(summary.text.trim())}</summary>`
+                    body = inner.slice(0, summary.start) + inner.slice(summary.end)
+                }
+                out += `\n\n<details${openAttribute(open.attrs)}>${summaryHtml}${parseBlock(body.trim())}</details>\n\n`
+                i = closeAt + '</details>'.length
+                continue
+            }
+        }
+        out += source[i]
+        i += 1
+    }
+    return out
 }
 
 function headingPlainText (innerHtml) {

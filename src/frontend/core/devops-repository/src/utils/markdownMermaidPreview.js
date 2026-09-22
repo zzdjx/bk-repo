@@ -52,6 +52,9 @@ function defaultLoadMermaid () {
                 throw new Error('Mermaid renderer is not available')
             }
             return initMermaid(window.mermaid)
+        }).catch((error) => {
+            mermaidModulePromise = null
+            throw error
         })
     }
     return mermaidModulePromise

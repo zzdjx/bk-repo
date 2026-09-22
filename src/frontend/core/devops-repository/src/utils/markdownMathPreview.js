@@ -59,6 +59,9 @@ function defaultLoadKatex () {
                 throw new Error('KaTeX renderer is not available')
             }
             return window.katex
+        }).catch((error) => {
+            katexModulePromise = null
+            throw error
         })
     }
     return katexModulePromise
