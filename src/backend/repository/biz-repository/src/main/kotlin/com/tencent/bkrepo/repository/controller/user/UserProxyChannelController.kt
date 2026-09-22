@@ -34,7 +34,9 @@ package com.tencent.bkrepo.repository.controller.user
 import com.tencent.bkrepo.auth.constant.BASIC_AUTH_HEADER_PREFIX
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.auth.pojo.enums.ResourceType
+import com.tencent.bkrepo.common.api.constant.ANONYMOUS_USER
 import com.tencent.bkrepo.common.api.constant.StringPool
+import com.tencent.bkrepo.common.api.util.checkurl.OutboundAddressGuard
 import com.tencent.bkrepo.common.api.util.checkurl.SecUrlValidator
 import com.tencent.bkrepo.common.api.pojo.Response
 import com.tencent.bkrepo.common.artifact.pojo.RepositoryType
@@ -42,16 +44,19 @@ import com.tencent.bkrepo.common.metadata.config.RepositoryProperties
 import com.tencent.bkrepo.common.metadata.service.repo.ProxyChannelService
 import com.tencent.bkrepo.common.metadata.util.ProxyChannelQueryHelper.maskPassword
 import com.tencent.bkrepo.common.metadata.util.RepositoryServiceHelper.Companion.isMaskedPassword
+import com.tencent.bkrepo.common.security.exception.AuthenticationException
 import com.tencent.bkrepo.common.security.permission.Permission
 import com.tencent.bkrepo.common.security.util.RsaUtils
+import com.tencent.bkrepo.common.security.util.SecurityUtils
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.repository.pojo.proxy.ProxyChannelInfo
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.tags.Tag
-import org.springframework.http.HttpEntity
+import okhttp3.Dns
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.springframework.http.HttpHeaders
-import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -60,7 +65,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.client.RestTemplate
+import java.net.InetAddress
 import java.util.Base64
 
 
@@ -71,7 +76,15 @@ class UserProxyChannelController(
     private val proxyChannelService: ProxyChannelService,
     private val repositoryProperties: RepositoryProperties,
 ) {
-    private val restTemplate = RestTemplate()
+    private val probeClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .dns(object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                return OutboundAddressGuard.resolve(hostname)
+            }
+        })
+        .build()
 
     @Operation(summary = "查询代理源信息")
     @Permission(type = ResourceType.REPO, action = PermissionAction.READ)
@@ -106,6 +119,9 @@ class UserProxyChannelController(
     fun checkProxyValid(
         @RequestBody checkParam: CheckParam
     ): Response<Boolean> {
+        if (SecurityUtils.getUserId() == ANONYMOUS_USER) {
+            throw AuthenticationException()
+        }
         with(checkParam) {
             if (!SecUrlValidator.isValid(url, repositoryProperties.proxyChannelUrl)) {
                 return ResponseBuilder.success(false)
@@ -142,18 +158,17 @@ class UserProxyChannelController(
         return BASIC_AUTH_HEADER_PREFIX + Base64.getEncoder().encodeToString(useInfo.toByteArray())
     }
 
-    private fun checkHelmValid(url: String , headers: HttpHeaders): Boolean {
-        val httpEntity = HttpEntity<Any>(headers)
-        try {
-            val response = restTemplate.exchange(
-                url + "/index.yaml", HttpMethod.HEAD, httpEntity, String::class.java)
-            return if (response.statusCode != HttpStatus.OK) {
-                false
-            } else {
-                true
+    private fun checkHelmValid(url: String, headers: HttpHeaders): Boolean {
+        val builder = Request.Builder().url(url + "/index.yaml").head()
+        headers.getFirst(HttpHeaders.AUTHORIZATION)?.let {
+            builder.header(HttpHeaders.AUTHORIZATION, it)
+        }
+        return try {
+            probeClient.newCall(builder.build()).execute().use { response ->
+                response.code == HttpStatus.OK.value()
             }
-        } catch (e: Exception) {
-            return false
+        } catch (ignored: Exception) {
+            false
         }
     }
 
