@@ -36,11 +36,11 @@ class SoftwarePackageServiceImpl(
         val criteria = Criteria.where(TPackage::type.name).`is`(repoType)
         if (projectId != null && projectId.isNotBlank()) {
             criteria.and(TPackage::projectId.name).`is`(projectId)
+            val repoNames = softwareRepoNames(projectId, repoType)
             if (repoName != null) {
+                if (repoName !in repoNames) return listOf()
                 criteria.and(TPackage::repoName.name).`is`(repoName)
             } else {
-                val allSoftRepo = softwareRepositoryService.listRepo(projectId, includeGeneric = false)
-                val repoNames = allSoftRepo.map { it.name }
                 criteria.and(TPackage::repoName.name).`in`(repoNames)
             }
         } else {
@@ -62,6 +62,13 @@ class SoftwarePackageServiceImpl(
         val result = packageDao.aggregate(aggregation, SoftwarePackageSearchPojo::class.java).mappedResults
 
         return transTree(result)
+    }
+
+    /**
+     * 软件源只开放 public/system 仓库，指定项目时仓库范围必须收敛到这些仓库
+     */
+    private fun softwareRepoNames(projectId: String, repoType: RepositoryType?): List<String> {
+        return softwareRepositoryService.listRepo(projectId, type = repoType, includeGeneric = false).map { it.name }
     }
 
     private fun transCri(criteria: Criteria, repos: List<RepositoryInfo>) {
@@ -151,10 +158,13 @@ class SoftwarePackageServiceImpl(
             }
             queryModel.rule = Rule.NestedRule(rules, Rule.NestedRule.RelationType.OR)
         }
-        if (projectId != null && repoName == null) {
-            val genericRepos =
-                softwareRepositoryService.listRepo(projectId, type = repoType, includeGeneric = false).map { it.name }
-            rules.add(Rule.QueryRule(field = "repoName", value = genericRepos, operation = OperationType.IN))
+        if (projectId != null) {
+            val repoNames = softwareRepoNames(projectId, repoType)
+            if (repoName == null) {
+                rules.add(Rule.QueryRule(field = "repoName", value = repoNames, operation = OperationType.IN))
+            } else if (repoName !in repoNames) {
+                return Page(1, queryModel.page.pageSize, 0, listOf())
+            }
         }
         val context = softwarePackageSearchInterpreter.interpret(queryModel)
         val query = context.mongoQuery
