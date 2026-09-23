@@ -15,6 +15,7 @@ import io.agentscope.core.permission.PermissionContextState
 import io.agentscope.core.permission.PermissionDecision
 import io.agentscope.core.tool.ToolBase
 import io.agentscope.core.tool.ToolCallParam
+import org.slf4j.LoggerFactory
 import reactor.core.publisher.Mono
 
 /**
@@ -52,8 +53,17 @@ abstract class AbstractReadOnlyDomainTool(
             ToolResultBlock.error("permission_denied: ${ex.message}")
         } catch (ex: IllegalArgumentException) {
             ToolResultBlock.error("invalid_argument: ${ex.message}")
+        } catch (ex: Exception) {
+            // 依赖下游服务的工具会抛出远程调用异常，必须转成工具结果而不是让 Mono 以错误信号终止，
+            // 否则整轮对话会直接失败，模型没有机会向用户解释查询未完成
+            logger.error("domain tool [$name] failed", ex)
+            ToolResultBlock.error("upstream_error: ${ex::class.simpleName}: ${ex.message}")
         }
     }
 
     protected abstract fun execute(param: ToolCallParam): String
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(AbstractReadOnlyDomainTool::class.java)
+    }
 }
