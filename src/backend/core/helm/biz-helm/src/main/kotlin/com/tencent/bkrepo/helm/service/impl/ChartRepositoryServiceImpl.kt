@@ -360,7 +360,7 @@ class ChartRepositoryServiceImpl(
         }
     }
 
-    @Permission(ResourceType.REPO, PermissionAction.READ)
+    @Permission(ResourceType.REPO, PermissionAction.WRITE)
     @Transactional(rollbackFor = [Throwable::class])
     override fun regenerateIndexYaml(artifactInfo: HelmArtifactInfo, v1Flag: Boolean) {
         regenerateIndex(artifactInfo, v1Flag)

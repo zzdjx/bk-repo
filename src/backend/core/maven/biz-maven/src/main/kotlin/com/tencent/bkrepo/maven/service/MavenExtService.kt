@@ -39,6 +39,7 @@ class MavenExtService(
         repos: String?
     ): Response<Page<MavenGAVCResponse.UriResult>> {
         gavcCheck(g, a, v, c)
+        checkGavcPermission(projectId, repos)
         val result = buildGavcQuery(projectId, pageNumber, pageSize, g, a, v, c, repos)
         val list = result.data?.records?.map {
             MavenGAVCResponse.UriResult("$mavenDomain/${it["projectId"]}/${it["repoName"]}${it["fullPath"]}")
@@ -51,6 +52,17 @@ class MavenExtService(
             records = list!!
         )
         return ResponseBuilder.success(page)
+    }
+
+    private fun checkGavcPermission(projectId: String, repos: String?) {
+        val repoNames = repos?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+        if (repoNames.isEmpty()) {
+            permissionManager.checkProjectPermission(PermissionAction.READ, projectId)
+            return
+        }
+        repoNames.forEach {
+            permissionManager.checkRepoPermission(PermissionAction.READ, projectId, it)
+        }
     }
 
     private fun gavcCheck(g: String?, a: String?, v: String?, c: String?) {
