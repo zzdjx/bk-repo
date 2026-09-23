@@ -80,6 +80,9 @@ class PermissionController @Autowired constructor(
     @PostMapping("/check")
     fun checkPermission(@RequestBody request: CheckPermissionRequest): Response<Boolean> {
         checkRequest(request)
+        if (!isAuthFromPlatform()) {
+            preCheckContextUser(request.uid)
+        }
         return ResponseBuilder.success(permissionService.checkPermission(request))
     }
 

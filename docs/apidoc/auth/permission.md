@@ -155,6 +155,8 @@
 |resourceType|ENUM|是|REPO|权限类型[REPO,PROJECT,SYSTEM,NODE]|permission type [REPO,PROJECT,SYSTEM,NODE]|
 |uid|string|是|无|用户ID|the user id|
 
+- 鉴权说明：普通用户（Basic / JWT / OAuth）只能校验自己的 `uid`，否则返回 `AUTH_USER_FORAUTH_NOT_PERM`；系统管理员与平台账号（Platform / Sign 认证）可校验任意 `uid`。
+
 - output:
 
 ```
