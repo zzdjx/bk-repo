@@ -71,6 +71,7 @@ import com.tencent.bkrepo.common.security.util.SecurityUtils
 import com.tencent.bkrepo.common.service.util.HeaderUtils
 import com.tencent.bkrepo.common.service.util.HttpContextHolder
 import io.jsonwebtoken.SignatureAlgorithm
+import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Service
 import java.security.MessageDigest
@@ -274,6 +275,15 @@ class OauthAuthorizationServiceImpl(
         return transfer(tOauthToken)
     }
 
+    override fun getUserToken(accessToken: String, userId: String): OauthToken? {
+        val tOauthToken = oauthTokenRepository.findFirstByAccessToken(accessToken) ?: return null
+        if (tOauthToken.userId != userId) {
+            logger.warn("User [$userId] tried to get oauth token of user [${tOauthToken.userId}]")
+            return null
+        }
+        return transfer(tOauthToken).copy(refreshToken = null)
+    }
+
     override fun validateToken(accessToken: String): String? {
         val claims = JwtUtils.validateToken(
             signingKey = RsaUtils.stringToPublicKey(cryptoProperties.publicKeyStr2048PKCS8),
@@ -417,6 +427,7 @@ class OauthAuthorizationServiceImpl(
     }
 
     companion object {
+        private val logger = LoggerFactory.getLogger(OauthAuthorizationServiceImpl::class.java)
         private const val KEY_ID_NAME = "kid"
         private const val KEY_ID_VALUE = "bkrepo_rsa_rs256"
     }

@@ -343,6 +343,26 @@ class OauthAuthorizationServiceImplTest {
     }
 
     @Test
+    @DisplayName("用户查询他人 token 时返回 null")
+    fun `getUserToken returns null for token of another user`() {
+        val issued = exchangeAuthorizationCode("code-other-user")
+
+        assertNull(service.getUserToken(issued.accessToken, "attacker"))
+    }
+
+    @Test
+    @DisplayName("用户查询自己的 token 时不返回 refresh token")
+    fun `getUserToken hides refresh token for owner`() {
+        val issued = exchangeAuthorizationCode("code-owner")
+        assertNotNull(issued.refreshToken)
+
+        val token = service.getUserToken(issued.accessToken, USER_ID)
+
+        assertEquals(issued.accessToken, token?.accessToken)
+        assertNull(token?.refreshToken)
+    }
+
+    @Test
     @DisplayName("授权码兑换后不能重放")
     fun `authorization code cannot be exchanged twice`() {
         putAuthorizationCode("code-replay")
