@@ -31,6 +31,24 @@
 - 鉴权: 路径含 `projectId/repoName` 的接口需要节点 `READ`。无路径变量的 `GET /preview/api/file/getPreviewInfo` 只校验登录，同样只认远程 URL，忽略仓库坐标。分享 token 同样允许。
 - 响应: JSON。既有 `fileName` / `fileType` / `suffix` / `fileTemplate` / `watermark`。仅当 `fileTemplate` 为 `online3D`（本地可预览 `.glb`）时带 `warnFileSize`、`maxFileSize`（MB，`<=0` 关闭对应检查）和 `size`（源文件 byte）；其它模板这三项为 `null`。
 
+## 嵌入预览页时的外链
+
+Markdown、HTML、JSX 预览里，作者写出的绝对 `http://`、`https://` 地址，以及 `//`（按 `https://` 打开），在新标签页打开，预览页留在原地。新标签使用 `noopener,noreferrer`。相对路径、`#` 锚点留在当前预览。`mailto:`、`tel:`、`javascript:`、`data:` 交给浏览器默认处理，不拦截点击，因此 `javascript:void(0)` 上的脚本和 `onclick` 仍会执行。带 `download` 的链接不拦截。没有用户点击的自动跳转不改。
+
+有用户手势时，预览内脚本的 `window.open` 只放行 `http://`、`https://` 和 `//`，并固定 `noopener,noreferrer`。`about:blank`、相对路径、`javascript:`、`data:`、`mailto:`、`tel:` 不会调用原生 `window.open`，因此不会借 `allow-popups-to-escape-sandbox` 弹出未沙箱窗口。`location.href`、`location.assign`、`location.replace` 在放行时仍走浏览器原来的导航，相对路径会在预览 iframe 内打开。
+
+HTML/JSX 预览 iframe 的 sandbox 为 `allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms`。嵌入预览页的一方不要再给外层 iframe 加 sandbox。如果加了，必须带 `allow-popups` 和 `allow-popups-to-escape-sandbox`，否则预览页里的 `window.open` 会被浏览器拦住。webview 需要接新窗口，或接下面的消息。
+
+同步 `window.open` 失败时，预览页向父窗口发送：
+
+```json
+{ "source": "bkrepo-preview", "action": "open-url", "url": "https://example.com/docs" }
+```
+
+`targetOrigin` 为 `*`。预览页不展示打开失败的提示条。客户端嵌的是预览 URL，父窗口就是客户端。作品脚本可以伪造同一条消息；嵌入方若收到后无条件打开，就等于允许作品任意弹网页。只打开 `http` / `https` URL。
+
+短链页 `/a/{shareId}`、`/share/{shortShareId}` 仍只内嵌预览 URL，不监听这条消息。
+
 ## 三维预览配置
 
 | 配置项 | 默认值 | 说明 |
