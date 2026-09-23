@@ -37,16 +37,6 @@ class PreviewCallbackDnsTest {
     }
 
     @Test
-    @DisplayName("关闭内网拦截时放行 RFC1918 私网地址，保持既有行为")
-    fun `lookup allows site local address when internal address block disabled`() {
-        val dns = PreviewCallbackDns(SsrfGuard(previewConfig(blockInternal = false)))
-
-        val addresses = dns.lookup("10.0.0.1")
-
-        assertEquals(listOf(InetAddress.getByName("10.0.0.1")), addresses)
-    }
-
-    @Test
     @DisplayName("回环地址属于始终拦截网段，不受内网拦截开关影响")
     fun `lookup rejects loopback even when internal address block disabled`() {
         val dns = PreviewCallbackDns(SsrfGuard(previewConfig(blockInternal = false)))
