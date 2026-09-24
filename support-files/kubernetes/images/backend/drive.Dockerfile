@@ -10,6 +10,7 @@ ENV BK_REPO_HOME=/data/workspace \
     BK_REPO_LOGS_DIR=/data/workspace/logs \
     BK_REPO_SERVICE_PREFIX=bkrepo- \
     BK_REPO_PROFILE=dev \
+    HOME=/data/workspace \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_GC=1 \
@@ -95,8 +96,15 @@ RUN set -eux; \
     rm -rf /tmp/pw-dl
 
 COPY ./ /data/workspace/
+# uid/gid 1001 与 chart fsGroup 一致。Chromium 拒绝在 root 下启用进程沙箱；
+# chrome-sandbox 必须保持 root:root 4755，供非 root 进程走 setuid 沙箱。
 RUN ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo 'Asia/Shanghai' > /etc/timezone && \
+    groupadd --system --gid 1001 bkrepo && \
+    useradd --system --uid 1001 --gid 1001 --home-dir /data/workspace --no-create-home --shell /sbin/nologin bkrepo && \
+    mkdir -p /data/workspace/logs && \
+    chown -R bkrepo:bkrepo /data/workspace && \
     chmod +x /data/workspace/startup.sh
 WORKDIR /data/workspace
+USER 1001:1001
 CMD /data/workspace/startup.sh
