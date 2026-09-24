@@ -31,41 +31,37 @@
 
 package com.tencent.bkrepo.rpm.servcie
 
-import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
-import com.tencent.bkrepo.auth.pojo.enums.ResourceType
 import com.tencent.bkrepo.common.artifact.pojo.RepositoryCategory
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactContext
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactContextHolder
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactSearchContext
 import com.tencent.bkrepo.common.artifact.repository.core.ArtifactService
-import com.tencent.bkrepo.common.security.permission.Permission
+import com.tencent.bkrepo.common.security.permission.Principal
+import com.tencent.bkrepo.common.security.permission.PrincipalType
 import com.tencent.bkrepo.rpm.artifact.RpmArtifactInfo
 import com.tencent.bkrepo.rpm.artifact.repository.RpmLocalRepository
 import org.springframework.stereotype.Service
 
+@Principal(PrincipalType.ADMIN)
 @Service
 class RpmDebugService : ArtifactService() {
-    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun flushRepomd(rpmArtifactInfo: RpmArtifactInfo) {
         val context = ArtifactSearchContext()
         val repository = ArtifactContextHolder.getRepository(RepositoryCategory.LOCAL)
         (repository as RpmLocalRepository).flushRepoMdXML(context, null)
     }
 
-    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun flushAllRepomd(rpmArtifactInfo: RpmArtifactInfo) {
         val context = ArtifactContext()
         val repository = ArtifactContextHolder.getRepository(RepositoryCategory.LOCAL)
         (repository as RpmLocalRepository).flushAllRepoData(context)
     }
 
-    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun populatePackage() {
         val repository = ArtifactContextHolder.getRepository(RepositoryCategory.LOCAL)
         (repository as RpmLocalRepository).populatePackage()
     }
 
-    @Permission(type = ResourceType.REPO, action = PermissionAction.WRITE)
     fun fixPrimaryXml(rpmArtifactInfo: RpmArtifactInfo) {
         val context = ArtifactContext()
         val repository = ArtifactContextHolder.getRepository(RepositoryCategory.LOCAL)
