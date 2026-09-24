@@ -5,8 +5,13 @@ import com.tencent.bkrepo.repository.pojo.software.ProjectPackageOverview
 interface PackageStatisticsService {
 
     /**
-     * 包搜索总览
+     * 包搜索总览，只统计[userId]有权限的仓库
      */
-    fun packageOverview(repoType: String, projectId: String, packageName: String?): List<ProjectPackageOverview>
+    fun packageOverview(
+        userId: String,
+        repoType: String,
+        projectId: String,
+        packageName: String?
+    ): List<ProjectPackageOverview>
 
 }

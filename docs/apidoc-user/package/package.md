@@ -514,6 +514,55 @@
   }
   ```
 
+## 包搜索总览
+
+- API: GET /repository/api/package/search/overview?repoType=MAVEN&projectId=test&packageName=*spring*
+- API 名称: package_search_overview
+- 功能说明：
+  - 中文：按仓库统计项目下匹配的包数量。需要登录，只统计当前用户有读权限的仓库
+  - English：count matched packages by repository. Login required, only repositories readable by current user are counted
+- 请求体
+  此接口请求体为空
+- 请求字段说明
+
+  |字段|类型|是否必须|默认值|说明|Description|
+  |---|---|---|---|---|---|
+  |repoType|string|是|无|包类型，见[包类型枚举](#包类型枚举)，不区分大小写|package type|
+  |projectId|string|是|无|项目名称|project name|
+  |packageName|string|否|无|包名称，支持 `*` 通配|package name, supports `*` wildcard|
+
+- 响应体
+
+  ```json
+  {
+    "code": 0,
+    "message": null,
+    "data": [
+      {
+        "projectId": "test",
+        "repos": [
+          {
+            "repoName": "maven-local",
+            "packages": 10
+          }
+        ],
+        "sum": 10
+      }
+    ],
+    "traceId": null
+  }
+  ```
+
+- data字段说明
+
+  |字段|类型|说明|Description|
+  |---|---|---|---|
+  |projectId|string|项目名称|project name|
+  |repos|list|有读权限且包含匹配包的仓库|readable repositories with matched packages|
+  |repoName|string|仓库名称|repository name|
+  |packages|Long|仓库内匹配的包数量|matched package count|
+  |sum|Long|匹配的包总数|total matched package count|
+
 ## 下载版本
 
 - API: GET /repository/api/version/download/{projectId}/{repoName}?packageKey=npm://test&version=0.0.1
