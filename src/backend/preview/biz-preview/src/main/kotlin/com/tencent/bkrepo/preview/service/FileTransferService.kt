@@ -73,6 +73,8 @@ import com.tencent.bkrepo.repository.pojo.repo.RepositoryDetail
 import jakarta.servlet.http.HttpServletRequest
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
+import java.io.SequenceInputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -164,36 +166,54 @@ class FileTransferService(
     }
 
     /**
-     * 读完整原文件，供改写 PDF 标题。存储读取失败继续向外抛。
+     * 按存储偏移读取一段原文件，供 PDF 增量改标题时只取 xref / Info。
      */
-    fun readOriginalBytes(fileAttribute: FileAttribute): ByteArray {
-        val size = originalFileSize(fileAttribute)
-        if (size <= 0L) {
+    fun readAt(fileAttribute: FileAttribute, offset: Long, length: Int, total: Long): ByteArray {
+        if (length <= 0 || offset >= total) {
             return ByteArray(0)
         }
-        return loadOriginalRange(fileAttribute, Range.full(size)).use { it.readBytes() }
+        val capped = minOf(length.toLong(), total - offset).toInt()
+        val end = offset + capped - 1
+        return loadOriginalRange(fileAttribute, Range(offset, end, total)).use { it.readBytes() }
     }
 
     /**
-     * 按 HTTP Range 写出已在内存中的预览字节。
+     * 原文件按 Range 从存储读，末尾再接上增量更新。总长度是两者之和。
      */
-    fun sendRangedBytes(fileAttribute: FileAttribute, bytes: ByteArray) {
+    fun sendAppendedBytes(fileAttribute: FileAttribute, originalSize: Long, suffix: ByteArray) {
         prepareOriginalContext(fileAttribute)
         setInlinePreviewContentType(fileAttribute.suffix.orEmpty(), fileAttribute.fileName)
-        val total = bytes.size.toLong()
+        val total = originalSize + suffix.size
         val range = resolveHttpRange(total)
-        val slice = if (range.isPartialContent()) {
-            bytes.copyOfRange(range.start.toInt(), (range.end + 1).toInt())
-        } else {
-            bytes
-        }
+        val body = openVirtualRange(fileAttribute, originalSize, suffix, range)
         val name = fileAttribute.fileName?.trim()?.takeIf { it.isNotEmpty() } ?: "preview.pdf"
-        val stream = ArtifactInputStream(ByteArrayInputStream(slice), range)
+        val stream = ArtifactInputStream(body, range)
         val resource = ArtifactResource(stream, name)
         resource.contentType = MediaPreviewContentType.fromSuffix(fileAttribute.suffix.orEmpty())
             ?: "application/pdf"
         resource.useDisposition = false
         artifactResourceWriter.write(resource)
+    }
+
+    private fun openVirtualRange(
+        fileAttribute: FileAttribute,
+        originalSize: Long,
+        suffix: ByteArray,
+        range: Range,
+    ): InputStream {
+        val start = range.start
+        val end = range.end
+        if (end < originalSize) {
+            return loadOriginalRange(fileAttribute, Range(start, end, originalSize))
+        }
+        if (start >= originalSize) {
+            val from = (start - originalSize).toInt()
+            val length = (end - start + 1).toInt()
+            return ByteArrayInputStream(suffix, from, length)
+        }
+        val head = loadOriginalRange(fileAttribute, Range(start, originalSize - 1, originalSize))
+        val tailLength = (end - originalSize + 1).toInt()
+        return SequenceInputStream(head, ByteArrayInputStream(suffix, 0, tailLength))
     }
 
     private fun resolveHttpRange(total: Long): Range {

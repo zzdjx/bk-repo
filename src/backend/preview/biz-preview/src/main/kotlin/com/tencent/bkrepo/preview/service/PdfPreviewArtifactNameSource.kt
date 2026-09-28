@@ -9,10 +9,6 @@ import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.service.share.DriveShareNodeResolver
 import org.springframework.stereotype.Component
 
-fun interface PdfArtifactNameReader {
-    fun read(fileAttribute: FileAttribute): String?
-}
-
 /**
  * 打开预览时读取节点上的 IMATE_ARTIFACT_NAME。分享记录里的 artifactName 不参与。
  */
@@ -21,9 +17,9 @@ class PdfPreviewArtifactNameSource(
     private val repositoryService: RepositoryService,
     private val driveNodeService: DriveNodeService,
     private val nodeService: NodeService,
-) : PdfArtifactNameReader {
+) {
 
-    override fun read(fileAttribute: FileAttribute): String? {
+    fun read(fileAttribute: FileAttribute): String? {
         val projectId = fileAttribute.projectId?.trim().orEmpty()
         val repoName = fileAttribute.repoName?.trim().orEmpty()
         val fullPath = fileAttribute.artifactUri?.trim().orEmpty()

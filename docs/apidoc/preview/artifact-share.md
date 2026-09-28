@@ -267,7 +267,7 @@
 - 鉴权: 与打开分享相同；不校验仓库 READ。浏览器访问 `/a/{shareId}` 未登录时，网关回落前端页并由 `getLoginUrl` 跳转企业登录，`c_url` 为该短链；登录后继续打开。独立部署弹出前端登录框
 - 响应:
   - 有权限且不是原生 PDF: HTTP 200，`text/html`；iframe 加载 UTF-8 百分号编码后的预览地址
-  - 有权限且为原生 PDF: HTTP 200，`application/pdf`，支持 Range。有节点 `IMATE_ARTIFACT_NAME` 时，先改 PDF 标题再按 Range 输出，不回写仓库
+  - 有权限且为原生 PDF: HTTP 200，`application/pdf`，支持 Range。有节点 `IMATE_ARTIFACT_NAME` 时在末尾追加标题更新，正文仍按 Range 从存储读取，不回写仓库
   - 当前用户不在分享可见范围: HTTP 403，`text/html` 无权限页（含分享创建者，按钮刷新当前短链）
   - 分享不存在、已撤销，或底层文件不存在: HTTP 404，`text/html`
   - 其它错误（如 token 签发失败）仍返回 JSON，与打开分享一致

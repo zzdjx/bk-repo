@@ -8,7 +8,7 @@ import com.tencent.bkrepo.preview.pojo.DownloadResult
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.pojo.FileType
 import com.tencent.bkrepo.preview.service.FileTransferService
-import com.tencent.bkrepo.preview.service.PdfArtifactNameReader
+import com.tencent.bkrepo.preview.service.PdfPreviewArtifactNameSource
 import com.tencent.bkrepo.preview.service.cache.impl.PreviewFileCacheServiceImpl
 import com.tencent.bkrepo.repository.pojo.node.NodeDetail
 import io.mockk.every
@@ -37,7 +37,7 @@ class AbstractFilePreviewTest {
             fileTransferService,
             previewFileCacheService,
             nodeService,
-            mockk<PdfArtifactNameReader>(relaxed = true),
+            mockk<PdfPreviewArtifactNameSource>(relaxed = true),
         )
         preview.repositoryService = repositoryService
         preview.enableMultiTenant = enableMultiTenant

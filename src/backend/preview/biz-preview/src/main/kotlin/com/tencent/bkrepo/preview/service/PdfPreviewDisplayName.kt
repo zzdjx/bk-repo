@@ -25,12 +25,25 @@ object PdfPreviewDisplayName {
     private fun strip(raw: String): String {
         val out = StringBuilder(raw.length)
         for (ch in raw) {
-            if (ch == '/' || ch == '\\' || ch.code <= ASCII_CONTROL_MAX || ch.code == ASCII_DELETE) {
+            if (isDiscarded(ch)) {
                 continue
             }
             out.append(ch)
         }
         return out.toString()
+    }
+
+    private fun isDiscarded(ch: Char): Boolean {
+        return isPathSeparator(ch) || isAsciiControl(ch)
+    }
+
+    private fun isPathSeparator(ch: Char): Boolean {
+        return ch == '/' || ch == '\\'
+    }
+
+    private fun isAsciiControl(ch: Char): Boolean {
+        val code = ch.code
+        return code <= ASCII_CONTROL_MAX || code == ASCII_DELETE
     }
 
     private fun truncate(value: String): String {

@@ -5,7 +5,7 @@ import com.tencent.bkrepo.preview.config.configuration.PreviewConfig
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.pojo.FileType
 import com.tencent.bkrepo.preview.service.FileTransferService
-import com.tencent.bkrepo.preview.service.PdfArtifactNameReader
+import com.tencent.bkrepo.preview.service.PdfPreviewArtifactNameSource
 import com.tencent.bkrepo.preview.service.cache.impl.PreviewFileCacheServiceImpl
 import io.mockk.every
 import io.mockk.mockk
@@ -35,37 +35,51 @@ class PdfFilePreviewImplTest {
 
     @Test
     fun `local pdf without artifact name streams original artifact`() {
-        val preview = preview(PdfArtifactNameReader { null })
+        val preview = preview(null)
 
         preview.filePreviewHandle(fileAttribute)
 
         verify(exactly = 1) { fileTransferService.sendOriginalFileAsResponse(fileAttribute) }
-        verify(exactly = 0) { fileTransferService.readOriginalBytes(any()) }
-        verify(exactly = 0) { fileTransferService.sendRangedBytes(any(), any()) }
+        verify(exactly = 0) { fileTransferService.originalFileSize(any()) }
+        verify(exactly = 0) { fileTransferService.sendAppendedBytes(any(), any(), any()) }
     }
 
     @Test
-    fun `local pdf rewrites title before ranged response`() {
-        every { fileTransferService.readOriginalBytes(fileAttribute) } returns pdf(info = "草稿")
-        val bytes = slot<ByteArray>()
-        every { fileTransferService.sendRangedBytes(fileAttribute, capture(bytes)) } returns Unit
-        val preview = preview(PdfArtifactNameReader { "周报" })
+    fun `local pdf appends title and keeps the body ranged`() {
+        val original = pdf(info = "草稿")
+        every { fileTransferService.originalFileSize(fileAttribute) } returns original.size.toLong()
+        every { fileTransferService.readAt(fileAttribute, any(), any(), any()) } answers {
+            val start = (invocation.args[1] as Long).toInt()
+            val length = invocation.args[2] as Int
+            original.copyOfRange(start, (start + length).coerceAtMost(original.size))
+        }
+        val suffix = slot<ByteArray>()
+        every {
+            fileTransferService.sendAppendedBytes(
+                fileAttribute,
+                original.size.toLong(),
+                capture(suffix)
+            )
+        } returns Unit
+        val preview = preview("周报")
 
         preview.filePreviewHandle(fileAttribute)
 
         verify(exactly = 0) { fileTransferService.sendOriginalFileAsResponse(any()) }
-        PDDocument.load(bytes.captured).use { document ->
+        PDDocument.load(original + suffix.captured).use { document ->
             assertEquals("周报.pdf", document.documentInformation.title)
         }
     }
 
-    private fun preview(nameReader: PdfArtifactNameReader): PdfFilePreviewImpl {
+    private fun preview(artifactName: String?): PdfFilePreviewImpl {
+        val artifactNameSource = mockk<PdfPreviewArtifactNameSource>()
+        every { artifactNameSource.read(any()) } returns artifactName
         return PdfFilePreviewImpl(
             PreviewConfig(),
             fileTransferService,
             mockk<PreviewFileCacheServiceImpl>(),
             mockk<NodeService>(),
-            nameReader,
+            artifactNameSource,
         )
     }
 }
