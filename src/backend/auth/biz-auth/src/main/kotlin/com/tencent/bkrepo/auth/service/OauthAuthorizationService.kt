@@ -58,6 +58,11 @@ interface OauthAuthorizationService {
     fun getToken(accessToken: String): OauthToken?
 
     /**
+     * 获取属于[userId]的token信息，不属于该用户时返回null；不返回refreshToken
+     */
+    fun getUserToken(accessToken: String, userId: String): OauthToken?
+
+    /**
      * 验证token，验证通过返回userId
      */
     fun validateToken(accessToken: String): String?

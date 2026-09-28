@@ -95,8 +95,9 @@ class UserShareService(
         }
     }
 
-    fun info(id: String): UserShareRecordInfo {
+    fun info(projectId: String, id: String): UserShareRecordInfo {
         val shareRecord = userShareRecordDao.findById(id)
+            ?.takeIf { it.projectId == projectId }
             ?: throw ErrorCodeException(CommonMessageCode.RESOURCE_NOT_FOUND, id)
         checkShareRecord(shareRecord)
         return convert(shareRecord)
