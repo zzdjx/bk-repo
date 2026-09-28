@@ -35,9 +35,11 @@
 
 Markdown、HTML、JSX 预览里，作者写出的绝对 `http://`、`https://` 地址，以及 `//`（按 `https://` 打开），在新标签页打开，预览页留在原地。新标签使用 `noopener,noreferrer`。相对路径、`#` 锚点留在当前预览。`mailto:`、`tel:`、`javascript:`、`data:` 交给浏览器默认处理，不拦截点击，因此 `javascript:void(0)` 上的脚本和 `onclick` 仍会执行。带 `download` 的链接不拦截。没有用户点击的自动跳转不改。
 
-有用户手势时，预览内脚本的 `window.open` 只放行 `http://`、`https://` 和 `//`，并固定 `noopener,noreferrer`。`about:blank`、相对路径、`javascript:`、`data:`、`mailto:`、`tel:` 不会调用原生 `window.open`，因此不会借 `allow-popups-to-escape-sandbox` 弹出未沙箱窗口。`location.href`、`location.assign`、`location.replace` 在放行时仍走浏览器原来的导航，相对路径会在预览 iframe 内打开。
+有用户手势时，预览内脚本的 `window.open` 只放行 `http://`、`https://` 和 `//`，并固定 `noopener,noreferrer`。`about:blank`、相对路径、`javascript:`、`data:`、`mailto:`、`tel:` 不会从这里调用原生 `window.open`。`location.href`、`location.assign`、`location.replace` 在放行时仍走浏览器原来的导航，相对路径会在预览 iframe 内打开。
 
-HTML/JSX 预览 iframe 的 sandbox 为 `allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms`。嵌入预览页的一方不要再给外层 iframe 加 sandbox。如果加了，必须带 `allow-popups` 和 `allow-popups-to-escape-sandbox`，否则预览页里的 `window.open` 会被浏览器拦住。webview 需要接新窗口，或接下面的消息。
+HTML/JSX 预览 iframe 的 sandbox 为 `allow-scripts allow-popups allow-forms`，没有 `allow-same-origin`，也没有 `allow-popups-to-escape-sandbox`。作品脚本绕过 hook 后弹出的窗口仍带着这份沙箱，文档源是不透明源，读不到预览页的 cookie 和 localStorage。
+
+预览页自己打开新标签时（Markdown，以及沙箱里 `window.open` 失败后转发的消息），只打开主机名与当前页不同的 `http` / `https`。同主机名不打开。Generic 在 `preview=true` 或仓库名为 `report` 时会把 HTML 以 `text/html` 内联返回，未沙箱的同主机名窗口能读到宿主 cookie 和 localStorage。
 
 同步 `window.open` 失败时，预览页向父窗口发送：
 
@@ -45,7 +47,7 @@ HTML/JSX 预览 iframe 的 sandbox 为 `allow-scripts allow-popups allow-popups-
 { "source": "bkrepo-preview", "action": "open-url", "url": "https://example.com/docs" }
 ```
 
-`targetOrigin` 为 `*`。预览页不展示打开失败的提示条。客户端嵌的是预览 URL，父窗口就是客户端。作品脚本可以伪造同一条消息；嵌入方若收到后无条件打开，就等于允许作品任意弹网页。只打开 `http` / `https` URL。
+`targetOrigin` 为 `*`。预览页不展示打开失败的提示条。客户端嵌的是预览 URL，父窗口就是客户端。作品脚本可以伪造同一条消息。嵌入方只打开主机名与自己不同的 `http` / `https`。嵌入预览页的一方不要再给外层 iframe 加 sandbox；如果加了，不要带 `allow-popups-to-escape-sandbox`。webview 需要接新窗口，或接上面的消息。
 
 短链页 `/a/{shareId}`、`/share/{shortShareId}` 仍只内嵌预览 URL，不监听这条消息。
 

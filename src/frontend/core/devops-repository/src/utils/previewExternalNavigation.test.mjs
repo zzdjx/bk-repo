@@ -6,6 +6,7 @@ import {
     installPreviewNavigationGuard,
     openPreviewExternalUrl,
     planAnchorActivation,
+    previewExternalUrlAllowed,
     planFormActivation,
     planScriptNavigation,
     PREVIEW_CONTENT_SANDBOX,
@@ -67,6 +68,25 @@ test('failed window.open posts open-url and keeps the url for another click', ()
         action: 'open-url',
         url: 'javascript:alert(1)'
     }), null)
+    assert.equal(readPreviewOpenUrlMessage({
+        source: 'bkrepo-preview',
+        action: 'open-url',
+        url: 'https://preview.example/generic/p/r/a.html?preview=true'
+    }, 'https://preview.example/ui/p/file'), null)
+    assert.equal(readPreviewOpenUrlMessage({
+        source: 'bkrepo-preview',
+        action: 'open-url',
+        url: 'http://preview.example/a.html'
+    }, 'https://preview.example/ui/p/file'), null)
+    assert.equal(previewExternalUrlAllowed(
+        'https://user:secret@preview.example/a.html',
+        'https://preview.example/ui'
+    ), null)
+    assert.equal(readPreviewOpenUrlMessage({
+        source: 'bkrepo-preview',
+        action: 'open-url',
+        url: 'https://example.com/docs'
+    }, 'https://preview.example/ui/p/file'), 'https://example.com/docs')
 })
 
 test('sandbox guard opens authored absolute links and leaves relative clicks', () => {
@@ -153,11 +173,15 @@ test('iframe guard source calls the installer by its runtime name', () => {
     assert.equal(harness.opened.length, 1)
 })
 
-test('content sandbox allows popups and forms but not top navigation or downloads', () => {
+test('content sandbox allows popups and forms but not top navigation, downloads, or sandbox escape', () => {
     assert.equal(
         PREVIEW_CONTENT_SANDBOX,
-        'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms'
+        'allow-scripts allow-popups allow-forms'
     )
+    assert.equal(PREVIEW_CONTENT_SANDBOX.includes('allow-popups-to-escape-sandbox'), false)
+    assert.equal(PREVIEW_CONTENT_SANDBOX.includes('allow-same-origin'), false)
+    assert.equal(PREVIEW_CONTENT_SANDBOX.includes('allow-top-navigation'), false)
+    assert.equal(PREVIEW_CONTENT_SANDBOX.includes('allow-downloads'), false)
 })
 
 test('script navigation without a click is left alone and browser schemes stay available while activated', () => {
@@ -230,6 +254,7 @@ test('markdown root click opens absolute links and does not hook page navigation
     const root = createRoot()
     const location = { href: 'https://preview.example/file', assign (url) { this.href = url } }
     bindPreviewContentLinks(root, {
+        pageUrl: 'https://preview.example/file',
         open (url, target, features) {
             opened.push({ url, target, features })
             return { opener: {} }
@@ -249,6 +274,12 @@ test('markdown root click opens absolute links and does not hook page navigation
     assert.equal(location.href, 'https://preview.example/file')
     const relative = clickOn(root, link('./other.md'))
     assert.equal(relative.defaultPrevented, true)
+    assert.equal(opened.length, 1)
+    const sameHost = clickOn(root, link('https://preview.example/generic/p/r/a.html?preview=true'))
+    assert.equal(sameHost.defaultPrevented, true)
+    assert.equal(opened.length, 1)
+    const sameHostHttp = clickOn(root, link('http://preview.example:8443/a.html'))
+    assert.equal(sameHostHttp.defaultPrevented, true)
     assert.equal(opened.length, 1)
 })
 

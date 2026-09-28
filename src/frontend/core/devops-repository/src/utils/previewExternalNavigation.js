@@ -1,4 +1,6 @@
-export const PREVIEW_CONTENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms'
+// Popups stay sandboxed: no allow-same-origin, no allow-popups-to-escape-sandbox.
+// An opaque-origin window cannot read the preview page cookie jar or localStorage.
+export const PREVIEW_CONTENT_SANDBOX = 'allow-scripts allow-popups allow-forms'
 
 export function classifyAuthoredHref (raw) {
     if (raw == null) {
@@ -64,25 +66,50 @@ export function buildPreviewOpenUrlMessage (url) {
     }
 }
 
-export function readPreviewOpenUrlMessage (data) {
-    if (!data || data.source !== 'bkrepo-preview' || data.action !== 'open-url') {
+export function previewExternalUrlAllowed (url, pageUrl) {
+    const classified = classifyAuthoredHref(url)
+    if (classified.kind !== 'external') {
         return null
     }
-    const classified = classifyAuthoredHref(data.url)
-    if (classified.kind !== 'external') {
+    let target
+    try {
+        target = new URL(classified.url)
+    } catch (e) {
+        return null
+    }
+    if ((target.protocol !== 'http:' && target.protocol !== 'https:') || !target.hostname) {
+        return null
+    }
+    if (!pageUrl) {
+        return classified.url
+    }
+    let page
+    try {
+        page = new URL(pageUrl)
+    } catch (e) {
+        return null
+    }
+    if (target.hostname === page.hostname) {
         return null
     }
     return classified.url
 }
 
+export function readPreviewOpenUrlMessage (data, pageUrl) {
+    if (!data || data.source !== 'bkrepo-preview' || data.action !== 'open-url') {
+        return null
+    }
+    return previewExternalUrlAllowed(data.url, pageUrl)
+}
+
 export function openPreviewExternalUrl (url, deps) {
-    const classified = classifyAuthoredHref(url)
-    if (classified.kind !== 'external') {
+    const allowed = previewExternalUrlAllowed(url, deps && deps.pageUrl)
+    if (!allowed) {
         return null
     }
     let opened = null
     try {
-        opened = deps.open(classified.url, '_blank', 'noopener,noreferrer')
+        opened = deps.open(allowed, '_blank', 'noopener,noreferrer')
     } catch (e) {
         opened = null
     }
@@ -94,7 +121,7 @@ export function openPreviewExternalUrl (url, deps) {
         }
         return opened
     }
-    const message = buildPreviewOpenUrlMessage(classified.url)
+    const message = buildPreviewOpenUrlMessage(allowed)
     if (deps && typeof deps.postMessage === 'function') {
         try {
             deps.postMessage(message, '*')
@@ -103,7 +130,7 @@ export function openPreviewExternalUrl (url, deps) {
         }
     }
     if (deps && typeof deps.onBlocked === 'function') {
-        deps.onBlocked(classified.url)
+        deps.onBlocked(allowed)
     }
     return null
 }
@@ -258,8 +285,8 @@ function hookPreviewWindowOpen (targetWindow, nativeOpen, deps) {
         if (decision.kind === 'external') {
             return openPreviewExternalUrl(decision.url, deps)
         }
-        // A user-activated native popup inherits allow-popups-to-escape-sandbox.
-        // Only http(s) may open, and those go through openPreviewExternalUrl.
+        // The content sandbox does not grant allow-popups-to-escape-sandbox.
+        // User-activated non-http opens stay closed; http(s) uses openPreviewExternalUrl.
         if (decision.kind === 'blocked' || userActivated) {
             return null
         }
@@ -434,6 +461,7 @@ export function previewNavigationGuardSource () {
         planFormActivation,
         planScriptNavigation,
         buildPreviewOpenUrlMessage,
+        previewExternalUrlAllowed,
         openPreviewExternalUrl,
         isPreviewLinkElement,
         findPreviewLink,

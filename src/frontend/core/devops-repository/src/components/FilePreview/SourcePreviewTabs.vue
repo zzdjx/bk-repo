@@ -296,6 +296,7 @@
                     return
                 }
                 this.markdownLinkRelease = bindPreviewContentLinks(root, {
+                    pageUrl: window.location.href,
                     open: (url, target, features) => window.open(url, target, features),
                     postMessage: (message, origin) => this.postPreviewOpenUrl(message, origin)
                 })
@@ -307,7 +308,7 @@
                 }
             },
             onPreviewOpenUrlMessage (event) {
-                const url = readPreviewOpenUrlMessage(event && event.data)
+                const url = readPreviewOpenUrlMessage(event && event.data, window.location.href)
                 if (!url) {
                     return
                 }
