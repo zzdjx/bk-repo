@@ -35,18 +35,22 @@ import com.tencent.bkrepo.common.metadata.service.node.NodeService
 import com.tencent.bkrepo.preview.config.configuration.PreviewConfig
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.service.FileTransferService
+import com.tencent.bkrepo.preview.service.PdfArtifactNameReader
+import com.tencent.bkrepo.preview.service.PdfPreviewDisplayName
+import com.tencent.bkrepo.preview.service.PdfPreviewTitle
 import com.tencent.bkrepo.preview.service.cache.impl.PreviewFileCacheServiceImpl
 import org.springframework.stereotype.Service
 
 /**
- * 本地 PDF 按 Range 原样流出，供浏览器内置阅读器内联预览；远程 PDF 仍走转换缓存链路。
+ * 本地 PDF 按 Range 流出。有作品名时先改标题再 Range；远程 PDF 仍走转换缓存链路。
  */
 @Service
 class PdfFilePreviewImpl(
     config: PreviewConfig,
     private val fileTransferService: FileTransferService,
     previewFileCacheService: PreviewFileCacheServiceImpl,
-    nodeService: NodeService
+    nodeService: NodeService,
+    private val artifactNameReader: PdfArtifactNameReader,
 ) : AbstractFilePreview(
     config,
     fileTransferService,
@@ -54,10 +58,16 @@ class PdfFilePreviewImpl(
     nodeService
 ) {
     override fun filePreviewHandle(fileAttribute: FileAttribute) {
-        if (fileAttribute.storageType == 0) {
-            fileTransferService.sendOriginalFileAsResponse(fileAttribute)
-        } else {
+        if (fileAttribute.storageType != 0) {
             super.filePreviewHandle(fileAttribute)
+            return
         }
+        val title = PdfPreviewDisplayName.normalize(artifactNameReader.read(fileAttribute))
+        if (title == null) {
+            fileTransferService.sendOriginalFileAsResponse(fileAttribute)
+            return
+        }
+        val original = fileTransferService.readOriginalBytes(fileAttribute)
+        fileTransferService.sendRangedBytes(fileAttribute, PdfPreviewTitle.rewrite(original, title))
     }
 }

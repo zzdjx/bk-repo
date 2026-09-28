@@ -597,7 +597,7 @@
     - `name`：元数据 `IMATE_ARTIFACT_NAME`，缺省为文件 basename
     - `type`：元数据 `IMATE_ARTIFACT_TYPE`（需为 image/pdf/html/code/table/slides/markdown/video/audio/3d/other），缺省或非法为 `other`
   - 其它/缺失 `type`：返回 `{drive.domain}/ui/{projectId}/filePreview/local/0/{repoName}{fullPath}`
-  - Client 打开该 URL 时，音视频走 HTML5 播放器，原生 PDF 走浏览器内置阅读器；二者均按 HTTP Range 从 Drive 节点流式读取，响应 `Content-Type` 为可内联 MIME、`Content-Disposition: inline`，不落地整文件。Office 等转换预览仍拉取完整文件
+  - Client 打开该 URL 时，音视频走 HTML5 播放器，原生 PDF 走浏览器内置阅读器。二者按 HTTP Range 从 Drive 节点流式读取。原生 PDF 若有 `IMATE_ARTIFACT_NAME`，会在 Range 响应前把 PDF 标题改成该作品名，不回写仓库原文件。响应 `Content-Type` 为可内联 MIME、`Content-Disposition: inline`，不落地整文件。Office 等转换预览仍拉取完整文件
   - Client URL 不签发临时 token、不生成短链；`drive.domain` 为空时报参数错误
   - 无请求体
 
