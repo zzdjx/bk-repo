@@ -297,8 +297,9 @@ function attachPreviewContentLinkListeners (root, deps) {
     }
 }
 
-function createGuardDeps (targetWindow, nativeOpen) {
+function createGuardDeps (targetWindow, nativeOpen, pageUrl) {
     return {
+        pageUrl: pageUrl || '',
         open (url, target, features) {
             return nativeOpen(url, target, features)
         },
@@ -422,7 +423,7 @@ function wrapLocationMethod (loc, name, targetWindow, deps) {
     }
 }
 
-function hookFormSubmit (targetWindow) {
+function hookFormSubmit (targetWindow, pageUrl) {
     let FormCtor = null
     try {
         FormCtor = targetWindow.HTMLFormElement
@@ -435,9 +436,12 @@ function hookFormSubmit (targetWindow) {
     const original = FormCtor.prototype.submit
     try {
         FormCtor.prototype.submit = function previewGuardedFormSubmit () {
+            const decision = planFormActivation({ action: this.getAttribute('action') })
+            if (decision.kind === 'external' && !previewExternalUrlAllowed(decision.url, pageUrl)) {
+                return undefined
+            }
             if (isPreviewUserActivated(targetWindow)) {
-                const decision = planFormActivation({ action: this.getAttribute('action') })
-                if (decision.kind === 'external' && previewExternalUrlAllowed(decision.url)) {
+                if (decision.kind === 'external') {
                     markExternalForm(this)
                 } else {
                     return undefined
@@ -448,6 +452,21 @@ function hookFormSubmit (targetWindow) {
     } catch (e) {
         /* prototype may be non-writable */
     }
+}
+
+export function openPreviewAnchor (url, doc) {
+    const anchor = doc.createElement('a')
+    anchor.href = url
+    anchor.target = '_blank'
+    anchor.rel = 'noopener noreferrer'
+    anchor.referrerPolicy = 'no-referrer'
+    const parent = doc.body || doc.documentElement
+    if (!parent) {
+        return
+    }
+    parent.appendChild(anchor)
+    anchor.click()
+    parent.removeChild(anchor)
 }
 
 export function bindPreviewContentLinks (root, deps) {
@@ -466,13 +485,13 @@ export function bindPreviewContentLinks (root, deps) {
     return attachPreviewContentLinkListeners(root, bound)
 }
 
-export function installPreviewNavigationGuard (targetWindow, targetDocument) {
+export function installPreviewNavigationGuard (targetWindow, targetDocument, pageUrl) {
     const nativeOpen = typeof targetWindow.open === 'function'
         ? targetWindow.open.bind(targetWindow)
         : function openUnavailable () {
             return null
         }
-    const deps = createGuardDeps(targetWindow, nativeOpen)
+    const deps = createGuardDeps(targetWindow, nativeOpen, pageUrl)
     deps.scrollHash = function scrollHash (event, link) {
         scrollPreviewHash(event, link, targetDocument, targetWindow)
     }
@@ -487,10 +506,15 @@ export function installPreviewNavigationGuard (targetWindow, targetDocument) {
     } catch (e) {
         /* location may be non-configurable */
     }
-    hookFormSubmit(targetWindow)
+    hookFormSubmit(targetWindow, pageUrl)
 }
 
-export function previewNavigationGuardSource () {
+function previewPageUrlLiteral (pageUrl) {
+    const text = pageUrl == null ? '' : String(pageUrl)
+    return JSON.stringify(text).replace(/</g, '\\u003c')
+}
+
+export function previewNavigationGuardSource (pageUrl) {
     const parts = [
         classifyAuthoredHref,
         planAnchorActivation,
@@ -517,5 +541,5 @@ export function previewNavigationGuardSource () {
     // Production minify renames the function declaration inside toString(), but a
     // hardcoded call would keep the original name and throw before any listener attaches.
     const installName = installPreviewNavigationGuard.name
-    return `(function () {\n${parts.join('\n')}\n${installName}(window, document);\n})();`
+    return `(function () {\n${parts.join('\n')}\n${installName}(window, document, ${previewPageUrlLiteral(pageUrl)});\n})();`
 }

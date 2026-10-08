@@ -78,6 +78,7 @@
         PREVIEW_CONTENT_SANDBOX,
         bindPreviewContentLinks,
         buildPreviewOpenUrlMessage,
+        openPreviewAnchor,
         readPreviewOpenUrlMessage
     } from '@repository/utils/previewExternalNavigation'
 
@@ -205,6 +206,7 @@
                     return
                 }
                 try {
+                    const pageUrl = window.location.href
                     if (this.fileKind === 'markdown') {
                         this.previewHtml = renderMarkdownToSafeHtml(this.normalizedSource, {
                             resolveAssetUrl: this.resolveAssetUrl,
@@ -221,10 +223,11 @@
                             this.renderPlantumlPreview()
                         ])
                     } else if (this.fileKind === 'jsx') {
-                        this.jsxSrcdoc = buildJsxSandboxSrcdoc(this.normalizedSource)
+                        this.jsxSrcdoc = buildJsxSandboxSrcdoc(this.normalizedSource, pageUrl)
                     } else if (this.fileKind === 'html') {
                         this.htmlSrcdoc = buildHtmlSandboxSrcdoc(this.normalizedSource, {
-                            resolveAssetUrl: this.resolveAssetUrl
+                            resolveAssetUrl: this.resolveAssetUrl,
+                            pageUrl
                         })
                     }
                 } catch (error) {
@@ -298,7 +301,10 @@
                 }
                 this.markdownLinkRelease = bindPreviewContentLinks(root, {
                     pageUrl: window.location.href,
-                    open: (url, target, features) => window.open(url, target, features),
+                    open (url) {
+                        openPreviewAnchor(url, document)
+                        return { opener: null }
+                    },
                     postMessage: (message, origin) => this.postPreviewOpenUrl(message, origin)
                 })
             },

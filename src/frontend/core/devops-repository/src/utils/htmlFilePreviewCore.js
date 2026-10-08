@@ -17,7 +17,7 @@ const RESOURCE_ATTRS_BY_TAG = {
     use: ['href', 'xlink:href']
 }
 
-function buildHtmlPreviewGuardScript () {
+function buildHtmlPreviewGuardScript (pageUrl) {
     return `<script>
 (function () {
   function wrapHistoryMethod (name) {
@@ -49,7 +49,7 @@ function buildHtmlPreviewGuardScript () {
     });
   } catch (e) { /* ignore */ }
 })();
-${previewNavigationGuardSource()}
+${previewNavigationGuardSource(pageUrl)}
 <\/script>`
 }
 
@@ -243,7 +243,7 @@ function injectPreviewGuard (source, guardScript) {
  * Isolation is the iframe sandbox plus opaque-origin guards — not a resource CSP whitelist.
  * Relative repo assets are rewritten when resolveAssetUrl is provided; absolute CDN URLs stay intact.
  */
-export function buildHtmlSandboxSrcdoc (htmlSource, { resolveAssetUrl } = {}) {
+export function buildHtmlSandboxSrcdoc (htmlSource, { resolveAssetUrl, pageUrl } = {}) {
     const rewritten = rewriteHtmlResourceUrls(htmlSource || '', resolveAssetUrl)
-    return injectPreviewGuard(rewritten, buildHtmlPreviewGuardScript())
+    return injectPreviewGuard(rewritten, buildHtmlPreviewGuardScript(pageUrl))
 }

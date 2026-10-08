@@ -4,6 +4,7 @@ import {
     bindPreviewContentLinks,
     classifyAuthoredHref,
     installPreviewNavigationGuard,
+    openPreviewAnchor,
     openPreviewExternalUrl,
     planAnchorActivation,
     previewExternalUrlAllowed,
@@ -185,7 +186,10 @@ test('iframe guard source calls the installer by its runtime name', () => {
     const source = previewNavigationGuardSource()
     const installName = installPreviewNavigationGuard.name
     assert.match(source, new RegExp(`function ${installName}\\s*\\(`))
-    assert.match(source, new RegExp(`${installName}\\(window, document\\);`))
+    assert.match(source, new RegExp(`${installName}\\(window, document, ""\\);`))
+    const withPage = previewNavigationGuardSource('https://preview.example/a</script>')
+    assert.equal(withPage.includes('</script>'), false)
+    assert.match(withPage, /\\u003c\/script>/)
     const harness = createHarness()
     new Function('window', 'document', source)(harness.win, harness.doc)
     const external = click(harness, link('https://example.com/docs'))
@@ -199,6 +203,81 @@ test('iframe guard source calls the installer by its runtime name', () => {
     const download = click(harness, link('https://example.com/file.zip', { download: '' }))
     assert.equal(download.defaultPrevented, true)
     assert.equal(harness.opened.at(-1).url, 'https://example.com/file.zip')
+})
+
+test('iframe guard blocks same-host links and forms when the page url is present', () => {
+    const harness = createHarness()
+    installPreviewNavigationGuard(harness.win, harness.doc, 'https://preview.example/ui/file')
+    const sameHost = click(harness, link('https://preview.example/web/generic/p/r/a.html?preview=true'))
+    assert.equal(sameHost.defaultPrevented, true)
+    assert.equal(harness.opened.length, 0)
+    const external = click(harness, link('https://example.com/docs'))
+    assert.equal(external.defaultPrevented, true)
+    assert.equal(harness.opened[0].url, 'https://example.com/docs')
+    const sameHostForm = formElement('//preview.example/web/generic/p/r/a.html?preview=true', 'get')
+    const sameHostSubmit = dispatch(harness, 'submit', sameHostForm)
+    assert.equal(sameHostSubmit.defaultPrevented, true)
+    assert.equal(sameHostForm.getAttribute('target'), null)
+    const externalForm = formElement('https://example.com/submit', 'post')
+    const externalSubmit = dispatch(harness, 'submit', externalForm)
+    assert.equal(externalSubmit.defaultPrevented, false)
+    assert.equal(externalForm.getAttribute('target'), '_blank')
+})
+
+test('same-host form.submit is blocked even without a click', () => {
+    const harness = createHarness()
+    const submitted = []
+    function Form () {}
+    Form.prototype.submit = function () {
+        submitted.push(this.getAttribute('action'))
+    }
+    Form.prototype.getAttribute = function (name) {
+        return this.attrs ? this.attrs[name] : null
+    }
+    Form.prototype.setAttribute = function (name, value) {
+        this.attrs[name] = String(value)
+    }
+    harness.win.HTMLFormElement = Form
+    harness.win.navigator.userActivation.isActive = false
+    installPreviewNavigationGuard(harness.win, harness.doc, 'https://preview.example/ui/file')
+    const same = new Form()
+    same.attrs = { action: 'https://preview.example/web/generic/p/r/a.html?preview=true' }
+    same.submit()
+    assert.deepEqual(submitted, [])
+    const other = new Form()
+    other.attrs = { action: 'https://example.com/submit' }
+    other.submit()
+    assert.deepEqual(submitted, ['https://example.com/submit'])
+    assert.equal(other.getAttribute('target'), undefined)
+})
+
+test('host page opens external urls with a noreferrer anchor', () => {
+    const clicks = []
+    const doc = {
+        body: {
+            appendChild () {},
+            removeChild () {}
+        },
+        createElement () {
+            return {
+                click () {
+                    clicks.push({
+                        href: this.href,
+                        target: this.target,
+                        rel: this.rel,
+                        referrerPolicy: this.referrerPolicy
+                    })
+                }
+            }
+        }
+    }
+    openPreviewAnchor('https://example.com/docs', doc)
+    assert.deepEqual(clicks, [{
+        href: 'https://example.com/docs',
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        referrerPolicy: 'no-referrer'
+    }])
 })
 
 test('content sandbox allows popups and forms but not top navigation, downloads, or sandbox escape', () => {

@@ -949,9 +949,9 @@ export function rewriteMarkdownImageUrls (html, resolveAssetUrl) {
     })
 }
 
-export function buildJsxSandboxSrcdoc (jsxSource, libBase) {
+export function buildJsxSandboxSrcdoc (jsxSource, libBase, pageUrl) {
     const preparedSource = prepareJsxSource(jsxSource)
-    const navigationGuard = previewNavigationGuardSource()
+    const navigationGuard = previewNavigationGuardSource(pageUrl)
     return `<!DOCTYPE html>
 <html>
 <head>
