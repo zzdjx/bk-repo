@@ -39,7 +39,6 @@ import com.tencent.bkrepo.agent.audit.ToolAuditMiddleware
 import com.tencent.bkrepo.agent.config.AgentHarnessConfigurer
 import com.tencent.bkrepo.agent.config.AgentMemoryConfig
 import com.tencent.bkrepo.agent.config.AgentModelConfig
-import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.config.properties.AgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.AgentLlmPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryProperties
@@ -118,10 +117,9 @@ class HarnessAgentSmokeTest {
             reconnectPollInterval = java.time.Duration.ofMillis(500),
             reconnectTimeout = java.time.Duration.ofMinutes(10),
             shutdownTimeout = java.time.Duration.ofSeconds(15),
-            stateKeyPrefix = "bkrepo:agent:state:",
+            stateCollection = "agent_state",
+            stateTtlDays = 30,
             requireRedis = false,
-            taskStoreKeyPrefix = "bkrepo:agent:task-store:",
-            memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
             memoryDailyLedgerRetention = java.time.Duration.ofDays(90),
             memoryMaintenanceInterval = java.time.Duration.ofHours(24),
             frontendToolsEnabled = true,
@@ -168,7 +166,6 @@ class HarnessAgentSmokeTest {
         val agentHarnessConfigurer = AgentHarnessConfigurer(
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
-            permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentRunRecordService()),
             toolAuditMiddleware = ToolAuditMiddleware(NoopAgentToolCallRecordService(), ObjectMapper()),
             delegationBudgetMiddleware = DelegationBudgetMiddleware(

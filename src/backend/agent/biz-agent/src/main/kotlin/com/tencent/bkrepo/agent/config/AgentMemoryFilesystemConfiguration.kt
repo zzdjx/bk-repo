@@ -27,18 +27,15 @@
 
 package com.tencent.bkrepo.agent.config
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.dao.AgentKvStoreDao
 import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
-import com.tencent.bkrepo.agent.task.LettuceStore
+import com.tencent.bkrepo.agent.task.MongoStore
 import io.agentscope.harness.agent.IsolationScope
 import io.agentscope.harness.agent.filesystem.spec.RemoteFilesystemSpec
-import io.lettuce.core.RedisClient
-import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.data.redis.connection.RedisConnectionFactory
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 
 /**
  * 阶段 10（长期记忆）：让 `memory_save`/`memory_search`/`memory_get` 使用的
@@ -62,27 +59,25 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
  * ## 与 [AgentStateConfiguration.agentStateStore] 的一致性
  *
  * `HarnessAgent.Builder.build()` 在配置了 `RemoteFilesystemSpec` 时会校验 `AgentStateStore` 不能是
- * 本地实现（`JsonFileAgentStateStore`/`InMemoryAgentStateStore`），否则直接抛异常。这里与
- * [AgentStateConfiguration] 使用同一个 Lettuce 客户端可用性作为开关信号，两者总是同时为
- * "有 Redis"或同时为"无 Redis"，不会出现该校验失败的组合。
+ * 本地实现（`JsonFileAgentStateStore`/`InMemoryAgentStateStore`），否则直接抛异常。两者现在都落在同一个
+ * Mongo 上，不存在"一边有存储一边没有"的组合。
  *
- * 没有 Lettuce 客户端时返回 `null`：[AgentHarnessConfigurer] 据此保持
- * `disableMemoryTools()`，长期记忆能力整体关闭，不退化为单副本本地行为——因为长期记忆的价值就在于
- * 跨会话/跨副本稳定可见，局部可用（只在恰好落到同一个副本时才能看到之前保存的记忆）比完全不可用
- * 更容易让用户困惑"我明明保存过，为什么找不到"。
+ * 落 Mongo 之前这里会在拿不到 Lettuce 客户端时返回 `null`，让 [AgentHarnessConfigurer] 保持
+ * `disableMemoryTools()`——因为长期记忆的价值就在于跨会话/跨副本稳定可见，局部可用比完全不可用更容易让
+ * 用户困惑"我明明保存过，为什么找不到"。Mongo 是全服务硬依赖，这个降级分支随之消失，长期记忆变成无条件可用。
  *
  * ## `agentMemoryStore` 为什么单独拆成一个 bean
  *
  * 补全阶段 10 时新增了"用户直连查看/删除记忆"的 REST 接口
  * （[MemoryFilesystemAccess]）和 `memory_delete` LLM 工具
  * （[com.tencent.bkrepo.agent.tool.memory.MemoryDeleteTool]），它们都需要绕开
- * `HarnessAgent` 内部私有的 `WorkspaceManager`、直接访问同一份底层存储。把 [LettuceStore] 单独
+ * `HarnessAgent` 内部私有的 `WorkspaceManager`、直接访问同一份底层存储。把 [MongoStore] 单独
  * 拆成一个 bean（而不是像最初实现那样只在 `agentMemoryFilesystemSpec` 内部 `new`），
  * 是为了让这几处共用同一条 Redis 连接，而不是各自重新创建连接。
  *
  * ## `memoryFilesystemAccess` 为什么不用 `@Component` 自注册
  *
- * [MemoryFilesystemAccess] 依赖抽象的 `BaseStore` 接口而不是具体的 [LettuceStore]，构造函数只接受
+ * [MemoryFilesystemAccess] 依赖抽象的 `BaseStore` 接口而不是具体的 [MongoStore]，构造函数只接受
  * `(store: BaseStore?, agentId: String)`。这里像阶段 9 `AgentTaskRepositoryConfiguration` 构造
  * `LimitedWorkspaceTaskRepository` 一样，用 `@Bean` 工厂方法而不是类自身 `@Component` 注解来完成 Spring
  * 装配——这样单测可以绕开 Spring 容器和真实 Lettuce 连接，直接 `new MemoryFilesystemAccess(fakeStore, id)`
@@ -94,43 +89,27 @@ class AgentMemoryFilesystemConfiguration {
     @Bean
     fun agentMemoryStore(
         properties: EffectiveAgentRuntimeProperties,
-        connectionFactory: ObjectProvider<RedisConnectionFactory>,
-    ): LettuceStore? {
-        val client = (connectionFactory.getIfAvailable() as? LettuceConnectionFactory)?.nativeClient as? RedisClient
-        if (client == null) {
-            logger.warn(
-                "No lettuce redis client available, long-term memory tools (memory_save/memory_search/" +
-                    "memory_get/memory_delete) and the direct memory view/delete REST API stay disabled. " +
-                    "Without cross-replica storage the feature would silently fragment per replica, so it is " +
-                    "kept off entirely instead of falling back to local disk.",
-            )
-            return null
-        }
+        dao: AgentKvStoreDao,
+        objectMapper: ObjectMapper,
+    ): MongoStore = MongoStore(
+        dao = dao,
+        scope = MongoStore.Scope.MEMORY,
+        objectMapper = objectMapper,
+        ttl = properties.retention.memory,
         // refreshTtlOnRead=true：记忆的保留期按"最后一次使用"算，读（memory_search/memory_get、用户直连
         // 查看）和写（memory_save/memory_delete）都会续期，长期在用的偏好不会被静默清掉。
-        return LettuceStore(
-            client,
-            properties.memoryStoreKeyPrefix,
-            ttl = properties.retention.memory,
-            refreshTtlOnRead = true,
-        )
-    }
+        refreshTtlOnRead = true,
+    )
 
     @Bean
-    fun agentMemoryFilesystemSpec(store: ObjectProvider<LettuceStore>): RemoteFilesystemSpec? {
-        val memoryStore = store.getIfAvailable() ?: return null
+    fun agentMemoryFilesystemSpec(store: MongoStore): RemoteFilesystemSpec =
         // IsolationScope.USER（也是 RemoteFilesystemSpec 的默认值）：按 userId 隔离，同一用户跨会话
         // 共享记忆，不同用户之间互不可见；显式写出来是为了让隔离维度的选择在代码里一目了然，不依赖默认值。
-        return RemoteFilesystemSpec(memoryStore).isolationScope(IsolationScope.USER)
-    }
+        RemoteFilesystemSpec(store).isolationScope(IsolationScope.USER)
 
     @Bean
     fun memoryFilesystemAccess(
-        store: ObjectProvider<LettuceStore>,
+        store: MongoStore,
         properties: EffectiveAgentRuntimeProperties,
-    ): MemoryFilesystemAccess = MemoryFilesystemAccess(store.getIfAvailable(), properties.name)
-
-    companion object {
-        private val logger = LoggerFactory.getLogger(AgentMemoryFilesystemConfiguration::class.java)
-    }
+    ): MemoryFilesystemAccess = MemoryFilesystemAccess(store, properties.name)
 }

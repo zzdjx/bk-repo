@@ -27,44 +27,54 @@
 
 package com.tencent.bkrepo.agent.config
 
+import com.mongodb.client.MongoClient
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import io.agentscope.core.state.AgentStateStore
-import io.agentscope.core.state.InMemoryAgentStateStore
-import io.agentscope.extensions.redis.state.RedisAgentStateStore
-import io.lettuce.core.RedisClient
+import io.agentscope.extensions.mongodb.state.MongoAgentStateStore
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.data.redis.connection.RedisConnectionFactory
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
+import org.springframework.data.mongodb.MongoDatabaseFactory
 
 @Configuration(proxyBeanMethods = false)
 class AgentStateConfiguration {
 
     /**
-     * AgentScope 的 [RedisAgentStateStore] 要求传入 Lettuce [RedisClient]，比 common-redis 暴露的
-     * RedisOperation 低一层，因此直接取 Spring 已建好的原生 client：连接参数、连接池以及 common-redis
-     * 为兼容 Redis 4/5 强制的 RESP2 协议都自动沿用，也不会额外开一套连接。
+     * 会话状态落 MongoDB，与 `agent_session` / `agent_run` 等业务集合同库同连接池。
      *
-     * client 由 [LettuceConnectionFactory] 持有并负责关闭，此处不能自行 shutdown。
+     * ## 为什么不是 Redis
+     *
+     * `RedisAgentStateStore` 到 2.0.4 都没有 TTL 入口——它底下的 `RedisClientAdapter` 只暴露
+     * `set(key, value)`，整个 redis extension 里没有 `expire`/`setex`/`ttl` 的调用——所以会话状态写进
+     * Redis 之后永不过期，只能靠外部任务扫 key 去清。而会话状态是需要长期可回溯的持久化数据，被 Redis
+     * 的内存淘汰策略逐出就等于会话凭空失忆，本来也不该和缓存共用一套存储。换 Mongo 之后到期由 TTL 索引
+     * （框架按 [EffectiveAgentRuntimeProperties.stateTtlDays] 建）自动回收。
+     *
+     * ## 没有降级分支
+     *
+     * Mongo 是 bk-repo 全服务的硬依赖（所有 dao 都依赖它），拿不到 client 就不是"降级到内存"能糊过去的
+     * 场景。此前 Redis 版本留了 [io.agentscope.core.state.InMemoryAgentStateStore] 兜底，代价是 Redis
+     * 不可用时服务照常起来、会话却在重启和跨副本之间静默丢失；这里不保留这个行为。
+     *
+     * client 的生命周期归 Spring Boot 的 `MongoAutoConfiguration` 管，store 的 `close()` 不能调，
+     * 否则会把整个服务的 Mongo 连接一起关掉——因此这里不注册为 destroyMethod。
      */
-    @Bean
+    @Bean(destroyMethod = "")
     fun agentStateStore(
         properties: EffectiveAgentRuntimeProperties,
-        connectionFactory: ObjectProvider<RedisConnectionFactory>,
+        mongoClient: MongoClient,
+        mongoDatabaseFactory: MongoDatabaseFactory,
     ): AgentStateStore {
-        val client = (connectionFactory.getIfAvailable() as? LettuceConnectionFactory)?.nativeClient as? RedisClient
-        if (client == null) {
-            logger.warn(
-                "No lettuce redis client available, falling back to in-memory agent state. " +
-                    "Sessions will be lost on restart and cannot be recovered on another replica."
-            )
-            return InMemoryAgentStateStore()
-        }
-        return RedisAgentStateStore.builder()
-            .lettuceClient(client)
-            .keyPrefix(properties.stateKeyPrefix)
+        val databaseName = mongoDatabaseFactory.mongoDatabase.name
+        logger.info(
+            "Agent state store: mongodb db[$databaseName] collection[${properties.stateCollection}] " +
+                "ttlDays[${properties.stateTtlDays}]"
+        )
+        return MongoAgentStateStore.builder()
+            .mongoClient(mongoClient)
+            .databaseName(databaseName)
+            .collectionName(properties.stateCollection)
+            .ttlDays(properties.stateTtlDays)
             .build()
     }
 

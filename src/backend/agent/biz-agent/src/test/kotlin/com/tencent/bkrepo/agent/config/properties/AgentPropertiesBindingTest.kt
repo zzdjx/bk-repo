@@ -152,14 +152,15 @@ class AgentPropertiesBindingTest {
                 features = AgentRuntimeProperties.Features(frontendToolsEnabled = false)
                 activeRunTtl = java.time.Duration.ofMinutes(15)
                 maxMessageLength = 16_000
-                state = AgentRuntimeProperties.State(keyPrefix = "bkrepo:agent:custom:")
+                state = AgentRuntimeProperties.State(collection = "agent_state_custom", ttlDays = 7)
             },
         )
 
         assertFalse(runtime.frontendToolsEnabled)
         assertEquals(java.time.Duration.ofMinutes(15), runtime.activeRunTtl)
         assertEquals(16_000, runtime.maxMessageLength)
-        assertEquals("bkrepo:agent:custom:", runtime.stateKeyPrefix)
+        assertEquals("agent_state_custom", runtime.stateCollection)
+        assertEquals(7, runtime.stateTtlDays)
     }
 
     @Test

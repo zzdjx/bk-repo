@@ -27,13 +27,14 @@
 
 package com.tencent.bkrepo.agent.config
 
+import com.tencent.bkrepo.agent.session.AguiRuntimeContextCarrier
 import com.tencent.bkrepo.agent.session.HarnessAgentResolver
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import io.agentscope.core.agui.adapter.AguiAdapterConfig
-import io.agentscope.core.agui.model.ToolMergeMode
 import io.agentscope.core.agui.processor.AguiRequestProcessor
 import io.agentscope.core.agui.registry.AguiAgentRegistry
+import io.agentscope.core.tool.ToolMergeMode
 import io.agentscope.harness.agent.HarnessAgent
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -57,9 +58,10 @@ class AguiAgentConfiguration {
     /**
      * AG-UI 适配配置。
      *
-     * 错误终态：AgentScope 2.0.1 的 [AguiAgentAdapter.errorEvents] 会在 RUN_ERROR 后无条件追加
-     * RUN_FINISHED（legacy 行为）。#2646 起可通过 [AguiAdapterConfig.Builder.emitRunFinishedAfterError]
-     * 关闭；升级后应显式设为 false。
+     * 错误终态：2.0.1 的 `AguiAgentAdapter.errorEvents` 会在 RUN_ERROR 后无条件追加 RUN_FINISHED
+     * （legacy 行为），逼得 [com.tencent.bkrepo.agent.service.run.AgentRunOutcomeTracker] 必须记住
+     * "已经失败过"才不被后来的 RUN_FINISHED 翻成成功。#2646 起这个追加可以关掉，这里显式关闭，让协议
+     * 层只发一个终态事件。
      */
     @Bean
     fun aguiAdapterConfig(
@@ -77,6 +79,7 @@ class AguiAgentConfiguration {
             .enableReasoning(enableReasoning)
             .emitTokenUsage(false)
             .emitToolCallArgs(true)
+            .emitRunFinishedAfterError(false)
             // 保持默认 false：discovery/transfer-diagnostics 等只读子 Agent 的事件走框架自带的
             // SubagentEventConverter 降级为 Custom(subagent.*)，避免 agent_spawn 同步阻塞期间子 Agent
             // 自身的 RUN_STARTED/TOOL_CALL_START 泄漏到顶层 AG-UI 协议状态机（会被 @ag-ui/client 判定为
@@ -92,5 +95,7 @@ class AguiAgentConfiguration {
     ): AguiRequestProcessor = AguiRequestProcessor.builder()
         .agentResolver(agentResolver)
         .config(config)
+        // 2.0.4（#3279）起 RuntimeContext 由 resolver 提供，约定见 AguiRuntimeContextCarrier
+        .runtimeContextResolver(AguiRuntimeContextCarrier)
         .build()
 }

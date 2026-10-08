@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Tencent is pleased to support the open source community by making BK-CI 蓝鲸持续集成平台 available.
  *
  * Copyright (C) 2026 Tencent.  All rights reserved.
@@ -27,7 +27,7 @@
 package com.tencent.bkrepo.agent.memory
 
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
-import com.tencent.bkrepo.agent.task.LettuceStore
+import com.tencent.bkrepo.agent.task.MongoStore
 import io.agentscope.core.agent.RuntimeContext
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
@@ -61,7 +61,7 @@ import java.util.concurrent.TimeUnit
  *
  * 长期记忆按 userId 隔离（[MemoryFilesystemAccess]），常规读写路径都是"调用方已经知道自己是谁"。清理
  * 任务是唯一需要"这个 agent 一共有哪些用户存过 daily ledger"的场景，[MemoryFilesystemAccess] 没有为此
- * 设计索引，因此这里在 [LettuceStore.scanNamespaces] 里用 Redis `SCAN` 反查——只在这一条路径上使用，
+ * 设计索引，因此这里在 [MongoStore.scanNamespaces] 里用 Redis `SCAN` 反查——只在这一条路径上使用，
  * 且是低频（默认每 [EffectiveAgentRuntimeProperties.memoryMaintenanceInterval] 一次，默认 24 小时）
  * 后台任务，不影响正常读写的性能特征。
  *
@@ -80,7 +80,7 @@ import java.util.concurrent.TimeUnit
 @Component
 class AgentMemoryMaintenanceJob(
     private val memoryFilesystemAccess: MemoryFilesystemAccess,
-    private val lettuceStoreProvider: ObjectProvider<LettuceStore>,
+    private val memoryStore: MongoStore,
     private val properties: EffectiveAgentRuntimeProperties,
 ) {
 
@@ -120,9 +120,8 @@ class AgentMemoryMaintenanceJob(
      */
     private fun runOnce() {
         try {
-            val store = lettuceStoreProvider.getIfAvailable() ?: return
             val cutoff = dailyLedgerCutoffDate(LocalDate.now(), properties.memoryDailyLedgerRetention)
-            val userIds = store.scanNamespaces(namespacePattern(properties.name))
+            val userIds = memoryStore.scanNamespaces(namespacePattern(properties.name))
                 .mapNotNull { namespace -> extractUserId(namespace) }
                 .distinct()
             var deletedFiles = 0
@@ -158,7 +157,7 @@ class AgentMemoryMaintenanceJob(
         /** [namespacePattern] 里 userId 段的位置：`["agents", agentId, "users", uid, "memory"]`。 */
         private const val USER_SEGMENT_INDEX = 3
 
-        /** 匹配所有用户在 `memory` 段下命名空间的通配模式，交给 [LettuceStore.scanNamespaces]。 */
+        /** 匹配所有用户在 `memory` 段下命名空间的通配模式，交给 [MongoStore.scanNamespaces]。 */
         fun namespacePattern(agentId: String): String =
             listOf("agents", agentId, "users", "*", MemoryFilesystemAccess.MEMORY_DIR)
                 .joinToString(NAMESPACE_SEPARATOR)

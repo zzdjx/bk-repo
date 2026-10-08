@@ -64,9 +64,6 @@ const val RUNTIME_CONTEXT_FORCE_ARCHIVE_ASSISTANT = "forceArchiveAssistant"
 /** middleware 内部 per-call 归档状态在 [RuntimeContext] 中的 key */
 const val RUNTIME_CONTEXT_MESSAGE_ARCHIVE_STATE = "messageArchiveState"
 
-/** Permission HITL resume：本轮注入的 [io.agentscope.core.event.ConfirmResult] 列表 */
-const val RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS = "bkrepo.permissionConfirmResults"
-
 const val AGENT_THREAD_ID_PREFIX = "s-"
 
 const val AGENT_MESSAGE_ID_PREFIX = "m-"
@@ -90,9 +87,6 @@ const val AGENT_SESSION_OWNER_KEY_PREFIX = "bkrepo:agent:session-owner:"
 
 /** Redis 中同会话 run 互斥锁 key 前缀 */
 const val AGENT_RUN_LOCK_KEY_PREFIX = "bkrepo:agent:run-lock:"
-
-/** Redis 中 thread pending interrupt 快照 key 前缀 */
-const val AGENT_PENDING_INTERRUPT_KEY_PREFIX = "bkrepo:agent:pending-interrupt:"
 
 /** Redis 中 resume 幂等指纹 key 前缀 */
 const val AGENT_RESUME_IDEMPOTENCY_KEY_PREFIX = "bkrepo:agent:resume-idempotent:"

@@ -10,17 +10,13 @@ package com.tencent.bkrepo.agent.config
 
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.common.redis.RedisOperation
-import io.lettuce.core.RedisClient
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.mockito.kotlin.mock
-import org.mockito.kotlin.whenever
 import org.springframework.beans.factory.NoSuchBeanDefinitionException
 import org.springframework.beans.factory.ObjectProvider
-import org.springframework.data.redis.connection.RedisConnectionFactory
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 
 class AgentRedisRequirementValidatorTest {
 
@@ -28,13 +24,11 @@ class AgentRedisRequirementValidatorTest {
     fun `要求Redis但没有Redis时应启动失败并提示如何处置`() {
         val validator = AgentRedisRequirementValidator(
             propertiesOf(requireRedis = true),
-            EmptyProvider(RedisConnectionFactory::class.java),
             EmptyProvider(RedisOperation::class.java),
         )
 
         val error = assertThrows<IllegalStateException> { validator.validate() }
 
-        assertTrue(error.message!!.contains("lettuceRedisClient"), "should tell which layer is missing")
         assertTrue(error.message!!.contains("redisOperation"), "should tell which layer is missing")
         assertTrue(
             error.message!!.contains(AgentRedisRequirementValidator.REQUIRE_REDIS_PROPERTY),
@@ -42,11 +36,31 @@ class AgentRedisRequirementValidatorTest {
         )
     }
 
+    /**
+     * 退化清单只应包含真正还靠 Redis 的能力。会话状态、挂起中断、长期记忆、后台任务都已迁到 Mongo，
+     * 继续写在这里会让运维以为缺 Redis 会丢持久化数据。
+     */
+    @Test
+    fun `退化清单只列缓存与协调原语`() {
+        val validator = AgentRedisRequirementValidator(
+            propertiesOf(requireRedis = true),
+            EmptyProvider(RedisOperation::class.java),
+        )
+
+        val message = assertThrows<IllegalStateException> { validator.validate() }.message!!
+
+        listOf("sessionOwnership", "activeRun", "resumeIdempotency").forEach {
+            assertTrue(message.contains(it), "degraded capabilities should mention $it, actual=$message")
+        }
+        listOf("agentState", "pendingInterrupt", "longTermMemory", "backgroundTask").forEach {
+            assertTrue(!message.contains(it), "$it 已落 Mongo，不应再算作 Redis 退化项，actual=$message")
+        }
+    }
+
     @Test
     fun `不要求Redis时缺Redis只告警不阻断启动`() {
         val validator = AgentRedisRequirementValidator(
             propertiesOf(requireRedis = false),
-            EmptyProvider(RedisConnectionFactory::class.java),
             EmptyProvider(RedisOperation::class.java),
         )
 
@@ -54,28 +68,9 @@ class AgentRedisRequirementValidatorTest {
     }
 
     @Test
-    fun `只有RedisOperation但拿不到原生Lettuce客户端时仍视为缺依赖`() {
-        // common-redis 的 RedisOperation 在、但连接工厂不是 Lettuce（或还没初始化）：
-        // RedisAgentStateStore 与 LettuceStore 都要原生 client，这种半可用状态必须也拦住。
-        val validator = AgentRedisRequirementValidator(
-            propertiesOf(requireRedis = true),
-            EmptyProvider(RedisConnectionFactory::class.java),
-            FixedProvider(mock<RedisOperation>()),
-        )
-
-        val error = assertThrows<IllegalStateException> { validator.validate() }
-
-        assertTrue(error.message!!.contains("lettuceRedisClient"))
-        assertTrue(!error.message!!.contains("redisOperation"))
-    }
-
-    @Test
     fun `Redis依赖齐备时校验通过`() {
-        val connectionFactory = mock<LettuceConnectionFactory>()
-        whenever(connectionFactory.nativeClient).thenReturn(mock<RedisClient>())
         val validator = AgentRedisRequirementValidator(
             propertiesOf(requireRedis = true),
-            FixedProvider<RedisConnectionFactory>(connectionFactory),
             FixedProvider(mock<RedisOperation>()),
         )
 

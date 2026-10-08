@@ -37,7 +37,9 @@ dependencies {
     api("io.agentscope:agentscope-extensions-model-openai") {
         exclude(group = "com.squareup.okhttp3", module = "okhttp-jvm")
     }
-    api("io.agentscope:agentscope-extensions-redis") {
+    // 持久化状态（agentState / 挂起中断 / 长期记忆 / 后台任务）落 Mongo；Redis 只留缓存与协调原语，
+    // 那三处走 common-redis 的 RedisOperation，不需要 agentscope 的 redis extension
+    api("io.agentscope:agentscope-extensions-mongodb") {
         exclude(group = "com.squareup.okhttp3", module = "okhttp-jvm")
     }
     api("io.agentscope:agentscope-extensions-agui") {

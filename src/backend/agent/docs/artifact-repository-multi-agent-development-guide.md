@@ -777,7 +777,7 @@ AgentScope `AgentEvent` 是内部事件源，必须由官方 `AguiAgentAdapter` 
 
 - `onActing`：工具批次开始时按 `ALLOWED` 落一条初始记录（`recordCalled`），随后依据事件流回填终态——`RequireUserConfirmEvent` → `ASKING`；`ToolResultEndEvent(state=DENIED)` → `RULE_DENIED`；其余 `ToolResultEndEvent` → 按 `ToolResultState` 映射到 `AgentToolResultState`（`RUNNING` 即"已放行、挂起转发给客户端"）。
 - `onAgent`：每次协调者被调用时检查输入消息里的 `ToolResultBlock`（resume 时由框架标准转换器产出），若其 `toolCallId` 命中一行还停在 `RUNNING` 的记录，就用其真实 `state` 补齐终态（`recordClientReportedResult`），这一步补上客户端真实执行结果，是本设计相对"只记服务端能看到的状态"最初方案的增量。
-- 用户在确认卡片点"拒绝"时，`AguiPermissionResumeAdapter` 直接调用 `recordUserDenied` 落 `ASK_DENIED`，不依赖 `onActing` 是否会重放（被拒绝的工具调用不一定会再走一次 acting 阶段）。
+- 用户在确认卡片点"拒绝"时，`AguiResumeDenialAuditor` 直接调用 `recordUserDenied` 落 `ASK_DENIED`，不依赖 `onActing` 是否会重放（被拒绝的工具调用不一定会再走一次 acting 阶段）。
 - 已知的剩余缺口：同一批工具调用里如果同时出现"需要 ASK"和"命中 DENY 规则"两种工具（罕见的并行调用场景），框架会整批直接返回 `RequireUserConfirmEvent` 并跳过 `runToolBatch`，被规则拒绝的那个工具调用不会有 `ToolResultEndEvent`，对应审计行会停在初始态——这是框架事件流本身的限制，代价与收益不成正比，暂不特殊处理。
 - 记录内容做了截断（`argsDigest`/`resultDigest` 上限 2000 字符）和字段级去敏（只存摘要，不存完整工具输出），任何审计写入失败只记日志、不影响主链路。
 
@@ -2022,4 +2022,94 @@ Agent 适合需要语言理解、证据综合和不确定性推理的任务。�
    `AgentRunReconnectRequest`、`LOG_OPERATE_RUN_RECONNECT`）已删除，客户端确认全量走
    `GET /run/stream`；1-4 仍需真机验收后再关闭本节。
 
+## 18. 升级到 AgentScope 2.0.4 与持久化迁移 MongoDB
 
+本节是对前面各阶段的整体修订。§8、§13 的阶段 9/10/12 描述的是落地当时的形态，为保留决策过程不回头改写；
+与现状冲突的部分以本节为准。
+
+### 18.1 为什么升到 2.0.4
+
+2.0.4 修掉了三处我们当时只能在外面打补丁的框架缺口：
+
+- **#2646**：`AguiAgentAdapter` 不再无条件在 `RUN_ERROR` 之后追加 `RUN_FINISHED`。此前这个 legacy 行为逼得
+  `AgentRunOutcomeTracker` 必须记住"已经失败过"才不会被后来的 `RUN_FINISHED` 翻成成功。现在
+  `AguiAgentConfiguration` 显式 `emitRunFinishedAfterError(false)`，协议层只发一个终态事件。
+- **#2495**：`PermissionEngine` 判定 ASK 时框架原生产出 `RunFinished(interrupt)`，字段比我们能合成的更全
+  （带 `approved`/`editedArgs`/`reason` 的 responseSchema、message、expiresAt）。注意形态变了：`reason` 是
+  `tool_call` 而不是 `permission_confirm`，权限确认的性质记在 `metadata["agentscope.interruptKind"]` 上。
+  判断一个 interrupt 是不是权限确认，要认这个标记，不要认 `reason` 的字面值。
+- **#2495 / #2955 / #3100**：`AguiResumeCoordinator` 按 thread 跟踪未决 interrupt，
+  `AguiMessageConverter.toMsgList(input, resumeInterrupts)` 自己把权限确认类 resume 翻成带
+  `agentscope_confirm_results` 的消息。整条权限恢复链路被上游接管。
+
+同时带来三处破坏性变更：`ToolMergeMode` 从 `io.agentscope.core.agui.model` 挪到 `io.agentscope.core.tool`；
+`AguiRequestProcessor.process()` 改收 `AguiRuntimeContextRequest<?>`（#3279，RuntimeContext 由注册的
+`AguiRuntimeContextResolver` 提供）；`AgentResolver.hasMemory` 的入参从 `String?` 换成 `RuntimeContext`。
+
+### 18.2 权限恢复交还框架
+
+删掉 `AguiPermissionResumeAdapter` 与 `PermissionConfirmResumeMiddleware`。它们在 2.0.4 上不只是冗余，
+而是会直接冲突：adapter 会把审批类 resume 条目从 `RunAgentInput` 里摘掉（转成 `ConfirmResult` 走
+RuntimeContext 旁路），而新的 `AguiResumeCoordinator.validate` 要求 resume 原样覆盖 thread 上全部未决
+interrupt，摘空之后整轮以 `AGUI_INTERRUPT_CONTRACT_ERROR` 失败。
+
+现在 resume 原样透传给框架，我们只保留两件框架不管的事：
+
+- `AguiResumeDenialAuditor`：用户点拒绝时直接落 `ASK_DENIED` 审计，不依赖 `onActing` 是否重放；
+- `AguiResumeValidator`：归属校验、`expiresAt` 过期拒绝、重复 resume 幂等。
+
+`AguiResumeCoordinatorHydrator` 不但要留，还比以前更重要——框架的契约校验读的就是它从 Mongo 快照重建的
+那张进程内表，跨副本或重启后不灌回去，合法的 resume 会被判成"未覆盖未决 interrupt"。因此
+`AgentRunOrchestrator.prepareInput` 里 hydrate 必须发生在 `process()` 之前。
+
+`AguiInterruptTracker.buildPermissionAskOutcome`（2.0.1 时合成 interrupt 的补丁）在 2.0.4 上已经走不到，
+但故意保留：真漏了框架那条转换，用户看到的是"点了没反应"而不是报错，失败模式太差，等原生路径在真实会话
+里验证过一轮再删。
+
+### 18.3 持久化全部迁到 MongoDB
+
+此前 Redis 上压了七类数据，其中四类是持久化状态——丢了等于用户数据凭空消失，却和缓存共用一套会被内存淘汰
+策略逐出的存储。`RedisAgentStateStore` 到 2.0.4 甚至都没有 TTL 入口（底下的 `RedisClientAdapter` 只暴露
+`set(key, value)`，整个 redis extension 里没有 `expire`/`setex`/`ttl`），会话状态写进去永不过期、只能靠外部
+任务扫 key 去清。这四类已整体迁走：
+
+| 数据 | 现在落在哪 | 保留期 |
+| --- | --- | --- |
+| 会话状态 `agentState` | `MongoAgentStateStore`，集合 `agent_state` | `agent.runtime.state.ttl-days`，默认 30 天 |
+| 待确认中断 `pendingInterrupt` | `MongoAgentPendingInterruptStore`，集合 `agent_pending_interrupt` | `session-ttl` |
+| 长期记忆 `longTermMemory` | `MongoStore(scope=memory)`，集合 `agent_kv_store` | `retention.memory`，读写都续期 |
+| 后台任务 `backgroundTask` | `MongoStore(scope=task)`，集合 `agent_kv_store` | `retention.task`，只写入续期 |
+
+留在 Redis 上的只剩三项，都是本来就该放 Redis 的：会话归属缓存（真相在 Mongo `agent_session`）、活跃运行
+互斥锁 + 停止标志、resume 幂等指纹。短 TTL、高频读写、丢了最多是多查一次库或多跑一次校验。
+`AgentRedisRequirementValidator` 的退化清单已随之收窄到这三项，并且不再检查原生 Lettuce 客户端——那层只有
+`RedisAgentStateStore` 和旧的 `LettuceStore` 需要，两者都已删除，`agentscope-extensions-redis` 依赖也一并移除。
+
+### 18.4 为什么长期记忆和后台任务要自写 `MongoStore`
+
+2.0.4 自带 `MongoBaseStore`，但用不了：它的文档只有 `key`/`namespace`/`value`/`version` 四个字段，没有任何
+时间戳，建不出 TTL 索引——而这两类数据都是只写不删的（`WorkspaceTaskRepository` 的孤儿清扫只处理僵死任务，
+不清历史），没有保留期就会单调增长。它也没有 `scanNamespaces`，而 `AgentMemoryMaintenanceJob` 要靠它反查
+"所有保存过 daily ledger 的用户"。这两点都不是能在外面补的。
+
+`com.tencent.bkrepo.agent.task.MongoStore` 因此替代了原来的 `LettuceStore`，行为语义保持一致：
+
+- `put`/`putIfVersion` 各落在单条 `findAndModify`/`update` 上，版本自增与值写入在服务端原子完成，
+  `putIfVersion` 可以当跨副本 CAS 原语用（`WorkspaceTaskRepository` 依赖这个语义）。期望版本 0 的
+  "仅当不存在"语义由 `(scope, namespace, key)` 唯一索引裁决并发，抢输的一方撞 `DuplicateKeyException` 按失败处理。
+- 读路径自己比一次 `expiresAt`，不完全依赖 TTL 索引：Mongo 的 TTL 线程约 60 秒才扫一轮，这个窗口里过期文档
+  仍然查得到，不自己判就会把早该消失的记忆当成有效内容返回。
+- `value` 存 JSON 串而不是展开成子文档，避免 map key 里的点号（如 `agentscope.interruptKind`）撞上 Mongo 的
+  字段名限制。同理 `agent_pending_interrupt` 的 `payload` 也是整串存取。
+
+长期记忆与后台任务共用 `agent_kv_store` 一张表、用 `scope` 区分。TTL 存的是绝对时刻而不是"写入后多少秒"，
+所以同一个 TTL 索引能同时服务两种不同的保留期，不需要拆集合。
+
+### 18.5 消失的降级分支
+
+Mongo 是 bk-repo 全服务的硬依赖（所有 dao 都依赖它），不像此前的 Redis 那样可缺省。因此这几条降级路径
+随迁移一起消失，不再是"条件可用"的能力：
+
+- 会话状态不再退回 `InMemoryAgentStateStore`（此前 Redis 不可用时服务照常起来、会话却在重启和跨副本之间静默丢失）；
+- 长期记忆不再因为拿不到存储而整体关闭，变成无条件可用；
+- 后台任务不再退回框架默认的本地文件系统 `TaskRepository`，`max-parallel-delegations` 硬限制也因此总是生效。

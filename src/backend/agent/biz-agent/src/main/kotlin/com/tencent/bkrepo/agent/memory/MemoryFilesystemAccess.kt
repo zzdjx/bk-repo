@@ -27,14 +27,14 @@
 
 package com.tencent.bkrepo.agent.memory
 
-import com.tencent.bkrepo.agent.task.LettuceStore
+import com.tencent.bkrepo.agent.task.MongoStore
 import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.harness.agent.filesystem.remote.RemoteFilesystem
 import io.agentscope.harness.agent.filesystem.remote.store.BaseStore
 import io.agentscope.harness.agent.filesystem.remote.store.NamespaceFactory
 
 /**
- * 直接访问长期记忆底层存储（[BaseStore]，生产环境即 [LettuceStore]），供"用户直连查看/删除记忆" REST 接口
+ * 直接访问长期记忆底层存储（[BaseStore]，生产环境即 [MongoStore]），供"用户直连查看/删除记忆" REST 接口
  * （`AgentMemoryService`）与 `memory_delete` LLM 工具（[com.tencent.bkrepo.agent.tool.memory.MemoryDeleteTool]）
  * 共用。
  *

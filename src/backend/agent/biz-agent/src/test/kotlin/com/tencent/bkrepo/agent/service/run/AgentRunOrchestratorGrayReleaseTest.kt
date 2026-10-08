@@ -12,7 +12,7 @@ import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimePropertiesResolver
 import com.tencent.bkrepo.agent.context.AgentChatContextResolver
-import com.tencent.bkrepo.agent.hitl.AguiPermissionResumeAdapter
+import com.tencent.bkrepo.agent.hitl.AguiResumeDenialAuditor
 import com.tencent.bkrepo.agent.hitl.AguiResumeCoordinatorHydrator
 import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
@@ -128,7 +128,7 @@ class AgentRunOrchestratorGrayReleaseTest {
             inputValidator = inputValidator,
             aguiResumeValidator = mock<AguiResumeValidator>(),
             aguiResumeCoordinatorHydrator = mock<AguiResumeCoordinatorHydrator>(),
-            aguiPermissionResumeAdapter = mock<AguiPermissionResumeAdapter>(),
+            aguiResumeDenialAuditor = mock<AguiResumeDenialAuditor>(),
             frontendToolSanitizer = mock<FrontendToolSanitizer>(),
             agentSessionService = sessionService,
             agentRunRecordService = runRecordService,

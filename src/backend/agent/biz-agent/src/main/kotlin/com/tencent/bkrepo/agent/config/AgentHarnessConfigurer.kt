@@ -30,7 +30,6 @@ package com.tencent.bkrepo.agent.config
 import com.tencent.bkrepo.agent.agent.AgentCatalog
 import com.tencent.bkrepo.agent.agent.client.ClientAgentPrompt
 import com.tencent.bkrepo.agent.audit.ToolAuditMiddleware
-import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
@@ -59,7 +58,6 @@ import java.nio.file.Paths
 class AgentHarnessConfigurer(
     private val agentMemoryConfig: AgentMemoryConfig,
     private val agentCatalog: AgentCatalog,
-    private val permissionConfirmResumeMiddleware: PermissionConfirmResumeMiddleware,
     private val usageTrackingMiddleware: UsageTrackingMiddleware,
     private val toolAuditMiddleware: ToolAuditMiddleware,
     private val delegationBudgetMiddleware: DelegationBudgetMiddleware,
@@ -101,7 +99,6 @@ class AgentHarnessConfigurer(
             // 长期记忆只能通过 memory_save 显式写入。副作用：暂时没有 MemoryMaintenanceMiddleware 提供
             // 的每日文件归档/MEMORY.md 定期整理，阶段 10 窄范围内先不补，后续如需要再补一个独立的定时任务。
             .disableMemoryHooks()
-            .middleware(permissionConfirmResumeMiddleware)
             // 熔断在外、并发限制在内：熔断已经 OPEN 时应直接拒绝，不该再去抢并发名额，也不该让
             // 并发限制的拒绝统计里混进"模型本来就在熔断"的噪音。两者都只挂 onModelCall，与下面
             // usage/audit/delegation 几个只挂 onActing/onReasoning 的 Middleware 互不干扰,

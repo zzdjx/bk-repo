@@ -112,7 +112,7 @@ allprojects {
                 entry("agentscope-core")
                 entry("agentscope-harness")
                 entry("agentscope-extensions-model-openai")
-                entry("agentscope-extensions-redis")
+                entry("agentscope-extensions-mongodb")
                 entry("agentscope-extensions-agui")
                 entry("agentscope-agui-spring-boot-starter")
             }

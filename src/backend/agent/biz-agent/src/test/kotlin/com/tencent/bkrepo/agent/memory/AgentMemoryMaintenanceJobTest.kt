@@ -27,7 +27,7 @@
 package com.tencent.bkrepo.agent.memory
 
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
-import com.tencent.bkrepo.agent.task.LettuceStore
+import com.tencent.bkrepo.agent.task.MongoStore
 import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.harness.agent.filesystem.remote.RemoteFilesystem
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -46,8 +46,8 @@ import java.time.LocalDate
  * 纯函数（[AgentMemoryMaintenanceJob.dailyLedgerCutoffDate]/[AgentMemoryMaintenanceJob.parseDailyLedgerDate]/
  * [AgentMemoryMaintenanceJob.extractUserId]/[AgentMemoryMaintenanceJob.namespacePattern]）直接调用验证；
  * [AgentMemoryMaintenanceJob.cleanupUser] 用 [FakeBaseStore] 驱动的 [MemoryFilesystemAccess] 验证真实
- * 删除行为。反查所有用户这一步（[com.tencent.bkrepo.agent.task.LettuceStore.scanNamespaces]）不在这里
- * 覆盖——它是纯 Redis 交互细节，已经在 `LettuceStoreTest` 里独立验证过，这里只需要保证拿到 userId
+ * 删除行为。反查所有用户这一步（[com.tencent.bkrepo.agent.task.MongoStore.scanNamespaces]）不在这里
+ * 覆盖——它是纯 Redis 交互细节，已经在 `MongoStoreTest` 里独立验证过，这里只需要保证拿到 userId
  * 列表之后的清理逻辑是对的（与 [com.tencent.bkrepo.agent.runtime.ActiveRunLockHeartbeatTest] 同样只测
  * 调度器包装的纯逻辑、不测 `@PostConstruct`/`ScheduledExecutorService` 本身的做法一致）。
  */
@@ -59,7 +59,7 @@ class AgentMemoryMaintenanceJobTest {
     private val memoryFilesystemAccess = MemoryFilesystemAccess(store, agentId)
     private val job = AgentMemoryMaintenanceJob(
         memoryFilesystemAccess,
-        mock<ObjectProvider<LettuceStore>>(),
+        mock<MongoStore>(),
         EffectiveAgentRuntimeProperties.defaults(),
     )
 

@@ -27,20 +27,17 @@
 
 package com.tencent.bkrepo.agent.config
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.dao.AgentKvStoreDao
 import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
-import com.tencent.bkrepo.agent.task.LettuceStore
 import com.tencent.bkrepo.agent.task.LimitedWorkspaceTaskRepository
+import com.tencent.bkrepo.agent.task.MongoStore
 import io.agentscope.harness.agent.filesystem.remote.RemoteFilesystem
 import io.agentscope.harness.agent.subagent.task.TaskRepository
 import io.agentscope.harness.agent.workspace.WorkspaceManager
-import io.lettuce.core.RedisClient
-import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.data.redis.connection.RedisConnectionFactory
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import java.nio.file.Paths
 
 /**
@@ -60,29 +57,23 @@ import java.nio.file.Paths
 class AgentTaskRepositoryConfiguration {
 
     /**
-     * 没有 Lettuce Redis 客户端时返回 `null`：[AgentHarnessConfigurer] 会跳过
-     * `.taskRepository(...)` 装配，`HarnessAgent.build()` 退回框架默认的本地文件系统实现
-     * `WorkspaceTaskRepository(本地 wsManager, ...)`——与升级前行为完全一致，仅限单副本内可查，
-     * 不引入任何新的降级复杂度。
+     * 落 Mongo 之后这里不再有"拿不到存储"的分支：Mongo 是 bk-repo 全服务的硬依赖，不像此前的 Redis
+     * 那样可缺省，所以后台任务跨副本可查也就不再是条件可用的能力。
      */
     @Bean
     fun agentTaskRepository(
         properties: EffectiveAgentRuntimeProperties,
-        connectionFactory: ObjectProvider<RedisConnectionFactory>,
+        dao: AgentKvStoreDao,
+        objectMapper: ObjectMapper,
         delegationConcurrencyGuard: DelegationConcurrencyGuard,
-    ): TaskRepository? {
-        val client = (connectionFactory.getIfAvailable() as? LettuceConnectionFactory)?.nativeClient as? RedisClient
-        if (client == null) {
-            logger.warn(
-                "No lettuce redis client available, background subagent tasks will use the local " +
-                    "filesystem TaskRepository. Task records will be lost on restart and cannot be " +
-                    "queried from another replica, and the max-parallel-delegations hard limit below " +
-                    "will not be enforced for this replica (only the soft reminder middleware applies).",
-            )
-            return null
-        }
-        // 后台任务记录只写不删，靠 key TTL 收口；不开 refreshTtlOnRead——事后翻查一条旧任务不应该延长它的寿命。
-        val store = LettuceStore(client, properties.taskStoreKeyPrefix, ttl = properties.retention.task)
+    ): TaskRepository {
+        // 后台任务记录只写不删，靠 TTL 收口；不开 refreshTtlOnRead——事后翻查一条旧任务不应该延长它的寿命。
+        val store = MongoStore(
+            dao = dao,
+            scope = MongoStore.Scope.TASK,
+            objectMapper = objectMapper,
+            ttl = properties.retention.task,
+        )
         // 固定命名空间（不随 RuntimeContext 变化）：任务记录本身已经按
         // `agents/<parentAgentId>/tasks/<sessionId>.json` 分文件，不需要 store 层再按 user 隔离。
         val filesystem = RemoteFilesystem(store, listOf("agents", properties.name, "tasks"))
@@ -97,9 +88,5 @@ class AgentTaskRepositoryConfiguration {
             properties.topology.coordinator.maxParallelDelegations,
             delegationConcurrencyGuard,
         )
-    }
-
-    companion object {
-        private val logger = LoggerFactory.getLogger(AgentTaskRepositoryConfiguration::class.java)
     }
 }

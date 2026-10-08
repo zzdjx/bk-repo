@@ -28,7 +28,6 @@ import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
 import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_RUN_ID
-import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
 import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
 import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
@@ -92,10 +91,9 @@ class UsageTrackingMiddlewareTest {
             reconnectPollInterval = Duration.ofMillis(500),
             reconnectTimeout = Duration.ofMinutes(10),
             shutdownTimeout = Duration.ofSeconds(15),
-            stateKeyPrefix = "bkrepo:agent:state:",
+            stateCollection = "agent_state",
+            stateTtlDays = 30,
             requireRedis = false,
-            taskStoreKeyPrefix = "bkrepo:agent:task-store:",
-            memoryStoreKeyPrefix = "bkrepo:agent:memory-store:",
             memoryDailyLedgerRetention = Duration.ofDays(90),
             memoryMaintenanceInterval = Duration.ofHours(24),
             frontendToolsEnabled = false,
@@ -133,7 +131,6 @@ class UsageTrackingMiddlewareTest {
         val agentHarnessConfigurer = AgentHarnessConfigurer(
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
-            permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(recordingUsageService),
             toolAuditMiddleware = ToolAuditMiddleware(NoopAgentToolCallRecordService(), ObjectMapper()),
             delegationBudgetMiddleware = DelegationBudgetMiddleware(

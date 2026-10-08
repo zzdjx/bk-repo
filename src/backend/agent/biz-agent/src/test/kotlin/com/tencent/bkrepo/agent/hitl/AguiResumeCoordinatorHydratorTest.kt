@@ -13,6 +13,7 @@ import com.tencent.bkrepo.agent.session.InMemoryAgentResumeIdempotencyStore
 import com.tencent.bkrepo.agent.session.PendingInterruptSession
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
 import io.agentscope.core.agent.Agent
+import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.core.agui.adapter.AguiAdapterConfig
 import io.agentscope.core.agui.model.AguiResume
 import io.agentscope.core.agui.model.RunAgentInput
@@ -130,7 +131,7 @@ class AguiResumeCoordinatorHydratorTest {
         val resolver = object : AgentResolver {
             override fun resolveAgent(agentId: String, threadId: String?): Agent =
                 mock<Agent>()
-            override fun hasMemory(threadId: String?): Boolean = false
+            override fun hasMemory(runtimeContext: RuntimeContext): Boolean = false
         }
         return AguiRequestProcessor.builder()
             .agentResolver(resolver)

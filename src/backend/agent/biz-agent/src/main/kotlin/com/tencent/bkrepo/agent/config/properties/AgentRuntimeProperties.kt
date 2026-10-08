@@ -41,34 +41,35 @@ data class AgentRuntimeProperties(
      */
     var shutdownTimeout: Duration = DEFAULT_SHUTDOWN_TIMEOUT,
     var state: State = State(),
-    var task: Task = Task(),
     var memory: Memory = Memory(),
     var retention: Retention = Retention(),
     var features: Features = Features(),
     var topology: Topology = Topology(),
     var gray: Gray = Gray(),
 ) {
+    /**
+     * 会话状态（[io.agentscope.core.state.AgentStateStore]：协调者与各子 Agent 的 memory、
+     * 工具调用轨迹、中断现场）存储配置。
+     *
+     * 落 MongoDB，与 `agent_session` / `agent_run` 等业务集合同库。此前落 Redis，但
+     * `RedisAgentStateStore` 到 2.0.4 仍然不支持 TTL（`RedisClientAdapter` 只有 `set(k, v)`，
+     * 没有 `expire`/`setex`），写进去的会话状态永不过期，只会无限涨；而这类数据本来就是需要长期
+     * 可回溯、不能随 Redis 逐出的持久化数据，放 Redis 本身就是定位错误。
+     */
     data class State(
-        var keyPrefix: String = DEFAULT_KEY_PREFIX,
+        var collection: String = DEFAULT_COLLECTION,
+        /**
+         * 会话状态保留天数，到期由 Mongo TTL 索引自动清理。
+         *
+         * 用"天"而不是 [Duration] 是因为框架的 `MongoAgentStateStore.Builder.ttlDays(Integer)` 只接受
+         * 整数天，暴露更细的粒度只会让配置看起来比实际更可调。
+         */
+        var ttlDays: Int = DEFAULT_TTL_DAYS,
         var requireRedis: Boolean = DEFAULT_REQUIRE_REDIS,
     ) {
         companion object {
-            const val DEFAULT_KEY_PREFIX = "bkrepo:agent:state:"
-        }
-    }
-
-    /**
-     * 分布式后台任务（[io.agentscope.harness.agent.subagent.task.TaskRepository]）存储配置。
-     *
-     * 只影响 `agent_spawn` 同步等待超时后被框架 promote 出的后台任务记录的持久化位置：
-     * 有 Lettuce Redis 客户端时落 Redis（跨副本可查），否则退回框架默认的本地文件系统实现
-     * （与升级前行为一致，仅限单副本内可查）。
-     */
-    data class Task(
-        var keyPrefix: String = DEFAULT_KEY_PREFIX,
-    ) {
-        companion object {
-            const val DEFAULT_KEY_PREFIX = "bkrepo:agent:task-store:"
+            const val DEFAULT_COLLECTION = "agent_state"
+            const val DEFAULT_TTL_DAYS = 30
         }
     }
 
@@ -76,12 +77,10 @@ data class AgentRuntimeProperties(
      * 长期记忆（`memory_save`/`memory_search`/`memory_get`，见
      * [com.tencent.bkrepo.agent.config.AgentMemoryFilesystemConfiguration]）存储配置。
      *
-     * 只影响 `MEMORY.md` 与 `memory` 目录下 `*.md` 文件的持久化位置：有 Lettuce Redis 客户端时落 Redis
-     * （跨副本可查、按用户隔离），否则整个长期记忆能力保持关闭——不退回单副本本地文件系统，
-     * 因为长期记忆需要跨会话/跨副本稳定可见，局部可用比完全不可用更容易造成"记忆丢失"的用户困惑。
+     * 只影响 `MEMORY.md` 与 `memory` 目录下 `*.md` 文件，落 Mongo 集合 `agent_kv_store`
+     * （见 [com.tencent.bkrepo.agent.task.MongoStore]，按用户隔离），保留期见 [Retention.memory]。
      */
     data class Memory(
-        var keyPrefix: String = DEFAULT_KEY_PREFIX,
         /**
          * 长期记忆定期整理任务（[com.tencent.bkrepo.agent.memory.AgentMemoryMaintenanceJob]）的执行间隔与
          * daily ledger（`memory/YYYY-MM-DD.md`）保留期。
@@ -452,10 +451,9 @@ data class EffectiveAgentRuntimeProperties(
     val reconnectPollInterval: Duration,
     val reconnectTimeout: Duration,
     val shutdownTimeout: Duration,
-    val stateKeyPrefix: String,
+    val stateCollection: String,
+    val stateTtlDays: Int,
     val requireRedis: Boolean,
-    val taskStoreKeyPrefix: String,
-    val memoryStoreKeyPrefix: String,
     val memoryDailyLedgerRetention: Duration,
     val memoryMaintenanceInterval: Duration,
     val frontendToolsEnabled: Boolean,
@@ -485,10 +483,9 @@ object AgentRuntimePropertiesResolver {
             reconnectPollInterval = runtime.reconnectPollInterval,
             reconnectTimeout = runtime.reconnectTimeout,
             shutdownTimeout = runtime.shutdownTimeout,
-            stateKeyPrefix = runtime.state.keyPrefix,
+            stateCollection = runtime.state.collection,
+            stateTtlDays = runtime.state.ttlDays,
             requireRedis = runtime.state.requireRedis,
-            taskStoreKeyPrefix = runtime.task.keyPrefix,
-            memoryStoreKeyPrefix = runtime.memory.keyPrefix,
             memoryDailyLedgerRetention = runtime.memory.dailyLedgerRetention,
             memoryMaintenanceInterval = runtime.memory.maintenanceInterval,
             frontendToolsEnabled = runtime.features.frontendToolsEnabled,

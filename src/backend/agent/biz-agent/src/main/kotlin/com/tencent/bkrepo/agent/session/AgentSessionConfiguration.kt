@@ -29,6 +29,7 @@ package com.tencent.bkrepo.agent.session
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.dao.AgentPendingInterruptDao
 import com.tencent.bkrepo.common.redis.RedisOperation
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
@@ -55,23 +56,17 @@ class AgentSessionConfiguration {
         )
     }
 
+    /** 落 Mongo 的理由见 [MongoAgentPendingInterruptStore]：这是持久化状态，不是缓存。 */
     @Bean
     fun agentPendingInterruptStore(
         properties: EffectiveAgentRuntimeProperties,
-        redisOperation: ObjectProvider<RedisOperation>,
+        dao: AgentPendingInterruptDao,
         objectMapper: ObjectMapper,
-    ): AgentPendingInterruptStore {
-        val redis = redisOperation.getIfAvailable()
-        if (redis == null) {
-            logger.warn("No RedisOperation available, falling back to in-memory pending interrupt store")
-            return InMemoryAgentPendingInterruptStore()
-        }
-        return RedisAgentPendingInterruptStore(
-            redisOperation = redis,
-            objectMapper = objectMapper,
-            ttlSeconds = properties.sessionTtl.seconds,
-        )
-    }
+    ): AgentPendingInterruptStore = MongoAgentPendingInterruptStore(
+        dao = dao,
+        objectMapper = objectMapper,
+        ttl = properties.sessionTtl,
+    )
 
     @Bean
     fun agentResumeIdempotencyStore(

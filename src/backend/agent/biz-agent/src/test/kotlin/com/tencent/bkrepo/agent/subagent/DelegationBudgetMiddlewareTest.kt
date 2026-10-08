@@ -89,8 +89,6 @@ class DelegationBudgetMiddlewareTest {
             spec: TaskRunSpec,
         ): BackgroundTask = throw UnsupportedOperationException()
 
-        override fun removeTask(rc: RuntimeContext, sessionId: String, taskId: String) {}
-        override fun clear() {}
         override fun listTasks(rc: RuntimeContext, sessionId: String, filter: TaskStatus?) = tasks
         override fun cancelTask(rc: RuntimeContext, sessionId: String, taskId: String) = false
     }

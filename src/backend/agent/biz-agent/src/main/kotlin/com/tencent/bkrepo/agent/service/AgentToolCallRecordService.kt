@@ -54,7 +54,7 @@ interface AgentToolCallRecordService {
     /** 命中 DENY 规则，未询问用户即被拒绝。 */
     fun recordRuleDenied(runId: String, toolCallId: String)
 
-    /** 用户在确认卡片上点了拒绝（[com.tencent.bkrepo.agent.hitl.AguiPermissionResumeAdapter]）。 */
+    /** 用户在确认卡片上点了拒绝（[com.tencent.bkrepo.agent.hitl.AguiResumeDenialAuditor]）。 */
     fun recordUserDenied(originRunId: String, toolCallId: String)
 
     /** 工具在服务端真正执行完成（域工具/编排工具的终态，或本地工具挂起转发客户端的 RUNNING 态）。 */

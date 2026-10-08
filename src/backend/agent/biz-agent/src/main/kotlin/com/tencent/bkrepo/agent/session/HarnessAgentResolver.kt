@@ -9,6 +9,7 @@
 package com.tencent.bkrepo.agent.session
 
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.core.agui.AguiException
 import io.agentscope.core.agui.processor.AgentResolver
 import io.agentscope.core.agui.registry.AguiAgentRegistry
@@ -30,7 +31,7 @@ class HarnessAgentResolver(
     /**
      * 启用 server-side memory：历史由 AgentStateStore 恢复，请求侧只保留最新 USER 消息或 resume[]。
      */
-    override fun hasMemory(threadId: String?): Boolean = !threadId.isNullOrBlank()
+    override fun hasMemory(runtimeContext: RuntimeContext): Boolean = !runtimeContext.sessionId.isNullOrBlank()
 
     fun defaultAgentId(): String = properties.name
 }

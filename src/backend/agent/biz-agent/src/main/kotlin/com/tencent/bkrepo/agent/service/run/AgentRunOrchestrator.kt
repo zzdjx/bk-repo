@@ -10,10 +10,9 @@ package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
-import com.tencent.bkrepo.agent.hitl.AguiPermissionResumeAdapter
+import com.tencent.bkrepo.agent.hitl.AguiResumeDenialAuditor
 import com.tencent.bkrepo.agent.hitl.AguiResumeCoordinatorHydrator
 import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
-import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS
 import com.tencent.bkrepo.agent.tool.frontend.FrontendToolSanitizer
 import com.tencent.bkrepo.agent.context.AgentChatContext
 import com.tencent.bkrepo.agent.context.AgentChatContextResolver
@@ -29,6 +28,7 @@ import com.tencent.bkrepo.agent.runtime.ActiveRunManager
 import com.tencent.bkrepo.agent.runtime.ActiveRunScope
 import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
 import com.tencent.bkrepo.agent.session.AgentSessionStore
+import com.tencent.bkrepo.agent.session.AguiRuntimeContextCarrier
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.constant.HttpStatus
 import com.tencent.bkrepo.common.api.constant.StringPool
@@ -60,7 +60,7 @@ class AgentRunOrchestrator(
     private val inputValidator: RunAgentInputValidator,
     private val aguiResumeValidator: AguiResumeValidator,
     private val aguiResumeCoordinatorHydrator: AguiResumeCoordinatorHydrator,
-    private val aguiPermissionResumeAdapter: AguiPermissionResumeAdapter,
+    private val aguiResumeDenialAuditor: AguiResumeDenialAuditor,
     private val frontendToolSanitizer: FrontendToolSanitizer,
     private val agentSessionService: AgentSessionService,
     private val agentRunRecordService: AgentRunRecordService,
@@ -142,24 +142,19 @@ class AgentRunOrchestrator(
         val input: RunAgentInput,
         val threadId: String,
         val runId: String,
-        val permissionConfirmResults: List<io.agentscope.core.event.ConfirmResult>,
     )
 
     private fun prepareInput(userId: String, projectId: String, input: RunAgentInput): PreparedInput {
         inputValidator.validate(input)
         aguiResumeValidator.validateAndPrepare(userId, projectId, input)
         val sanitized = frontendToolSanitizer.sanitize(input)
-        val adapted = aguiPermissionResumeAdapter.adapt(sanitized)
-        // 必须在 adapter 之后：审批类 resume 会被剥掉改走 ConfirmResult，不能灌进框架协调器。
-        aguiResumeCoordinatorHydrator.hydrateIfNeeded(aguiRequestProcessor, adapted.input)
+        aguiResumeDenialAuditor.recordDenials(sanitized)
+        // resume[] 原样交给框架：2.0.4 的 AguiResumeCoordinator 要求 resume 覆盖 thread 上全部未决
+        // interrupt，而它那张表是进程内的，跨副本 / 重启后为空，必须先从 Redis 快照灌回去。
+        aguiResumeCoordinatorHydrator.hydrateIfNeeded(aguiRequestProcessor, sanitized)
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
-        agentSessionService.assertActiveSession(userId, projectId, adapted.input.threadId)
-        return PreparedInput(
-            adapted.input,
-            adapted.input.threadId,
-            adapted.input.runId,
-            adapted.confirmResults,
-        )
+        agentSessionService.assertActiveSession(userId, projectId, sanitized.threadId)
+        return PreparedInput(sanitized, sanitized.threadId, sanitized.runId)
     }
 
     private fun resolveExistingRun(input: RunAgentInput): SseEmitter? {
@@ -239,15 +234,10 @@ class AgentRunOrchestrator(
             chatContext.projectId,
         )
         val interruptState = AguiInterruptTracker.State()
-        var ctx = chatContext.toRuntimeContext()
-        if (prepared.permissionConfirmResults.isNotEmpty()) {
-            ctx = RuntimeContext.builder(ctx)
-                .put(RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS, prepared.permissionConfirmResults)
-                .build()
-        }
-        val runtimeContext = ctx
-        val eventFlux: Flux<AguiEvent> = aguiRequestProcessor.process(prepared.input, null, null, runtimeContext)
-            .events()
+        val runtimeContext = chatContext.toRuntimeContext()
+        // 2.0.4（#3279）：RuntimeContext 不再作为 process() 的入参，改为搭在请求上由 resolver 取回
+        val processRequest = AguiRuntimeContextCarrier.wrap(prepared.input, runtimeContext)
+        val eventFlux: Flux<AguiEvent> = aguiRequestProcessor.process(processRequest).events()
         val emitter = SseEmitter(properties.sseTimeout.toMillis())
         return AgentRunScope(
             userId = chatContext.userId,

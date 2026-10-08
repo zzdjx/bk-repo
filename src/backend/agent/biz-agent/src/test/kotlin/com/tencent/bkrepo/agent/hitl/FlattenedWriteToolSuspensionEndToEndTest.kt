@@ -27,12 +27,12 @@ import com.tencent.bkrepo.agent.config.properties.AgentMemoryPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimePropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
-import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS
 import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_RUN_ID
 import com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.pojo.AgentToolResultState
 import com.tencent.bkrepo.agent.service.run.AgentRunOutcomeTracker
+import com.tencent.bkrepo.agent.session.AguiRuntimeContextCarrier
 import com.tencent.bkrepo.agent.session.HarnessAgentResolver
 import com.tencent.bkrepo.agent.session.InMemoryAgentPendingInterruptStore
 import com.tencent.bkrepo.agent.session.InMemoryAgentResumeIdempotencyStore
@@ -56,7 +56,7 @@ import io.agentscope.core.agui.event.AguiEvent
 import io.agentscope.core.agui.model.AguiMessage
 import io.agentscope.core.agui.model.AguiResume
 import io.agentscope.core.agui.model.RunAgentInput
-import io.agentscope.core.agui.model.ToolMergeMode
+import io.agentscope.core.tool.ToolMergeMode
 import io.agentscope.core.agui.processor.AguiRequestProcessor
 import io.agentscope.core.agui.registry.AguiAgentRegistry
 import io.agentscope.core.event.ConfirmResult
@@ -92,9 +92,9 @@ import java.util.concurrent.atomic.AtomicReference
  *    [com.tencent.bkrepo.agent.service.run.AgentRunEventPipeline.dispatchEvent] 完全一致的调用顺序
  *    （[AguiInterruptTracker] + [AgentRunOutcomeTracker]）重放，把 pending interrupt 真正持久化到
  *    [AgentInterruptStateRepository]。
- * 2. 第二轮：构造真实的 resume `RunAgentInput`（`approved=true`），经真实的
- *    [AguiPermissionResumeAdapter] 从仓库读回 confirmResults，注入
- *    `RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS`（与生产环境
+ * 2. 第二轮：构造真实的 resume `RunAgentInput`（`approved=true`）原样交给框架——2.0.4 起
+ *    `AguiResumeCoordinator` 按 thread 跟踪未决 interrupt、`AguiMessageConverter` 自己把权限确认类
+ *    resume 翻成带 `agentscope_confirm_results` 的消息（与生产环境
  *    [com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator.buildRunScope] 完全相同的路径），
  *    再次调用同一个 [AguiRequestProcessor] + 同一个协调者 `HarnessAgent`（同一个 threadId/sessionId，
  *    状态由 [InMemoryAgentStateStore] 按 (userId, sessionId) 直接找回，不需要任何确定性哈希/label 计算）。
@@ -146,6 +146,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             val processor = AguiRequestProcessor.builder()
                 .agentResolver(agentResolver)
                 .config(adapterConfig)
+                .runtimeContextResolver(AguiRuntimeContextCarrier)
                 .build()
 
             // ---------- 第一轮：协调者直接调用 set_download_path，原生 ASK 挂起 ----------
@@ -170,8 +171,11 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             assertTrue(round1Interrupts.any { it.metadata()?.get("toolName") == "set_download_path" }) {
                 "第一轮挂起的 interrupt 应关联到 set_download_path，实际 interrupts=$round1Interrupts"
             }
-            assertTrue(round1Interrupts.any { it.reason() == "permission_confirm" }) {
-                "第一轮应是权限确认形态（reason=permission_confirm），实际 interrupts=$round1Interrupts"
+            // 判据是框架自己打的 interruptKind 标记，不是 reason 的字面值：2.0.1 下这个 interrupt 由
+            // AguiInterruptTracker 合成，reason 就是 permission_confirm；2.0.4（#2495）改成框架原生产出，
+            // reason 变回 tool_call，权限确认的性质移到 metadata 里。两版都带这个标记，断它才稳。
+            assertTrue(round1Interrupts.any { it.metadata()?.get("agentscope.interruptKind") == "permission_confirm" }) {
+                "第一轮应是权限确认形态，实际 interrupts=$round1Interrupts"
             }
             assertTrue(round1Interrupts.all { !it.message().isNullOrBlank() }) {
                 "@ag-ui/client 的 Zod schema 要求 interrupt.message 为非空字符串（回归：拍平方案上线后" +
@@ -211,18 +215,13 @@ class FlattenedWriteToolSuspensionEndToEndTest {
                     ),
                 )
                 .build()
-            val adapted = AguiPermissionResumeAdapter(interruptStateRepository, toolCallRecordService).adapt(resumeInput)
-            assertTrue(adapted.confirmResults.isNotEmpty()) {
-                "拍平后写工具的 ASKING 应始终挂在协调者自己身上，Adapter 应解析出非空的 confirmResults，" +
-                    "实际=${adapted.confirmResults}"
-            }
+            AguiResumeDenialAuditor(interruptStateRepository, toolCallRecordService).recordDenials(resumeInput)
 
             val round2Events = runRoundAndCollectEvents(
                 processor = processor,
                 runId = round2RunId,
-                messages = adapted.input.messages,
-                resume = adapted.input.resume,
-                confirmResults = adapted.confirmResults,
+                messages = resumeInput.messages,
+                resume = resumeInput.resume,
             )
             val round2Replay = replayThroughRealPipelineAndPersist(round2Events, round2RunId)
             val round2RunFinished = round2Replay.dispatched.filterIsInstance<AguiEvent.RunFinished>().singleOrNull()
@@ -287,6 +286,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             val processor = AguiRequestProcessor.builder()
                 .agentResolver(agentResolver)
                 .config(adapterConfig)
+                .runtimeContextResolver(AguiRuntimeContextCarrier)
                 .build()
 
             val round1Events = runRoundAndCollectEvents(
@@ -311,25 +311,17 @@ class FlattenedWriteToolSuspensionEndToEndTest {
                     ),
                 )
                 .build()
-            val adapted = AguiPermissionResumeAdapter(interruptStateRepository, toolCallRecordService).adapt(resumeInput)
-            assertTrue(adapted.confirmResults.isNotEmpty()) {
-                "即便是拒绝，Adapter 也应解析出对应的 confirmResults（confirmed=false），实际=${adapted.confirmResults}"
-            }
-            assertTrue(adapted.confirmResults.none { it.isConfirmed }) {
-                "本轮应是拒绝场景，confirmResults 里不应有 confirmed=true 的项，实际=${adapted.confirmResults}"
-            }
-
+            AguiResumeDenialAuditor(interruptStateRepository, toolCallRecordService).recordDenials(resumeInput)
             assertTrue(toolCallRecordService.userDeniedEvents.any { it.first == round1RunId }) {
-                "用户拒绝时 AguiPermissionResumeAdapter 应直接把该行标记为用户拒绝，不依赖 onActing 是否重放，" +
+                "用户拒绝时 AguiResumeDenialAuditor 应直接把该行标记为用户拒绝，不依赖 onActing 是否重放，" +
                     "实际=${toolCallRecordService.userDeniedEvents}"
             }
 
             runRoundAndCollectEvents(
                 processor = processor,
                 runId = round2RunId,
-                messages = adapted.input.messages,
-                resume = adapted.input.resume,
-                confirmResults = adapted.confirmResults,
+                messages = resumeInput.messages,
+                resume = resumeInput.resume,
             )
 
             assertTrue(toolCallRecordService.executedEvents.none { it.resultState == AgentToolResultState.RUNNING }) {
@@ -375,7 +367,6 @@ class FlattenedWriteToolSuspensionEndToEndTest {
         val agentHarnessConfigurer = AgentHarnessConfigurer(
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
-            permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentRunRecordService()),
             toolAuditMiddleware = ToolAuditMiddleware(toolCallRecordService, ObjectMapper()),
             delegationBudgetMiddleware = DelegationBudgetMiddleware(
@@ -410,7 +401,6 @@ class FlattenedWriteToolSuspensionEndToEndTest {
         runId: String,
         messages: List<AguiMessage>,
         resume: List<AguiResume>,
-        confirmResults: List<ConfirmResult> = emptyList(),
     ): List<AguiEvent> {
         val input = RunAgentInput.builder()
             .threadId(threadId)
@@ -418,17 +408,14 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             .messages(messages)
             .resume(resume)
             .build()
-        var runtimeContext = RuntimeContext.builder()
+        // resume 直接随 input 走：2.0.4 起 AguiMessageConverter 自己把权限确认类 resume 翻成
+        // ConfirmResult 消息，不再需要我们从 RuntimeContext 旁路喂进去。
+        val runtimeContext = RuntimeContext.builder()
             .userId(userId)
             .sessionId(threadId)
             .put(RUNTIME_CONTEXT_RUN_ID, runId)
             .build()
-        if (confirmResults.isNotEmpty()) {
-            runtimeContext = RuntimeContext.builder(runtimeContext)
-                .put(RUNTIME_CONTEXT_PERMISSION_CONFIRM_RESULTS, confirmResults)
-                .build()
-        }
-        val result = processor.process(input, null, null, runtimeContext)
+        val result = processor.process(AguiRuntimeContextCarrier.wrap(input, runtimeContext))
         return result.events()
             .collectList()
             .block(Duration.ofSeconds(60))
@@ -438,7 +425,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
     /**
      * 完全复刻 [com.tencent.bkrepo.agent.service.run.AgentRunEventPipeline.dispatchEvent] 的调用顺序
      * （含 [AgentRunOutcomeTracker]），因此 pending interrupt 会像生产环境一样真正落到
-     * [interruptStateRepository]，供后续 resume 通过真实的 [AguiPermissionResumeAdapter] 读取，
+     * [interruptStateRepository]，供后续 resume 通过真实的 [AguiResumeDenialAuditor] 读取，
      * 而不是在测试里手工构造快照。拍平后不再需要 `SubagentHitlPromoter` 促升——协调者的 ASK/
      * TOOL_SUSPENDED 已经是顶层原生 `RunFinished(interrupt)`，`AguiInterruptTracker` 直接就能识别。
      */
@@ -477,6 +464,8 @@ class FlattenedWriteToolSuspensionEndToEndTest {
         is AguiEvent.Custom -> "Custom(name=${name()}, value=${value()})"
         is AguiEvent.Raw -> "Raw(source=${source()}, event=${event()})"
         is AguiEvent.RunFinished -> "RunFinished(outcome=${outcome()})"
+        // 带上 message/code：RunError 不展开的话，断言失败只会显示一个光秃秃的 "RunError"
+        is AguiEvent.RunError -> "RunError(code=${code()}, message=${message()})"
         else -> this::class.simpleName ?: this.toString()
     }
 

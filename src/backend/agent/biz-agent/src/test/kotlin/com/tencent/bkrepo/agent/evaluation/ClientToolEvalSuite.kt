@@ -45,7 +45,6 @@ import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimePropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
-import com.tencent.bkrepo.agent.hitl.PermissionConfirmResumeMiddleware
 import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
 import com.tencent.bkrepo.agent.resilience.ModelCircuitBreakerMiddleware
 import com.tencent.bkrepo.agent.resilience.ModelConcurrencyLimitMiddleware
@@ -203,7 +202,6 @@ class ClientToolEvalSuite {
         val agentHarnessConfigurer = AgentHarnessConfigurer(
             agentMemoryConfig = AgentMemoryConfig(),
             agentCatalog = agentCatalog,
-            permissionConfirmResumeMiddleware = PermissionConfirmResumeMiddleware(),
             usageTrackingMiddleware = UsageTrackingMiddleware(NoopAgentRunRecordService()),
             toolAuditMiddleware = ToolAuditMiddleware(recordingService, ObjectMapper()),
             delegationBudgetMiddleware = DelegationBudgetMiddleware(
