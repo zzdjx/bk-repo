@@ -96,17 +96,13 @@ class AgentRunEventPipeline(
         )
         lifecycleManager.finish(
             scope,
-            AgentRunLifecycleManager.FinishOptions(
-                abortAgent = true,
-                runStatus = AgentRunStatus.CANCELLED,
-                cancelReason = AgentRunAbortReason.USER_STOP.value,
-            ),
+            AgentRunLifecycleManager.FinishReason.Cancelled(AgentRunAbortReason.USER_STOP),
         )
         return true
     }
 
     private fun handleError(scope: AgentRunScope, error: Throwable) {
         logger.error("agent ag-ui run failed, user[{}] session[{}]", scope.userId, scope.threadId, error)
-        lifecycleManager.finishWithError(scope, error)
+        lifecycleManager.finish(scope, AgentRunLifecycleManager.FinishReason.Failed(error))
     }
 }

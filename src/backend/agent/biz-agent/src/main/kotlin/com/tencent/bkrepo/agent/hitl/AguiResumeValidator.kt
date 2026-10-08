@@ -100,8 +100,9 @@ class AguiResumeValidator(
     /**
      * `snapshot.expiresAt` 在持久化时由 [AguiInterruptNormalizer.normalizeSnapshot] 按
      * `activeRunTtl` 兜底填充，是客户端确认卡片上展示的"多久后失效"。此前这里从未校验，真正拦住过老
-     * resume 的只是 Redis 存储本身的 TTL（`sessionTtl`，默认 30 天，远长于 `activeRunTtl` 的 11 分钟）
-     * ——也就是说过期的确认卡片在这个窗口内其实一直能被 resume 执行，与 UI 上的过期时间不符。
+     * resume 的只是 `agent_pending_interrupt` 文档本身的 TTL（`sessionTtl`，默认 30 天，远长于
+     * `activeRunTtl` 的 11 分钟）——也就是说过期的确认卡片在这个窗口内其实一直能被 resume 执行，
+     * 与 UI 上的过期时间不符。
      * 这里显式按 `expiresAt` 拒绝迟到的 resume，让服务端行为与客户端展示的过期时间一致。
      */
     private fun assertNotExpired(interruptId: String, snapshot: PendingInterruptSnapshot) {

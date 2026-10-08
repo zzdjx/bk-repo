@@ -17,15 +17,16 @@ import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentMap
 
 /**
- * 把 Redis 里的 pending interrupt 灌回 AgentScope 进程内 [io.agentscope.core.agui.processor.AguiResumeCoordinator]。
+ * 把持久化的 pending interrupt 灌回 AgentScope 进程内
+ * [io.agentscope.core.agui.processor.AguiResumeCoordinator]。
  *
- * AgentScope 2.0.1 的协调器是 `AguiRequestProcessor` 里一份 ConcurrentHashMap，只认本 JVM
- * 上一轮 `RunFinished(interrupt)` 写进去的记录。我们自己的 pending 快照已经进 Redis
- *（跨副本 / 滚动发布 / 进程重启都还在），但框架这份内存表不会跟着恢复。
+ * 框架的协调器是 `AguiRequestProcessor` 里一份 ConcurrentHashMap，只认本 JVM
+ * 上一轮 `RunFinished(interrupt)` 写进去的记录。我们自己的 pending 快照落在 Mongo
+ * （`agent_pending_interrupt`，跨副本 / 滚动发布 / 进程重启都还在），但框架这份内存表不会跟着恢复。
  *
- * 于是会出现：我们的 [AguiResumeValidator] 放行（Redis 对得上），紧接着框架报
+ * 于是会出现：我们的 [AguiResumeValidator] 放行（Mongo 里对得上），紧接着框架报
  * `RunAgentInput.resume does not match any open interrupt`——这正是客户端「查询任务列表」后
- * 立刻看到的那句错误。本地工具 `list_download_tasks` 第一轮挂起写 Redis，第二轮 resume
+ * 立刻看到的那句错误。本地工具 `list_download_tasks` 第一轮挂起落库，第二轮 resume
  * 打到另一副本或空表 JVM 时必现。
  *
  * 框架没有公开 restore API，这里只在内存表为空时按快照补进去，已有本轮记录则不动。

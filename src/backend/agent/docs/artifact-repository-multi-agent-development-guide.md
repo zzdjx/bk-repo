@@ -2113,3 +2113,90 @@ Mongo 是 bk-repo 全服务的硬依赖（所有 dao 都依赖它），不像此
 - 会话状态不再退回 `InMemoryAgentStateStore`（此前 Redis 不可用时服务照常起来、会话却在重启和跨副本之间静默丢失）；
 - 长期记忆不再因为拿不到存储而整体关闭，变成无条件可用；
 - 后台任务不再退回框架默认的本地文件系统 `TaskRepository`，`max-parallel-delegations` 硬限制也因此总是生效。
+
+## 19. 模块梳理与重构（2026-10）
+
+§18 的升级与迁移完成之后对整个 agent 模块做了一次通读，按"读代码时会不会被误导"排序处理。本节记录
+改了什么、以及为什么这么改——与前面各阶段叙述冲突处，以本节为准。
+
+### 19.1 注释债：迁 Mongo 之后失效的叙述
+
+迁移本身只改了实现，没有改围绕它写的那些设计说明，结果留下十余处会把读者引向错误结论的注释。这类
+问题比死代码危险：死代码顶多浪费时间，错的注释会让人基于错误前提去改代码。已经逐处订正：
+
+- `MemoryFilesystemAccess` 原本写"长期记忆持久化在 Redis"、"没有 Lettuce 客户端时整体关闭"；
+- `AgentMemoryMaintenanceJob` 原本写反查用户用的是 Redis `SCAN`，实际是 `MongoStore.scanNamespaces`
+  （对 `namespace` 列做 distinct 再客户端 glob 过滤）；
+- `AguiResumeCoordinatorHydrator` 整段在讲"把 Redis 里的 pending interrupt 灌回框架"，实际数据源是
+  `agent_pending_interrupt` 集合；
+- `AgentRuntimeProperties.Retention` 的文档把 `task`/`memory` 归在"Redis 侧（靠 key TTL）"，实际七项
+  全部靠 Mongo 的 `expiresAt` TTL 索引，区别只在"按业务记录逐条算"还是"由 store 统一持有"。
+
+### 19.2 `require-redis` 改名
+
+`agent.runtime.state.require-redis` 搬到 `agent.runtime.features.require-redis`。这个开关早就跟会话
+状态没关系了——状态、长期记忆、后台任务、挂起的 interrupt 全在 Mongo，而 Mongo 是硬依赖，不存在退化。
+它真正 gate 的是三项协调能力：会话归属缓存、活跃 run 注册表、resume 幂等标记。挂在 `state` 下面会让
+人以为"不开这个开关会话状态就会丢"，恰好是反的。放到 `features` 与 `read-only-mode` 并列，语义才一致：
+两者都是部署期的硬化开关，默认关闭以便本地开发。旧键不保留兼容。
+
+### 19.3 删掉的死代码
+
+- `agent.runtime.topology.agents.client.*`：client 的本地工具早已拍平进协调者，不再是子代理。
+  `AgentCatalog.bindingFor` 只认 discovery / transferDiagnostics / governance 三个 agentId，这组配置
+  绑定了、复制进 `Effective` 快照了，从来没人读。
+- `AgentBinding.modelProfile`（raw 与 effective 各一份）：同样从未被读取。子代理的模型选择实际走
+  `AgentFactory`，不经过这个字段。
+- `MemoryFilesystemAccess` 的 `store: BaseStore?` 可空性与 `isAvailable()`：store 现在恒非空，七处
+  `?: return` 守卫、`AgentMemoryServiceImpl.assertAvailable()` 以及两个专门覆盖该降级路径的单测一并
+  移除。
+- `EffectiveAgentGray`：见下。
+
+### 19.4 配置双轨：砍掉唯一的陷阱字段
+
+`AgentRuntimeProperties`（Spring 绑定、可变、支持配置中心热更）与 `EffectiveAgentRuntimeProperties`
+（启动期拍平的不可变快照）并存是有意的设计：绝大多数配置读快照，省掉"读到半更新状态"的顾虑。
+
+问题出在灰度。灰度是唯一必须热更的配置，`AgentRunOrchestrator` 为此直接注入 live bean；但快照里也
+复制了一份 `EffectiveAgentGray`，KDoc 只能写"勿用于热更新判定"——一个字段存在的唯一意义变成了提醒
+别用它，而误用的后果（改了名单不生效）没有任何异常可循。现在整个 `EffectiveAgentGray` 删除，
+`EffectiveAgentRuntimeProperties` 不再有 `gray` 字段，规则收敛成一句话：**读配置一律走快照，唯一例外
+是灰度，直接读 live bean**。两套 `isAllowed` 的一致性单测随之失去意义，一并删除。
+
+### 19.5 run 终态：从选项包改成 sealed 原因
+
+`AgentRunLifecycleManager` 原本提供 `finish(scope, FinishOptions)` 与 `finishWithError(scope, error)`
+两个入口。`FinishOptions` 是个五字段的标志包，其中 `disposeSubscription` 从来没有被覆盖过（死字段），
+剩下四个字段彼此强相关却要靠调用方自己拼对；`finishWithError` 的函数体与 `finish` 逐行等价，只是把
+那组值写死成"失败"。
+
+改成 `FinishReason` sealed interface，把"一次 run 只有三种结束方式"变成类型层面的事实：
+
+| 原因 | 终态状态 | 是否打断 Agent |
+|---|---|---|
+| `StreamCompleted` | 取 `scope.terminalStatus`（COMPLETED / SUSPENDED / FAILED） | 否，Agent 已自行停止 |
+| `Cancelled(reason)` | CANCELLED | 是 |
+| `Failed(error)` | FAILED | 是 |
+
+每种原因完整决定状态、是否打断、以及落库记什么审计字段，调用方无法拼出非法组合。`finishWithError`
+删除，四个调用点全部收口到 `finish`。
+
+`AgentRunStreamOrchestrator` 没有并进来：它管的是重连流的 emitter 收尾，与"run 结束"是两件事——一次
+run 可以有零到多条重连流。那里真正的重复是 `AtomicBoolean` + `complete()` 的一次性守卫被手写了六遍，
+抽成了私有的 `StreamCompletion`。
+
+### 19.6 `AgentRunOrchestrator` 拆分
+
+原来 20 个构造依赖，其中 6 个只服务于 `prepareInput`，另有一批只服务于启动流程；`startRun` →
+`recordRunStart` → `buildRunScope` 三层各自七个参数，把同一组值反复往下穿。拆成：
+
+- `AgentRunInputPreparer`：输入校验、工具清洗、HITL resume 三件套。五步的先后约束写在类文档里，
+  因为它们不能换顺序（清洗会重写 `forwardedProps`，审计必须在交给框架之前，灌回必须最后）。
+- `AgentRunStarter`：登记运行态、归档入站消息、拉起 AG-UI 事件流，产出 `AgentRunScope`。
+- `AgentRunOrchestrator`：只剩 11 个依赖，职责收窄为"按顺序过准入闸，然后把活交出去"。
+
+顺带把原先埋在 `prepareInput` 末尾的 IAM 权限检查与会话归属检查提了出来——它们是准入判断，不是输入
+处理，留在那里的唯一后果是从方法名看不出来还会鉴权。现在 `run()` 的五道准入闸按"拒绝得越便宜越靠前"
+排列，顺序理由写在类文档里。
+
+`PreparedInput` 随之改名为 `PreparedRunInput` 并提升为顶层类型。

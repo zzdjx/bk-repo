@@ -36,8 +36,16 @@ object AgentForwardedPropsSupport {
         return sanitized.takeIf { it.isNotEmpty() }
     }
 
+    /**
+     * 把 AG-UI 传上来的 `forwardedProps`（声明类型是 `Any?`，实际由 JSON 反序列化而来）规范成
+     * `Map<String, Any>`：非 Map、空 Map、键空白的条目一律丢掉，拿不到任何有效键时返回 `null`。
+     *
+     * 对外开放是因为 [com.tencent.bkrepo.agent.context.AgentChatContextResolver] 也要从同一份
+     * `forwardedProps` 里读 deviceId/traceId，两边必须用同一套规范化规则，否则会出现"清洗时认得这个键、
+     * 提取时认不得"的偏差。
+     */
     @Suppress("UNCHECKED_CAST")
-    private fun asStringMap(value: Any?): Map<String, Any>? {
+    fun asStringMap(value: Any?): Map<String, Any>? {
         if (value == null) return null
         if (value !is Map<*, *>) return null
         return value.entries

@@ -113,55 +113,49 @@ class AgentRunStreamOrchestrator(
         runScope: ActiveRunScope,
     ): SseEmitter {
         logger.info("live stream run[{}] thread[{}]", runId, threadId)
-        val emitter = SseEmitter(properties.reconnectTimeout.toMillis())
+        val completion = StreamCompletion(SseEmitter(properties.reconnectTimeout.toMillis()))
         val afterIndex = lastEventIndex ?: -1L
-        val finished = AtomicBoolean(false)
 
         Schedulers.boundedElastic().schedule {
             try {
-                var cursor = runEventService.replayTo(emitter, runId, afterIndex)
-                if (attachLocalSink(runId, threadId, cursor, emitter, finished)) {
+                val cursor = runEventService.replayTo(completion.emitter, runId, afterIndex)
+                if (attachLocalSink(runId, threadId, cursor, completion)) {
                     return@schedule
                 }
-                pollRemoteEvents(runId, threadId, runScope, cursor, emitter, finished)
+                pollRemoteEvents(runId, threadId, runScope, cursor, completion)
             } catch (ex: Exception) {
-                if (finished.compareAndSet(false, true)) {
-                    emitter.completeWithError(ex)
-                }
+                completion.completeWithError(ex)
             }
         }
-        return emitter
+        return completion.emitter
     }
 
     private fun attachLocalSink(
         runId: String,
         threadId: String,
         cursor: Long,
-        emitter: SseEmitter,
-        finished: AtomicBoolean,
+        completion: StreamCompletion,
     ): Boolean {
         val unsubscribe = replaySinkRegistry.subscribe(runId, cursor) { event ->
-            if (finished.get()) return@subscribe
+            if (completion.isClaimed) return@subscribe
             try {
-                sseEventWriter.sendJson(emitter, event.eventJson)
-                if (event.terminal && finished.compareAndSet(false, true)) {
-                    emitter.complete()
+                sseEventWriter.sendJson(completion.emitter, event.eventJson)
+                if (event.terminal) {
+                    completion.complete()
                 }
             } catch (ex: Exception) {
-                if (finished.compareAndSet(false, true)) {
-                    emitter.completeWithError(ex)
-                }
+                completion.completeWithError(ex)
             }
         } ?: return false
 
-        emitter.onCompletion { unsubscribe() }
-        emitter.onTimeout {
+        completion.emitter.onCompletion { unsubscribe() }
+        completion.emitter.onTimeout {
             unsubscribe()
-            if (finished.compareAndSet(false, true)) {
-                sendStreamTimeout(emitter, threadId, runId)
+            if (completion.claim()) {
+                sendStreamTimeout(completion.emitter, threadId, runId)
             }
         }
-        emitter.onError { unsubscribe() }
+        completion.emitter.onError { unsubscribe() }
         return true
     }
 
@@ -170,36 +164,37 @@ class AgentRunStreamOrchestrator(
         threadId: String,
         runScope: ActiveRunScope,
         startCursor: Long,
-        emitter: SseEmitter,
-        finished: AtomicBoolean,
+        completion: StreamCompletion,
     ) {
         var cursor = startCursor
         val deadline = System.currentTimeMillis() + properties.reconnectTimeout.toMillis()
-        while (!finished.get() && System.currentTimeMillis() < deadline) {
+        while (!completion.isClaimed && System.currentTimeMillis() < deadline) {
             val events = runEventService.listAfterIndex(runId, cursor)
             for (event in events) {
-                if (finished.get()) return
-                sseEventWriter.sendJson(emitter, event.eventData)
+                if (completion.isClaimed) return
+                sseEventWriter.sendJson(completion.emitter, event.eventData)
                 cursor = event.eventIndex
                 if (event.terminal) {
-                    finished.set(true)
-                    emitter.complete()
+                    completion.complete()
                     return
                 }
             }
             val latestRun = agentRunRecordService.findByRunId(runId)
             if (latestRun?.status != AgentRunStatus.RUNNING && !activeRunManager.isRunning(runScope)) {
-                finished.set(true)
-                emitter.complete()
+                completion.complete()
                 return
             }
             Thread.sleep(properties.reconnectPollInterval.toMillis())
         }
-        if (finished.compareAndSet(false, true)) {
-            sendStreamTimeout(emitter, threadId, runId)
+        if (completion.claim()) {
+            sendStreamTimeout(completion.emitter, threadId, runId)
         }
     }
 
+    /**
+     * 重连超时：补一条 `stream_timeout` 的 `RunError` 再收尾，让客户端知道是这条流到点了、而不是
+     * run 失败了。调用前必须已经 [StreamCompletion.claim]，所以这里直接操作 emitter。
+     */
     private fun sendStreamTimeout(emitter: SseEmitter, threadId: String, runId: String) {
         try {
             sseEventWriter.send(
@@ -274,5 +269,32 @@ class AgentRunStreamOrchestrator(
                     normalized.metadata,
                 )
             }
+    }
+}
+
+/**
+ * 一条重连流的一次性收尾闸。
+ *
+ * 同一个 emitter 会被好几条路径同时推进：本地 sink 的事件回调、emitter 自己的 timeout/error 回调、
+ * 跨实例轮询循环、以及外层捕获异常的 catch 块。谁先到谁负责收尾，之后所有人都必须闭嘴——往一个已经
+ * complete 过的 [SseEmitter] 上再写会抛 `IllegalStateException`，把本来正常的收尾变成一条噪音错误日志。
+ *
+ * [claim] 单独暴露出来是给"抢到收尾权之后还要先发一条事件再 complete"的场景（见
+ * [AgentRunStreamOrchestrator.sendStreamTimeout]）。
+ */
+private class StreamCompletion(val emitter: SseEmitter) {
+
+    private val claimed = AtomicBoolean(false)
+
+    val isClaimed: Boolean get() = claimed.get()
+
+    fun claim(): Boolean = claimed.compareAndSet(false, true)
+
+    fun complete() {
+        if (claim()) emitter.complete()
+    }
+
+    fun completeWithError(ex: Throwable) {
+        if (claim()) emitter.completeWithError(ex)
     }
 }

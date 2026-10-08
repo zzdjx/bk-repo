@@ -8,24 +8,14 @@
 
 package com.tencent.bkrepo.agent.service.run
 
-import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
-import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
-import com.tencent.bkrepo.agent.context.AgentChatContextResolver
-import com.tencent.bkrepo.agent.hitl.AguiResumeDenialAuditor
-import com.tencent.bkrepo.agent.hitl.AguiResumeCoordinatorHydrator
-import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
-import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import com.tencent.bkrepo.agent.service.AgentSessionService
-import com.tencent.bkrepo.agent.session.AgentSessionStore
-import com.tencent.bkrepo.agent.tool.frontend.FrontendToolSanitizer
 import com.tencent.bkrepo.common.api.constant.HttpStatus
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import io.agentscope.core.agui.model.RunAgentInput
-import io.agentscope.core.agui.processor.AguiRequestProcessor
 import io.agentscope.core.shutdown.GracefulShutdownManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -45,7 +35,7 @@ import org.mockito.kotlin.whenever
 @DisplayName("AgentRunOrchestrator停机前置检查单测")
 class AgentRunOrchestratorShutdownTest {
 
-    private val inputValidator = mock<RunAgentInputValidator>()
+    private val inputPreparer = mock<AgentRunInputPreparer>()
     private val activeRunManager = mock<ActiveRunManager>()
     private val runRecordService = mock<AgentRunRecordService>()
     private val sessionService = mock<AgentSessionService>()
@@ -60,18 +50,18 @@ class AgentRunOrchestratorShutdownTest {
         }
 
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, exception.status)
-        verifyNoInteractions(inputValidator, activeRunManager, runRecordService, sessionService)
+        verifyNoInteractions(inputPreparer, activeRunManager, runRecordService, sessionService)
     }
 
     @Test
     fun `正常运行时前置检查应放行并继续走入参校验`() {
         whenever(shutdownManager.isAcceptingRequests).thenReturn(true)
         val input = input()
-        whenever(inputValidator.validate(input)).thenThrow(MarkerException())
+        whenever(inputPreparer.prepare("user-1", "project-1", input)).thenThrow(MarkerException())
 
         assertThrows(MarkerException::class.java) { orchestrator().run("user-1", "project-1", input) }
 
-        verify(inputValidator).validate(input)
+        verify(inputPreparer).prepare("user-1", "project-1", input)
     }
 
     private fun input(): RunAgentInput = RunAgentInput.builder()
@@ -80,26 +70,17 @@ class AgentRunOrchestratorShutdownTest {
         .build()
 
     private fun orchestrator(): AgentRunOrchestrator = AgentRunOrchestrator(
-        properties = EffectiveAgentRuntimeProperties.defaults(),
         runtimeProperties = AgentRuntimeProperties(),
+        shutdownManager = shutdownManager,
         permissionManager = mock<PermissionManager>(),
-        inputValidator = inputValidator,
-        aguiResumeValidator = mock<AguiResumeValidator>(),
-        aguiResumeCoordinatorHydrator = mock<AguiResumeCoordinatorHydrator>(),
-        aguiResumeDenialAuditor = mock<AguiResumeDenialAuditor>(),
-        frontendToolSanitizer = mock<FrontendToolSanitizer>(),
         agentSessionService = sessionService,
         agentRunRecordService = runRecordService,
         activeRunManager = activeRunManager,
-        replaySinkRegistry = mock<AgentRunReplaySinkRegistry>(),
-        agentSessionStore = mock<AgentSessionStore>(),
-        agentChatContextResolver = mock<AgentChatContextResolver>(),
-        aguiRequestProcessor = mock<AguiRequestProcessor>(),
-        messageArchiveHandler = mock<AguiMessageArchiveHandler>(),
+        inputPreparer = inputPreparer,
+        runStarter = mock<AgentRunStarter>(),
         agentRunStreamOrchestrator = mock<AgentRunStreamOrchestrator>(),
         lifecycleManager = mock<AgentRunLifecycleManager>(),
         eventPipeline = mock<AgentRunEventPipeline>(),
-        shutdownManager = shutdownManager,
     )
 
     /** 用来证明"前置检查放行了"，避免为此把整条 run 链路都搭起来。 */

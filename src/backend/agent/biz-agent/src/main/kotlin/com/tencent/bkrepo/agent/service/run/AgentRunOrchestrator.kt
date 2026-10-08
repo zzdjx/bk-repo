@@ -8,72 +8,59 @@
 
 package com.tencent.bkrepo.agent.service.run
 
-import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
-import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
-import com.tencent.bkrepo.agent.hitl.AguiResumeDenialAuditor
-import com.tencent.bkrepo.agent.hitl.AguiResumeCoordinatorHydrator
-import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
-import com.tencent.bkrepo.agent.tool.frontend.FrontendToolSanitizer
-import com.tencent.bkrepo.agent.context.AgentChatContext
-import com.tencent.bkrepo.agent.context.AgentChatContextResolver
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
-import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
-import com.tencent.bkrepo.agent.constant.AGENT_RUN_ID_PREFIX
 import com.tencent.bkrepo.agent.model.TAgentRun
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
-import com.tencent.bkrepo.agent.pojo.AgentRunTriggerType
-import com.tencent.bkrepo.agent.service.AgentRunRecordService
-import com.tencent.bkrepo.agent.service.AgentSessionService
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
 import com.tencent.bkrepo.agent.runtime.ActiveRunScope
-import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
-import com.tencent.bkrepo.agent.session.AgentSessionStore
-import com.tencent.bkrepo.agent.session.AguiRuntimeContextCarrier
+import com.tencent.bkrepo.agent.service.AgentRunRecordService
+import com.tencent.bkrepo.agent.service.AgentSessionService
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.constant.HttpStatus
-import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.api.exception.ErrorCodeException
 import com.tencent.bkrepo.common.api.exception.TooManyRequestsException
 import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import com.tencent.bkrepo.common.security.exception.PermissionException
-import io.agentscope.core.agent.RuntimeContext
-import io.agentscope.core.agui.event.AguiEvent
 import io.agentscope.core.agui.model.RunAgentInput
-import io.agentscope.core.agui.processor.AguiRequestProcessor
 import io.agentscope.core.shutdown.GracefulShutdownManager
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
-import reactor.core.publisher.Flux
 
 /**
- * AG-UI run 编排：校验 → 幂等 → 加锁 → 启动记录 → 订阅事件流。
+ * AG-UI run 的入口编排。
  *
- * 每个步骤方法保持短小，复杂收尾逻辑委托 [AgentRunLifecycleManager]。
+ * 这里只做两件事：按顺序过一遍准入判断，然后把活交给三个协作者——[AgentRunInputPreparer] 清洗输入、
+ * [AgentRunStarter] 拉起运行、[AgentRunEventPipeline] 消费事件流（收尾由 [AgentRunLifecycleManager]
+ * 统一负责）。
+ *
+ * ## 准入判断的顺序是有理由的
+ *
+ * 五道闸按"拒绝得越便宜、越应该靠前"排列，这样被拒的请求不会白做后面的工作，客户端拿到的也是最切题
+ * 的那个错误：
+ *
+ * 1. [assertAcceptingRequests]——本副本正在停机。最紧急，而且与请求内容无关。
+ * 2. [assertGrayAllowed]——项目/用户不在放量名单里。名单外的用户该直接看到"未开通"，而不是先撞上
+ *    一个参数校验错误。
+ * 3. 输入清洗（[AgentRunInputPreparer]）——必须在鉴权之前，因为鉴权要用清洗后的 `threadId`。
+ * 4. [assertAuthorized]——IAM 项目权限 + 会话归属。
+ * 5. [resolveExistingRun] / [acquireRunLock]——幂等与并发。放最后是因为它们要查库、抢锁，是这一串
+ *    里最贵的两步。
  */
 @Component
 class AgentRunOrchestrator(
-    private val properties: EffectiveAgentRuntimeProperties,
     private val runtimeProperties: AgentRuntimeProperties,
+    private val shutdownManager: GracefulShutdownManager,
     private val permissionManager: PermissionManager,
-    private val inputValidator: RunAgentInputValidator,
-    private val aguiResumeValidator: AguiResumeValidator,
-    private val aguiResumeCoordinatorHydrator: AguiResumeCoordinatorHydrator,
-    private val aguiResumeDenialAuditor: AguiResumeDenialAuditor,
-    private val frontendToolSanitizer: FrontendToolSanitizer,
     private val agentSessionService: AgentSessionService,
     private val agentRunRecordService: AgentRunRecordService,
     private val activeRunManager: ActiveRunManager,
-    private val replaySinkRegistry: AgentRunReplaySinkRegistry,
-    private val agentSessionStore: AgentSessionStore,
-    private val agentChatContextResolver: AgentChatContextResolver,
-    private val aguiRequestProcessor: AguiRequestProcessor,
-    private val messageArchiveHandler: AguiMessageArchiveHandler,
+    private val inputPreparer: AgentRunInputPreparer,
+    private val runStarter: AgentRunStarter,
     private val agentRunStreamOrchestrator: AgentRunStreamOrchestrator,
     private val lifecycleManager: AgentRunLifecycleManager,
     private val eventPipeline: AgentRunEventPipeline,
-    private val shutdownManager: GracefulShutdownManager,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -81,11 +68,12 @@ class AgentRunOrchestrator(
     fun run(userId: String, projectId: String, input: RunAgentInput): SseEmitter {
         assertAcceptingRequests()
         assertGrayAllowed(userId, projectId)
-        val prepared = prepareInput(userId, projectId, input)
+        val prepared = inputPreparer.prepare(userId, projectId, input)
+        assertAuthorized(userId, projectId, prepared.threadId)
         resolveExistingRun(prepared.input)?.let { return it }
         val runScope = ActiveRunScope(userId, projectId, prepared.threadId)
         acquireRunLock(runScope)
-        val scope = startRun(userId, projectId, prepared, runScope)
+        val scope = runStarter.start(userId, projectId, prepared, runScope)
         return attachEventStream(scope)
     }
 
@@ -118,17 +106,12 @@ class AgentRunOrchestrator(
     /**
      * 灰度总闸：只回答"这个项目/用户能不能进"，不管进来之后能用哪些子 Agent 或工具——那需要把
      * `AgentCatalog`/`PermissionEngine`/`FrontendToolRegistrar` 这些启动期装配好的全局单例改造成
-     * 按请求动态计算，是明显更大的改造，见 [com.tencent.bkrepo.agent.config.properties
-     * .AgentRuntimeProperties.Gray] 的说明。
+     * 按请求动态计算，是明显更大的改造，见 [AgentRuntimeProperties.Gray] 的说明。
      *
-     * 放在 [assertAcceptingRequests] 之后、`prepareInput` 之前：比停机检查晚一步是因为停机是更紧急的
-     * 拒绝信号（关系到能不能启动新 run），比输入校验、会话归属检查早是为了不白做那些校验——名单外的
-     * 项目/用户应该尽快拿到明确的"未开通"反馈，而不是先看到别的校验错误。
-     *
-     * 故意读 [runtimeProperties]（live 的 `@ConfigurationProperties` bean）而不是 [properties]
-     * （启动期拍平一次的 [EffectiveAgentRuntimeProperties] 快照）：前者的字段会在配置中心推送变更后被
-     * Spring Cloud Context 原地 rebind，这样改名单/开关灰度不需要重启服务，见
-     * [com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties.Gray] 的"运行时热更新"说明。
+     * 故意读 [runtimeProperties]（live 的 `@ConfigurationProperties` bean）而不是启动期拍平一次的
+     * [com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties] 快照：前者的字段
+     * 会在配置中心推送变更后被 Spring Cloud Context 原地 rebind，这样改名单/开关灰度不需要重启服务。
+     * 那份快照里刻意没有 `gray` 字段，就是为了不给人留下"读快照也行"的错觉。
      */
     private fun assertGrayAllowed(userId: String, projectId: String) {
         if (runtimeProperties.gray.isAllowed(userId, projectId)) {
@@ -138,25 +121,16 @@ class AgentRunOrchestrator(
         throw PermissionException("Project[$projectId] is not in the agent gray release allowlist")
     }
 
-    private data class PreparedInput(
-        val input: RunAgentInput,
-        val threadId: String,
-        val runId: String,
-    )
-
-    private fun prepareInput(userId: String, projectId: String, input: RunAgentInput): PreparedInput {
-        inputValidator.validate(input)
-        aguiResumeValidator.validateAndPrepare(userId, projectId, input)
-        val sanitized = frontendToolSanitizer.sanitize(input)
-        aguiResumeDenialAuditor.recordDenials(sanitized)
-        // resume[] 原样交给框架：2.0.4 的 AguiResumeCoordinator 要求 resume 覆盖 thread 上全部未决
-        // interrupt，而它那张表是进程内的，跨副本 / 重启后为空，必须先从 Redis 快照灌回去。
-        aguiResumeCoordinatorHydrator.hydrateIfNeeded(aguiRequestProcessor, sanitized)
+    /** 项目级 IAM 权限 + 会话归属：threadId 必须属于这个用户在这个项目下的活跃会话。 */
+    private fun assertAuthorized(userId: String, projectId: String, threadId: String) {
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
-        agentSessionService.assertActiveSession(userId, projectId, sanitized.threadId)
-        return PreparedInput(sanitized, sanitized.threadId, sanitized.runId)
+        agentSessionService.assertActiveSession(userId, projectId, threadId)
     }
 
+    /**
+     * 幂等：同一个 runId 重复 POST 时不重新执行 Agent。已经跑完的直接回放事件，还在跑的拒绝掉——
+     * 想跟上进度应该走 stream 接口，而不是再 POST 一次。
+     */
     private fun resolveExistingRun(input: RunAgentInput): SseEmitter? {
         val existingRun = agentRunRecordService.findByRunId(input.runId) ?: return null
         return when (existingRun.status) {
@@ -165,93 +139,11 @@ class AgentRunOrchestrator(
         }
     }
 
+    /** 一个会话同一时刻只允许一次 run。锁的释放在 [AgentRunLifecycleManager] 的收尾里。 */
     private fun acquireRunLock(scope: ActiveRunScope) {
         if (!activeRunManager.tryAcquire(scope)) {
             throw TooManyRequestsException("Session[${scope.threadId}] is already running")
         }
-    }
-
-    private fun startRun(
-        userId: String,
-        projectId: String,
-        prepared: PreparedInput,
-        runScope: ActiveRunScope,
-    ): AgentRunScope {
-        val executionId = AGENT_RUN_ID_PREFIX + StringPool.uniqueId()
-        val triggerType = if (prepared.input.hasResume()) {
-            AgentRunTriggerType.AGUI_RESUME
-        } else {
-            AgentRunTriggerType.USER_INPUT
-        }
-        val chatContext = agentChatContextResolver.resolve(userId, projectId, prepared.input, executionId)
-        recordRunStart(
-            userId,
-            projectId,
-            prepared,
-            executionId,
-            chatContext.deviceId,
-            triggerType,
-            runScope,
-        )
-        return buildRunScope(prepared, chatContext)
-    }
-
-    private fun recordRunStart(
-        userId: String,
-        projectId: String,
-        prepared: PreparedInput,
-        executionId: String,
-        deviceId: String?,
-        triggerType: AgentRunTriggerType,
-        runScope: ActiveRunScope,
-    ) {
-        agentRunRecordService.startRun(
-            runId = prepared.runId,
-            executionId = executionId,
-            threadId = prepared.threadId,
-            userId = userId,
-            projectId = projectId,
-            deviceId = deviceId,
-            entryAgentId = properties.name,
-            triggerType = triggerType,
-        )
-        agentSessionService.touchSession(prepared.threadId, prepared.runId, userId, projectId)
-        agentSessionStore.touchSessionOwner(userId, projectId, prepared.threadId)
-        activeRunManager.bindActiveRun(runScope, prepared.runId)
-        replaySinkRegistry.open(prepared.runId)
-    }
-
-    private fun buildRunScope(
-        prepared: PreparedInput,
-        chatContext: AgentChatContext,
-    ): AgentRunScope {
-        val archiveState = AguiMessageArchiveHandler.State()
-        messageArchiveHandler.archiveIncomingUserMessages(
-            prepared.input,
-            prepared.threadId,
-            prepared.runId,
-            chatContext.userId,
-            chatContext.projectId,
-        )
-        val interruptState = AguiInterruptTracker.State()
-        val runtimeContext = chatContext.toRuntimeContext()
-        // 2.0.4（#3279）：RuntimeContext 不再作为 process() 的入参，改为搭在请求上由 resolver 取回
-        val processRequest = AguiRuntimeContextCarrier.wrap(prepared.input, runtimeContext)
-        val eventFlux: Flux<AguiEvent> = aguiRequestProcessor.process(processRequest).events()
-        val emitter = SseEmitter(properties.sseTimeout.toMillis())
-        return AgentRunScope(
-            userId = chatContext.userId,
-            projectId = chatContext.projectId,
-            input = prepared.input,
-            threadId = prepared.threadId,
-            runId = prepared.runId,
-            executionId = chatContext.executionId,
-            runtimeContext = runtimeContext,
-            eventFlux = eventFlux,
-            archiveState = archiveState,
-            interruptState = interruptState,
-            emitter = emitter,
-        )
     }
 
     private fun attachEventStream(scope: AgentRunScope): SseEmitter {

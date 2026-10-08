@@ -8,23 +8,13 @@
 
 package com.tencent.bkrepo.agent.service.run
 
-import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
-import com.tencent.bkrepo.agent.config.properties.AgentRuntimePropertiesResolver
-import com.tencent.bkrepo.agent.context.AgentChatContextResolver
-import com.tencent.bkrepo.agent.hitl.AguiResumeDenialAuditor
-import com.tencent.bkrepo.agent.hitl.AguiResumeCoordinatorHydrator
-import com.tencent.bkrepo.agent.hitl.AguiResumeValidator
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
-import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import com.tencent.bkrepo.agent.service.AgentSessionService
-import com.tencent.bkrepo.agent.session.AgentSessionStore
-import com.tencent.bkrepo.agent.tool.frontend.FrontendToolSanitizer
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import com.tencent.bkrepo.common.security.exception.PermissionException
 import io.agentscope.core.agui.model.RunAgentInput
-import io.agentscope.core.agui.processor.AguiRequestProcessor
 import io.agentscope.core.shutdown.GracefulShutdownManager
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.DisplayName
@@ -40,7 +30,7 @@ import org.mockito.kotlin.whenever
 @DisplayName("AgentRunOrchestrator灰度总闸单测")
 class AgentRunOrchestratorGrayReleaseTest {
 
-    private val inputValidator = mock<RunAgentInputValidator>()
+    private val inputPreparer = mock<AgentRunInputPreparer>()
     private val activeRunManager = mock<ActiveRunManager>()
     private val runRecordService = mock<AgentRunRecordService>()
     private val sessionService = mock<AgentSessionService>()
@@ -85,7 +75,7 @@ class AgentRunOrchestratorGrayReleaseTest {
             orchestrator(gray).run("stranger-user", "stranger-project", input())
         }
 
-        verify(inputValidator, never()).validate(any())
+        verify(inputPreparer, never()).prepare(any(), any(), any())
         verifyNoInteractions(activeRunManager, runRecordService, sessionService)
     }
 
@@ -120,28 +110,19 @@ class AgentRunOrchestratorGrayReleaseTest {
         orchestrator(AgentRuntimeProperties(gray = gray))
 
     private fun orchestrator(runtimeProperties: AgentRuntimeProperties): AgentRunOrchestrator {
-        whenever(inputValidator.validate(any())).thenThrow(MarkerException())
+        whenever(inputPreparer.prepare(any(), any(), any())).thenThrow(MarkerException())
         return AgentRunOrchestrator(
-            properties = AgentRuntimePropertiesResolver.resolve(runtimeProperties),
             runtimeProperties = runtimeProperties,
+            shutdownManager = shutdownManager,
             permissionManager = mock<PermissionManager>(),
-            inputValidator = inputValidator,
-            aguiResumeValidator = mock<AguiResumeValidator>(),
-            aguiResumeCoordinatorHydrator = mock<AguiResumeCoordinatorHydrator>(),
-            aguiResumeDenialAuditor = mock<AguiResumeDenialAuditor>(),
-            frontendToolSanitizer = mock<FrontendToolSanitizer>(),
             agentSessionService = sessionService,
             agentRunRecordService = runRecordService,
             activeRunManager = activeRunManager,
-            replaySinkRegistry = mock<AgentRunReplaySinkRegistry>(),
-            agentSessionStore = mock<AgentSessionStore>(),
-            agentChatContextResolver = mock<AgentChatContextResolver>(),
-            aguiRequestProcessor = mock<AguiRequestProcessor>(),
-            messageArchiveHandler = mock<AguiMessageArchiveHandler>(),
+            inputPreparer = inputPreparer,
+            runStarter = mock<AgentRunStarter>(),
             agentRunStreamOrchestrator = mock<AgentRunStreamOrchestrator>(),
             lifecycleManager = mock<AgentRunLifecycleManager>(),
             eventPipeline = mock<AgentRunEventPipeline>(),
-            shutdownManager = shutdownManager,
         )
     }
 

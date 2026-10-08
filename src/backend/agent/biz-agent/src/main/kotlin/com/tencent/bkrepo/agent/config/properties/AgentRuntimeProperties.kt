@@ -65,7 +65,6 @@ data class AgentRuntimeProperties(
          * 整数天，暴露更细的粒度只会让配置看起来比实际更可调。
          */
         var ttlDays: Int = DEFAULT_TTL_DAYS,
-        var requireRedis: Boolean = DEFAULT_REQUIRE_REDIS,
     ) {
         companion object {
             const val DEFAULT_COLLECTION = "agent_state"
@@ -110,10 +109,16 @@ data class AgentRuntimeProperties(
      * 每一项都可以配成 `0`（或负值）表示"永不过期"，用于个别环境需要长期留存审计数据的场景；
      * 默认值都是有限值，因为这些集合/键都是只写不删的——不设上限就会单调增长。
      *
-     * ## Mongo 侧（靠 TTL 索引，由 Mongo 自己删）
+     * 七项全部落 Mongo，统一靠 `expiresAt` 字段上的 TTL 索引由 Mongo 自己删。过期时刻都是在写入时
+     * 算好打进文档的，因此配置改了只影响之后新写入的文档，已有文档保持写入当时算出的过期时刻，不会被
+     * 追溯修正。注意 Mongo 的 TTL 后台线程约 60s 才扫一轮，读路径不能假设"过期即不可见"，需要自己比
+     * `expiresAt`（见 [com.tencent.bkrepo.agent.task.MongoStore]）。
      *
-     * 四张表的过期时刻在写入时算好落到 `expiresAt` 字段上，配置改了只影响之后新写入的文档，
-     * 已有文档保持写入当时算出的过期时刻，不会被追溯修正。
+     * ## 按业务记录逐条计算的五项
+     *
+     * [runEvent]/[run]/[toolCall]/[message]/[session] 由
+     * [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy] 在写每条记录时现算 `expiresAt`，
+     * 所以支持 [Override] 的项目/用户维度差异化。
      *
      * 各项之间不是独立的，调整时注意这几条约束：
      * - [runEvent] 决定断线重连能回放多久以前的 run，必须小于等于 [run]：run 元数据都没了，
@@ -125,7 +130,11 @@ data class AgentRuntimeProperties(
      * - [run] 与 [toolCall] 是同一件事的两面（一次运行 + 这次运行里的工具调用审计），
      *   建议保持一致，否则查审计时会出现"有 run 没有工具调用记录"的空洞。
      *
-     * ## Redis 侧（靠 key TTL，由 Redis 自己删）
+     * ## 由 store 统一持有 TTL 的两项
+     *
+     * [task]/[memory] 走的是 `agent_kv_store` 这张通用 KV 表，TTL 在 `MongoStore` 构造时一次性配好
+     * （见 `AgentTaskRepositoryConfiguration`/`AgentMemoryFilesystemConfiguration`），对同一个 store 里
+     * 所有条目一致，因此不支持 [Override]。
      *
      * - [task] 是 `agent_spawn` 超时后被 promote 出的后台任务记录，语义是"最后一次写入之后再放多久"。
      *   任务本身活不过一次会话，这里的保留期只影响"事后还能不能查到这条任务记录"。
@@ -149,9 +158,9 @@ data class AgentRuntimeProperties(
          *
          * 只覆盖 [runEvent]/[run]/[toolCall]/[message]/[session] 这五项——它们都是"写入记录时按 `Instant`
          * 现算现打 `expiresAt` 戳"（见 [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy]），天然支持
-         * 按每条记录单独决定过期时刻。[task]/[memory] 是在 Redis key 级别、Bean 构造时一次性配置 TTL（见
-         * `AgentTaskRepositoryConfiguration`/`AgentMemoryFilesystemConfiguration`），要做到差异化需要把
-         * "构造 store 时固定 TTL"改成"每次写入时动态传入"，改造面完全不同，不在这次范围内。
+         * 按每条记录单独决定过期时刻。[task]/[memory] 的 TTL 由 `MongoStore` 在 Bean 构造时一次性持有，
+         * 要做到差异化需要把"构造 store 时固定 TTL"改成"每次写入时动态传入"，改造面完全不同，
+         * 不在这次范围内。
          *
          * 匹配规则：[projectIds]/[userIds] 是 OR 关系（与 [Gray] 一致）；[overrides] 列表里第一个命中的
          * 生效，不做多个 override 合并；命中的 override 里某一项留空（`null`）表示这一项不覆盖，沿用全局
@@ -182,6 +191,17 @@ data class AgentRuntimeProperties(
          * 用户对自己的数据始终有完全控制权，这个开关防的是 Agent 误操作，不是冻结整个服务。
          */
         var readOnlyMode: Boolean = DEFAULT_READ_ONLY_MODE,
+        /**
+         * 缺 Redis 时是否拒绝启动（生产应置 true），见 [com.tencent.bkrepo.agent.config.AgentRedisRequirementValidator]。
+         *
+         * 注意这里跟会话状态无关——状态、长期记忆、后台任务、挂起的 interrupt 都落 Mongo，Mongo 本身
+         * 就是全服务硬依赖，没有"退化"一说。真正会在缺 Redis 时静默退化为进程内的只有三样协调能力：
+         * 会话归属锁、活跃 run 注册表、resume 幂等标记。它们退化之后单副本仍然能跑通，但多副本下会出现
+         * 「A 副本起的 run，B 副本停不掉」这种只在生产才暴露的问题，所以需要一个显式开关在启动期拦住。
+         *
+         * 和 [readOnlyMode] 一样默认 `false`：本地开发不接 Redis 也要能起来。
+         */
+        var requireRedis: Boolean = DEFAULT_REQUIRE_REDIS,
     )
 
     /**
@@ -199,7 +219,8 @@ data class AgentRuntimeProperties(
      *
      * [AgentRunOrchestrator][com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 直接持有这个
      * 类所属的 [AgentRuntimeProperties] bean（而不是启动期就拍平固化的
-     * [EffectiveAgentRuntimeProperties]），每次请求都调用 [isAllowed] 现读当前字段值。`@ConfigurationProperties`
+     * [EffectiveAgentRuntimeProperties]——后者刻意没有 `gray` 字段，就是为了不给人留下
+     * "读快照也行"的错觉），每次请求都调用 [isAllowed] 现读当前字段值。`@ConfigurationProperties`
      * bean 本身在配置中心（Consul）推送变更后会被 Spring Cloud Context 的 `ConfigurationPropertiesRebinder`
      * 原地重新绑定（同一个单例实例、字段被新值覆盖），因此改名单不需要重启，也不需要 `@RefreshScope`——
      * 这条链路依赖配置中心的 watch 机制真的把变更同步到了这个副本的 Environment，本地开发不接配置中心时
@@ -214,7 +235,7 @@ data class AgentRuntimeProperties(
         /** 用户名单，用于内部测试/白名单用户跨项目验证；与项目名单是 OR 关系，任一命中即放行。 */
         var allowedUserIds: Set<String> = emptySet(),
     ) {
-        /** 灰度关闭时永远放行；开启时项目或用户命中任一名单即放行（OR 语义），与 [EffectiveAgentGray.isAllowed] 语义一致。 */
+        /** 灰度关闭时永远放行；开启时项目或用户命中任一名单即放行（OR 语义）。 */
         fun isAllowed(userId: String, projectId: String): Boolean {
             if (!enabled) return true
             return projectId in allowedProjectIds || userId in allowedUserIds
@@ -236,8 +257,13 @@ data class AgentRuntimeProperties(
             var taskListEnabled: Boolean = true,
         )
 
+        /**
+         * 每个域内子代理一个开关。键名必须与 [com.tencent.bkrepo.agent.agent.AgentIds] 里的 agentId
+         * 对应，否则 [com.tencent.bkrepo.agent.agent.AgentCatalog.bindingFor] 会直接 `error()`。
+         *
+         * 没有 `client`：client 的本地工具已经拍平到协调者自身，不再是子代理，也就没有对应的开关。
+         */
         data class Agents(
-            var client: AgentBinding = AgentBinding(enabled = true, maxSteps = 10),
             var discovery: AgentBinding = AgentBinding(enabled = true),
             var transferDiagnostics: AgentBinding = AgentBinding(enabled = false, maxSteps = 10),
             var governance: AgentBinding = AgentBinding(enabled = false, maxSteps = 8),
@@ -245,7 +271,6 @@ data class AgentRuntimeProperties(
 
         data class AgentBinding(
             var enabled: Boolean = false,
-            var modelProfile: String = DEFAULT_MODEL_PROFILE,
             var maxSteps: Int = DEFAULT_MAX_STEPS,
         )
     }
@@ -292,12 +317,11 @@ data class EffectiveAgentTopology(
 
     data class AgentBinding(
         val enabled: Boolean,
-        val modelProfile: String,
         val maxSteps: Int,
     )
 
+    /** 与 [com.tencent.bkrepo.agent.agent.AgentCatalog.bindingFor] 认识的 agentId 一一对应。 */
     data class Agents(
-        val client: AgentBinding,
         val discovery: AgentBinding,
         val transferDiagnostics: AgentBinding,
         val governance: AgentBinding,
@@ -312,24 +336,16 @@ data class EffectiveAgentTopology(
                 taskListEnabled = topology.coordinator.taskListEnabled,
             ),
             agents = Agents(
-                client = AgentBinding(
-                    enabled = topology.agents.client.enabled,
-                    modelProfile = topology.agents.client.modelProfile,
-                    maxSteps = topology.agents.client.maxSteps,
-                ),
                 discovery = AgentBinding(
                     enabled = topology.agents.discovery.enabled,
-                    modelProfile = topology.agents.discovery.modelProfile,
                     maxSteps = topology.agents.discovery.maxSteps,
                 ),
                 transferDiagnostics = AgentBinding(
                     enabled = topology.agents.transferDiagnostics.enabled,
-                    modelProfile = topology.agents.transferDiagnostics.modelProfile,
                     maxSteps = topology.agents.transferDiagnostics.maxSteps,
                 ),
                 governance = AgentBinding(
                     enabled = topology.agents.governance.enabled,
-                    modelProfile = topology.agents.governance.modelProfile,
                     maxSteps = topology.agents.governance.maxSteps,
                 ),
             ),
@@ -408,36 +424,13 @@ data class EffectiveAgentRetention(
 }
 
 /**
- * 见 [AgentRuntimeProperties.Gray]。
+ * [AgentRuntimeProperties] 在 Bean 创建时拍平出来的一份不可变快照，是全模块读配置的唯一入口。
  *
- * 这是启动期拍平出来的一份不可变快照，随 [EffectiveAgentRuntimeProperties] 一起在 Bean 创建时算一次、
- * 之后不会跟着配置中心的推送变化——真正参与放行判定的是 [AgentRuntimeProperties.Gray] 的同名
- * `isAllowed`（[com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 直接持有 live 的
- * [AgentRuntimeProperties]），这里的 [isAllowed] 只保留给需要"启动时那份配置长什么样"的场景（比如
- * 日志/展示），不要用来做热更新相关的放行判定。
+ * 唯一的例外是灰度：[AgentRuntimeProperties.Gray] 要支持配置中心热更新，所以
+ * [com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 直接注入 live 的
+ * [AgentRuntimeProperties] 现读。这里刻意不收录 `gray` 字段——它要是出现在这份快照里，
+ * 任何人读到的都是"启动那一刻"的名单，放量改了名单却不生效，而且排查时看不出任何异常。
  */
-data class EffectiveAgentGray(
-    val enabled: Boolean,
-    val allowedProjectIds: Set<String>,
-    val allowedUserIds: Set<String>,
-) {
-    /** 灰度关闭时永远放行；开启时项目或用户命中任一名单即放行（OR 语义）。 */
-    fun isAllowed(userId: String, projectId: String): Boolean {
-        if (!enabled) return true
-        return projectId in allowedProjectIds || userId in allowedUserIds
-    }
-
-    companion object {
-        fun from(gray: AgentRuntimeProperties.Gray): EffectiveAgentGray = EffectiveAgentGray(
-            enabled = gray.enabled,
-            allowedProjectIds = gray.allowedProjectIds,
-            allowedUserIds = gray.allowedUserIds,
-        )
-
-        fun defaults(): EffectiveAgentGray = from(AgentRuntimeProperties.Gray())
-    }
-}
-
 data class EffectiveAgentRuntimeProperties(
     val name: String,
     val sysPrompt: String,
@@ -460,7 +453,6 @@ data class EffectiveAgentRuntimeProperties(
     val readOnlyMode: Boolean,
     val retention: EffectiveAgentRetention,
     val topology: EffectiveAgentTopology,
-    val gray: EffectiveAgentGray,
 ) {
     companion object {
         fun defaults(): EffectiveAgentRuntimeProperties = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
@@ -485,13 +477,12 @@ object AgentRuntimePropertiesResolver {
             shutdownTimeout = runtime.shutdownTimeout,
             stateCollection = runtime.state.collection,
             stateTtlDays = runtime.state.ttlDays,
-            requireRedis = runtime.state.requireRedis,
+            requireRedis = runtime.features.requireRedis,
             memoryDailyLedgerRetention = runtime.memory.dailyLedgerRetention,
             memoryMaintenanceInterval = runtime.memory.maintenanceInterval,
             frontendToolsEnabled = runtime.features.frontendToolsEnabled,
             readOnlyMode = runtime.features.readOnlyMode,
             retention = EffectiveAgentRetention.from(runtime.retention),
             topology = EffectiveAgentTopology.from(runtime.topology),
-            gray = EffectiveAgentGray.from(runtime.gray),
         )
 }

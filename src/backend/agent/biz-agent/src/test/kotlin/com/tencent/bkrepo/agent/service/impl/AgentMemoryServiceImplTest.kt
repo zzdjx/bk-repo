@@ -52,16 +52,6 @@ class AgentMemoryServiceImplTest {
     }
 
     @Test
-    fun `未启用长期记忆时所有操作抛出NotFoundException`() {
-        val unavailableService = AgentMemoryServiceImpl(MemoryFilesystemAccess(null, agentId))
-
-        assertThrows(NotFoundException::class.java) { unavailableService.listFiles("alice") }
-        assertThrows(NotFoundException::class.java) { unavailableService.readFile("alice", "MEMORY.md") }
-        assertThrows(NotFoundException::class.java) { unavailableService.deleteFile("alice", "MEMORY.md") }
-        assertThrows(NotFoundException::class.java) { unavailableService.clearAll("alice") }
-    }
-
-    @Test
     fun `listFiles返回该用户已保存的记忆文件`() {
         seedMemoryMd("alice", "hello")
 

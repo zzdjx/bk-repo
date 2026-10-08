@@ -16,7 +16,9 @@ import org.springframework.stereotype.Component
 /**
  * HITL 运行态统一入口：pending interrupt 与 resume 幂等。
  *
- * 主线 run 编排只依赖此接口，具体存储由 session 层 Redis/InMemory 实现。
+ * 主线 run 编排只依赖此接口，具体存储由 session 层实现：pending interrupt 落 Mongo
+ * （[com.tencent.bkrepo.agent.session.MongoAgentPendingInterruptStore]），resume 幂等落 Redis
+ * （只是防重放的短期标记，丢了最多放过一次重复 resume，不值得为它建集合；没有 Redis 时退化为进程内）。
  */
 interface AgentInterruptStateRepository {
 

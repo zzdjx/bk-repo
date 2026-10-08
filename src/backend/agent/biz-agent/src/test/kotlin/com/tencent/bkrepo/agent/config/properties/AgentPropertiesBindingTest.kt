@@ -186,8 +186,7 @@ class AgentPropertiesBindingTest {
 
         val hardened = AgentRuntimePropertiesResolver.resolve(
             AgentRuntimeProperties().apply {
-                features = AgentRuntimeProperties.Features(readOnlyMode = true)
-                state = AgentRuntimeProperties.State(requireRedis = true)
+                features = AgentRuntimeProperties.Features(readOnlyMode = true, requireRedis = true)
             },
         )
 
@@ -310,7 +309,7 @@ class AgentPropertiesBindingTest {
 
     @Test
     fun `灰度总闸默认关闭且名单为空`() {
-        val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties()).gray
+        val defaults = AgentRuntimeProperties().gray
 
         assertFalse(defaults.enabled, "灰度默认必须关闭，不能影响现有部署")
         assertTrue(defaults.allowedProjectIds.isEmpty())
@@ -319,25 +318,12 @@ class AgentPropertiesBindingTest {
         assertTrue(defaults.isAllowed("any-user", "any-project"))
     }
 
+    /**
+     * 灰度判定只走 live 的 [AgentRuntimeProperties]（见 `AgentRunOrchestrator`），
+     * [EffectiveAgentRuntimeProperties] 刻意不收录 gray，所以这里直接测原始配置类。
+     */
     @Test
     fun `灰度开启后项目或用户命中任一名单即放行`() {
-        val gray = AgentRuntimePropertiesResolver.resolve(
-            AgentRuntimeProperties(
-                gray = AgentRuntimeProperties.Gray(
-                    enabled = true,
-                    allowedProjectIds = setOf("project-1"),
-                    allowedUserIds = setOf("user-1"),
-                ),
-            ),
-        ).gray
-
-        assertTrue(gray.isAllowed("stranger", "project-1"), "项目命中名单应放行")
-        assertTrue(gray.isAllowed("user-1", "stranger-project"), "用户命中名单应放行")
-        assertFalse(gray.isAllowed("stranger", "stranger-project"), "两者都不命中应拒绝")
-    }
-
-    @Test
-    fun `AgentRuntimeProperties_Gray的isAllowed语义应与EffectiveAgentGray一致_支撑灰度热更新读live properties`() {
         val gray = AgentRuntimeProperties.Gray(
             enabled = true,
             allowedProjectIds = setOf("project-1"),
@@ -347,9 +333,6 @@ class AgentPropertiesBindingTest {
         assertTrue(gray.isAllowed("stranger", "project-1"), "项目命中名单应放行")
         assertTrue(gray.isAllowed("user-1", "stranger-project"), "用户命中名单应放行")
         assertFalse(gray.isAllowed("stranger", "stranger-project"), "两者都不命中应拒绝")
-
-        // 灰度关闭时不管名单内容，任何项目/用户都应该放行。
-        assertTrue(AgentRuntimeProperties.Gray(enabled = false).isAllowed("stranger", "stranger-project"))
     }
 
     @Test

@@ -65,17 +65,6 @@ class MemoryFilesystemAccessTest {
     }
 
     @Test
-    fun `store为空时isAvailable返回false且所有读写操作安全降级`() {
-        val unavailable = MemoryFilesystemAccess(null, agentId)
-
-        assertFalse(unavailable.isAvailable())
-        assertTrue(unavailable.listFiles(rcAlice).isEmpty())
-        assertNull(unavailable.readFile(rcAlice, "MEMORY.md"))
-        assertFalse(unavailable.deleteFile(rcAlice, "MEMORY.md"))
-        assertTrue(unavailable.deleteLines(rcAlice, "MEMORY.md", 1, 1) is DeleteLinesResult.Failure)
-    }
-
-    @Test
     fun `listFiles能读到Agent侧通过RemoteFilesystem写入的MEMORY_md与memory目录文件`() {
         agentSideRootFs("alice").write(rcAlice, "/MEMORY.md", "- fact one\n- fact two")
         agentSideMemoryFs("alice").write(rcAlice, "/2026-08-08.md", "## note")

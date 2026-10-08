@@ -9,6 +9,7 @@
 package com.tencent.bkrepo.agent.context
 
 import com.tencent.bkrepo.agent.agui.AgentForwardedPropsKeys
+import com.tencent.bkrepo.agent.agui.AgentForwardedPropsSupport
 import io.agentscope.core.agui.model.RunAgentInput
 import org.springframework.stereotype.Component
 
@@ -39,24 +40,12 @@ class AgentChatContextResolver {
     )
 
     private fun extractTransport(input: RunAgentInput): TransportMetadata {
-        val props = asStringMap(input.forwardedProps) ?: return TransportMetadata(null, null)
+        val props = AgentForwardedPropsSupport.asStringMap(input.forwardedProps)
+            ?: return TransportMetadata(null, null)
         return TransportMetadata(
             deviceId = readString(props, AgentForwardedPropsKeys.DEVICE_ID),
             traceId = readString(props, AgentForwardedPropsKeys.TRACE_ID),
         )
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun asStringMap(value: Any?): Map<String, Any>? {
-        if (value == null) return null
-        if (value !is Map<*, *>) return null
-        return value.entries
-            .mapNotNull { (key, v) ->
-                val name = key?.toString()?.trim().orEmpty()
-                if (name.isBlank()) null else name to v as Any
-            }
-            .toMap()
-            .takeIf { it.isNotEmpty() }
     }
 
     private fun readString(props: Map<String, Any>, key: String): String? {

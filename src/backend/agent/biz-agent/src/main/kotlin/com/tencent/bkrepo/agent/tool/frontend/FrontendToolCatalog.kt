@@ -26,6 +26,9 @@ class FrontendToolCatalog {
 
     fun allAguiTools(): List<AguiTool> = tools.map { it.toAguiTool() }
 
+    /** 单个工具的 AG-UI 声明；名字不在 allowlist 里时返回 `null`。 */
+    fun aguiToolFor(name: String): AguiTool? = byName[name]?.toAguiTool()
+
     fun find(name: String): LocalToolDefinition? = byName[name]
 
     fun riskLevel(name: String): ToolRiskLevel? = byName[name]?.riskLevel

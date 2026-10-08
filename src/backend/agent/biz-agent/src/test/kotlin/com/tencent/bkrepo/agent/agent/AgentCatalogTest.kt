@@ -108,7 +108,6 @@ class AgentCatalogTest {
             agents = EffectiveAgentTopology.defaults().agents.copy(
                 transferDiagnostics = EffectiveAgentTopology.AgentBinding(
                     enabled = true,
-                    modelProfile = "default",
                     maxSteps = 10,
                 ),
             ),
@@ -128,7 +127,6 @@ class AgentCatalogTest {
             agents = EffectiveAgentTopology.defaults().agents.copy(
                 governance = EffectiveAgentTopology.AgentBinding(
                     enabled = true,
-                    modelProfile = "default",
                     maxSteps = 8,
                 ),
             ),

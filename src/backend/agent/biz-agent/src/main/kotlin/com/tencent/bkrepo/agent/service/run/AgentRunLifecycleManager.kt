@@ -11,6 +11,7 @@ package com.tencent.bkrepo.agent.service.run
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
 import com.tencent.bkrepo.agent.runtime.ActiveRunScope
+import com.tencent.bkrepo.agent.runtime.AgentRunAbortReason
 import com.tencent.bkrepo.agent.runtime.AgentSessionInterruptor
 import com.tencent.bkrepo.agent.service.AgentRunEventService
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
@@ -19,7 +20,13 @@ import org.springframework.stereotype.Component
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import reactor.core.scheduler.Schedulers
 
-/** run 结束、资源清理、跨副本 cancel 与 SSE 收尾。 */
+/**
+ * run 结束、资源清理、跨副本 cancel 与 SSE 收尾。
+ *
+ * 一次 run 只有 [FinishReason] 列出的三种结束方式，全部经由 [finish] 收口；`runFinished` 的 CAS
+ * 保证无论几条路径同时触发（事件流自然结束的同一刻客户端点了停止、abort handle 与本地 stop 标志
+ * 撞上），落库、清理与 SSE 收尾都只做一次。
+ */
 @Component
 class AgentRunLifecycleManager(
     private val activeRunManager: ActiveRunManager,
@@ -30,29 +37,35 @@ class AgentRunLifecycleManager(
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    data class FinishOptions(
-        val disposeSubscription: Boolean = true,
-        val abortAgent: Boolean = false,
-        val runStatus: AgentRunStatus? = null,
-        val cancelReason: String? = null,
-        val errorCode: String? = null,
-    )
+    /**
+     * run 结束的原因。每种原因完整决定了终态状态、是否需要打断 Agent、以及落库时记什么审计字段，
+     * 调用方不需要（也无法）自行拼装这几项的组合。
+     */
+    sealed interface FinishReason {
+
+        /**
+         * 事件流自然结束。终态取 [AgentRunScope.terminalStatus]——由
+         * [AgentRunOutcomeTracker.applyTerminalEvent] 从 `RunFinished`/`RunError` 事件推导出来，
+         * 可能是 COMPLETED / SUSPENDED / FAILED。一个终态事件都没发过就正常结束的流按 COMPLETED 记
+         * （`terminalStatus` 的初值），因为"流正常走完"本身就说明没有出错。
+         *
+         * 这是唯一不需要打断 Agent 的结束方式：Agent 已经自己停了。
+         */
+        data object StreamCompleted : FinishReason
+
+        /** 用户点了停止，或别的副本通过 [ActiveRunManager] 的 abort handle 要求停止。 */
+        data class Cancelled(val reason: AgentRunAbortReason) : FinishReason
+
+        /** 事件流本身抛错（区别于 Agent 发出 `RunError` 事件——那条走 [StreamCompleted]）。 */
+        data class Failed(val error: Throwable) : FinishReason
+    }
 
     fun registerHandle(scope: AgentRunScope) {
         activeRunManager.registerHandle(
             scope = scope.activeRunScope(),
             runId = scope.runId,
             runtimeContext = scope.runtimeContext,
-            abort = { reason ->
-                finish(
-                    scope,
-                    FinishOptions(
-                        abortAgent = true,
-                        runStatus = AgentRunStatus.CANCELLED,
-                        cancelReason = reason.value,
-                    ),
-                )
-            },
+            abort = { reason -> finish(scope, FinishReason.Cancelled(reason)) },
         )
     }
 
@@ -68,32 +81,24 @@ class AgentRunLifecycleManager(
         }
     }
 
-    fun finish(scope: AgentRunScope, options: FinishOptions = FinishOptions()) {
+    fun finish(scope: AgentRunScope, reason: FinishReason = FinishReason.StreamCompleted) {
         if (!scope.runFinished.compareAndSet(false, true)) return
-        if (options.abortAgent) {
+        // StreamCompleted 之外的两种原因都意味着 Agent 还在跑，必须先打断，否则它会继续消耗 token 并
+        // 往一条已经收尾的流里发事件。
+        val abortAgent = reason !is FinishReason.StreamCompleted
+        if (abortAgent) {
             agentSessionInterruptor.interrupt(scope.runtimeContext)
         }
-        if (options.disposeSubscription) {
-            disposeSubscription(scope, options.abortAgent)
-        }
+        disposeSubscription(scope, abortAgent)
         agentRunRecordService.finishRun(
             runId = scope.runId,
-            status = options.runStatus ?: scope.terminalStatus.get(),
-            cancelReason = options.cancelReason,
-            errorCode = options.errorCode,
-        )
-        cleanup(scope)
-        completeEmitter(scope.emitter)
-    }
-
-    fun finishWithError(scope: AgentRunScope, error: Throwable) {
-        if (!scope.runFinished.compareAndSet(false, true)) return
-        agentSessionInterruptor.interrupt(scope.runtimeContext)
-        disposeSubscription(scope, abortAgent = true)
-        agentRunRecordService.finishRun(
-            runId = scope.runId,
-            status = AgentRunStatus.FAILED,
-            errorCode = error.javaClass.simpleName,
+            status = when (reason) {
+                FinishReason.StreamCompleted -> scope.terminalStatus.get()
+                is FinishReason.Cancelled -> AgentRunStatus.CANCELLED
+                is FinishReason.Failed -> AgentRunStatus.FAILED
+            },
+            cancelReason = (reason as? FinishReason.Cancelled)?.reason?.value,
+            errorCode = (reason as? FinishReason.Failed)?.error?.javaClass?.simpleName,
         )
         cleanup(scope)
         completeEmitter(scope.emitter)

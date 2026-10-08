@@ -36,6 +36,7 @@ import com.tencent.bkrepo.agent.session.AguiRuntimeContextCarrier
 import com.tencent.bkrepo.agent.session.HarnessAgentResolver
 import com.tencent.bkrepo.agent.session.InMemoryAgentPendingInterruptStore
 import com.tencent.bkrepo.agent.session.InMemoryAgentResumeIdempotencyStore
+import com.tencent.bkrepo.agent.memory.FakeBaseStore
 import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
 import com.tencent.bkrepo.agent.resilience.ModelCircuitBreakerMiddleware
 import com.tencent.bkrepo.agent.resilience.ModelConcurrencyLimitMiddleware
@@ -376,7 +377,7 @@ class FlattenedWriteToolSuspensionEndToEndTest {
             ),
             modelCircuitBreakerMiddleware = ModelCircuitBreakerMiddleware(llmProperties),
             modelConcurrencyLimitMiddleware = ModelConcurrencyLimitMiddleware(llmProperties),
-            memoryFilesystemAccess = MemoryFilesystemAccess(null, runtimeProperties.name),
+            memoryFilesystemAccess = MemoryFilesystemAccess(FakeBaseStore(), runtimeProperties.name),
         )
         val coordinatorPermissionContext = AgentPermissionRulesConfiguration()
             .agentPermissionContext(runtimeProperties)

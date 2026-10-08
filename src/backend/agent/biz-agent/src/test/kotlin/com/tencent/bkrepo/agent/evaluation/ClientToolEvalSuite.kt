@@ -45,6 +45,7 @@ import com.tencent.bkrepo.agent.config.properties.AgentRuntimeProperties
 import com.tencent.bkrepo.agent.config.properties.AgentRuntimePropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
+import com.tencent.bkrepo.agent.memory.FakeBaseStore
 import com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess
 import com.tencent.bkrepo.agent.resilience.ModelCircuitBreakerMiddleware
 import com.tencent.bkrepo.agent.resilience.ModelConcurrencyLimitMiddleware
@@ -211,7 +212,7 @@ class ClientToolEvalSuite {
             ),
             modelCircuitBreakerMiddleware = ModelCircuitBreakerMiddleware(llmProperties),
             modelConcurrencyLimitMiddleware = ModelConcurrencyLimitMiddleware(llmProperties),
-            memoryFilesystemAccess = MemoryFilesystemAccess(null, runtimeProperties.name),
+            memoryFilesystemAccess = MemoryFilesystemAccess(FakeBaseStore(), runtimeProperties.name),
         )
         val permissionContext: PermissionContextState =
             AgentPermissionRulesConfiguration().agentPermissionContext(runtimeProperties)

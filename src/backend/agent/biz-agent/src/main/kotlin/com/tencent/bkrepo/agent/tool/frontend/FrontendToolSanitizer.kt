@@ -11,7 +11,6 @@ package com.tencent.bkrepo.agent.tool.frontend
 import com.tencent.bkrepo.agent.agui.AgentForwardedPropsSupport
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.common.api.exception.ParameterInvalidException
-import com.tencent.bkrepo.agent.tool.local.LocalToolDefinition
 import io.agentscope.core.agui.model.AguiTool
 import io.agentscope.core.agui.model.RunAgentInput
 import org.springframework.stereotype.Component
@@ -85,9 +84,6 @@ class FrontendToolSanitizer(
                 throw ParameterInvalidException("tools: tool[$name] is not allowed")
             }
         }
-        return requestedNames.mapNotNull { catalog.find(it)?.toAguiTool() }
+        return requestedNames.mapNotNull { catalog.aguiToolFor(it) }
     }
-
-    private fun LocalToolDefinition.toAguiTool(): AguiTool =
-        AguiTool(name, description, inputSchema)
 }

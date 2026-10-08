@@ -23,34 +23,24 @@ class AgentMemoryServiceImpl(
 ) : AgentMemoryService {
 
     override fun listFiles(userId: String): List<AgentMemoryFileInfo> {
-        assertAvailable()
         return memoryFilesystemAccess.listFiles(runtimeContextFor(userId)).map {
             AgentMemoryFileInfo(it.path, it.modifiedAt)
         }
     }
 
     override fun readFile(userId: String, path: String): String {
-        assertAvailable()
         assertValidPath(path)
         return memoryFilesystemAccess.readFile(runtimeContextFor(userId), path)
             ?: throw NotFoundException(CommonMessageCode.RESOURCE_NOT_FOUND, "Memory file[$path]")
     }
 
     override fun deleteFile(userId: String, path: String): Boolean {
-        assertAvailable()
         assertValidPath(path)
         return memoryFilesystemAccess.deleteFile(runtimeContextFor(userId), path)
     }
 
     override fun clearAll(userId: String) {
-        assertAvailable()
         memoryFilesystemAccess.deleteAll(runtimeContextFor(userId))
-    }
-
-    private fun assertAvailable() {
-        if (!memoryFilesystemAccess.isAvailable()) {
-            throw NotFoundException(CommonMessageCode.RESOURCE_NOT_FOUND, "long-term memory")
-        }
     }
 
     private fun assertValidPath(path: String) {
