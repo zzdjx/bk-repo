@@ -18,17 +18,20 @@
             />
             <iframe
                 v-else-if="fileKind === 'jsx' && jsxSrcdoc"
+                ref="jsxPreviewFrame"
                 class="jsx-preview-iframe"
                 :srcdoc="jsxSrcdoc"
-                sandbox="allow-scripts"
+                :sandbox="previewContentSandbox"
                 allow="clipboard-write"
                 title="jsx-preview"
             />
             <iframe
                 v-else-if="fileKind === 'html' && htmlSrcdoc"
+                ref="htmlPreviewFrame"
                 class="html-preview-iframe"
                 :srcdoc="htmlSrcdoc"
-                sandbox="allow-scripts"
+                :sandbox="previewContentSandbox"
+                allow="clipboard-write"
                 title="html-preview"
             />
         </div>
@@ -71,6 +74,13 @@
         renderMermaidCharts,
         renderPlantumlDiagrams
     } from '@repository/utils/markdownJsxPreview'
+    import {
+        PREVIEW_CONTENT_SANDBOX,
+        bindPreviewContentLinks,
+        buildPreviewOpenUrlMessage,
+        openPreviewAnchor,
+        readPreviewOpenUrlMessage
+    } from '@repository/utils/previewExternalNavigation'
 
     hljs.registerLanguage('javascript', javascript)
     hljs.registerLanguage('python', python)
@@ -122,7 +132,8 @@
                 jsxSrcdoc: '',
                 htmlSrcdoc: '',
                 editor: null,
-                previewToken: 0
+                previewToken: 0,
+                previewContentSandbox: PREVIEW_CONTENT_SANDBOX
             }
         },
         computed: {
@@ -166,18 +177,27 @@
             }
         },
         mounted () {
+            this.boundPreviewOpenUrlMessage = (event) => this.onPreviewOpenUrlMessage(event)
+            window.addEventListener('message', this.boundPreviewOpenUrlMessage)
             if (this.activeView === 'source') {
                 this.$nextTick(() => this.ensureEditor())
+            } else {
+                this.bindMarkdownExternalLinks()
             }
         },
         beforeDestroy () {
             this.previewToken += 1
+            this.releaseMarkdownLinks()
+            if (this.boundPreviewOpenUrlMessage) {
+                window.removeEventListener('message', this.boundPreviewOpenUrlMessage)
+            }
             this.disposeEditor()
         },
         methods: {
             async renderPreview () {
                 const previewToken = this.previewToken + 1
                 this.previewToken = previewToken
+                this.releaseMarkdownLinks()
                 this.previewError = ''
                 this.previewHtml = ''
                 this.jsxSrcdoc = ''
@@ -186,6 +206,7 @@
                     return
                 }
                 try {
+                    const pageUrl = window.location.href
                     if (this.fileKind === 'markdown') {
                         this.previewHtml = renderMarkdownToSafeHtml(this.normalizedSource, {
                             resolveAssetUrl: this.resolveAssetUrl,
@@ -195,16 +216,18 @@
                         if (previewToken !== this.previewToken) {
                             return
                         }
+                        this.bindMarkdownExternalLinks()
                         await Promise.all([
                             this.renderMermaidPreview(),
                             this.renderMathPreview(),
                             this.renderPlantumlPreview()
                         ])
                     } else if (this.fileKind === 'jsx') {
-                        this.jsxSrcdoc = buildJsxSandboxSrcdoc(this.normalizedSource)
+                        this.jsxSrcdoc = buildJsxSandboxSrcdoc(this.normalizedSource, pageUrl)
                     } else if (this.fileKind === 'html') {
                         this.htmlSrcdoc = buildHtmlSandboxSrcdoc(this.normalizedSource, {
-                            resolveAssetUrl: this.resolveAssetUrl
+                            resolveAssetUrl: this.resolveAssetUrl,
+                            pageUrl
                         })
                     }
                 } catch (error) {
@@ -268,6 +291,44 @@
                 if (this.editor) {
                     this.editor.dispose()
                     this.editor = null
+                }
+            },
+            bindMarkdownExternalLinks () {
+                this.releaseMarkdownLinks()
+                const root = this.$refs.markdownBody
+                if (!root || this.fileKind !== 'markdown') {
+                    return
+                }
+                this.markdownLinkRelease = bindPreviewContentLinks(root, {
+                    pageUrl: window.location.href,
+                    open (url) {
+                        openPreviewAnchor(url, document)
+                        return { opener: null }
+                    },
+                    postMessage: (message, origin) => this.postPreviewOpenUrl(message, origin)
+                })
+            },
+            releaseMarkdownLinks () {
+                if (typeof this.markdownLinkRelease === 'function') {
+                    this.markdownLinkRelease()
+                    this.markdownLinkRelease = null
+                }
+            },
+            onPreviewOpenUrlMessage (event) {
+                const url = readPreviewOpenUrlMessage(event && event.data, window.location.href)
+                if (!url) {
+                    return
+                }
+                const frames = [this.$refs.htmlPreviewFrame, this.$refs.jsxPreviewFrame]
+                const fromFrame = frames.some((frame) => frame && frame.contentWindow === event.source)
+                if (!fromFrame) {
+                    return
+                }
+                this.postPreviewOpenUrl(buildPreviewOpenUrlMessage(url), '*')
+            },
+            postPreviewOpenUrl (message, origin) {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage(message, origin)
                 }
             }
         }

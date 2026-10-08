@@ -1,3 +1,5 @@
+import { previewNavigationGuardSource } from './previewExternalNavigation.js'
+
 const ABSOLUTE_RESOURCE_PATTERN = /^(https?:|data:|blob:|mailto:|javascript:|tel:)/i
 const RESOURCE_ATTRS_BY_TAG = {
     script: ['src'],
@@ -15,7 +17,7 @@ const RESOURCE_ATTRS_BY_TAG = {
     use: ['href', 'xlink:href']
 }
 
-function buildHtmlPreviewGuardScript () {
+function buildHtmlPreviewGuardScript (pageUrl) {
     return `<script>
 (function () {
   function wrapHistoryMethod (name) {
@@ -46,37 +48,8 @@ function buildHtmlPreviewGuardScript () {
       get: function () { return undefined; }
     });
   } catch (e) { /* ignore */ }
-  document.addEventListener('click', function (event) {
-    var anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
-    if (!anchor) {
-      return;
-    }
-    var href = anchor.getAttribute('href');
-    if (!href) {
-      return;
-    }
-    if (href.charAt(0) === '#') {
-      if (href === '#') {
-        event.preventDefault();
-        return;
-      }
-      if (event.defaultPrevented) {
-        return;
-      }
-      var id = decodeURIComponent(href.slice(1));
-      var target = document.getElementById(id) || document.getElementsByName(id)[0];
-      if (!target) {
-        event.preventDefault();
-        return;
-      }
-      event.preventDefault();
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-  }, true);
 })();
+${previewNavigationGuardSource(pageUrl)}
 <\/script>`
 }
 
@@ -270,7 +243,7 @@ function injectPreviewGuard (source, guardScript) {
  * Isolation is the iframe sandbox plus opaque-origin guards — not a resource CSP whitelist.
  * Relative repo assets are rewritten when resolveAssetUrl is provided; absolute CDN URLs stay intact.
  */
-export function buildHtmlSandboxSrcdoc (htmlSource, { resolveAssetUrl } = {}) {
+export function buildHtmlSandboxSrcdoc (htmlSource, { resolveAssetUrl, pageUrl } = {}) {
     const rewritten = rewriteHtmlResourceUrls(htmlSource || '', resolveAssetUrl)
-    return injectPreviewGuard(rewritten, buildHtmlPreviewGuardScript())
+    return injectPreviewGuard(rewritten, buildHtmlPreviewGuardScript(pageUrl))
 }

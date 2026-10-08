@@ -171,8 +171,8 @@ export function getPreviewLibBaseUrl () {
     return `${location.origin}${window.BK_SUBPATH}ui/libs/`
 }
 
-export function buildJsxSandboxSrcdoc (jsxSource) {
-    return buildJsxSandboxSrcdocCore(jsxSource, getPreviewLibBaseUrl())
+export function buildJsxSandboxSrcdoc (jsxSource, pageUrl) {
+    return buildJsxSandboxSrcdocCore(jsxSource, getPreviewLibBaseUrl(), pageUrl)
 }
 
 export function getMonacoLanguage (filePath) {

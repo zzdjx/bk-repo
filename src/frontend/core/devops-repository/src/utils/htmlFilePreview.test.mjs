@@ -54,15 +54,17 @@ test('buildHtmlSandboxSrcdoc rewrites relative resources and keeps CDN urls', ()
     assert.doesNotMatch(srcdoc, /default-src/)
 })
 
-test('buildHtmlSandboxSrcdoc injects opaque-origin guards and blocks non-hash navigation', () => {
+test('buildHtmlSandboxSrcdoc injects opaque-origin guards and external link opening', () => {
     const srcdoc = buildHtmlSandboxSrcdoc(
         '<h1 id="top">Hello</h1><a href="https://evil.example">x</a><a href="#top">top</a>'
     )
     assert.match(srcdoc, /wrapHistoryMethod\('replaceState'\)/)
     assert.match(srcdoc, /document, 'cookie'/)
-    assert.match(srcdoc, /closest\('a\[href\]'\)/)
-    assert.match(srcdoc, /href\.charAt\(0\) === '#'/)
+    assert.match(srcdoc, /source: 'bkrepo-preview'/)
+    assert.match(srcdoc, /action: 'open-url'/)
+    assert.match(srcdoc, /scrollIntoView/)
     assert.match(srcdoc, /<h1 id="top">Hello<\/h1>/)
+    assert.match(srcdoc, /<a href="https:\/\/evil\.example">/)
 })
 
 test('buildHtmlSandboxSrcdoc injects into existing head', () => {

@@ -1,3 +1,5 @@
+import { previewNavigationGuardSource } from './previewExternalNavigation.js'
+
 const ABSOLUTE_URL_PATTERN = /^(https?:|data:|mailto:)/i
 
 export function normalizePreviewPath (filePath) {
@@ -947,8 +949,9 @@ export function rewriteMarkdownImageUrls (html, resolveAssetUrl) {
     })
 }
 
-export function buildJsxSandboxSrcdoc (jsxSource, libBase) {
+export function buildJsxSandboxSrcdoc (jsxSource, libBase, pageUrl) {
     const preparedSource = prepareJsxSource(jsxSource)
+    const navigationGuard = previewNavigationGuardSource(pageUrl)
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -1005,32 +1008,7 @@ export function buildJsxSandboxSrcdoc (jsxSource, libBase) {
       });
     } catch (e) { /* ignore */ }
     // Fragment links in sandboxed srcdoc are treated as cross-origin navigations and blank the frame.
-    document.addEventListener('click', function (event) {
-      var anchor = event.target && event.target.closest ? event.target.closest('a[href^="#"]') : null;
-      if (!anchor) {
-        return;
-      }
-      var href = anchor.getAttribute('href');
-      if (!href || href === '#') {
-        event.preventDefault();
-        return;
-      }
-      if (event.defaultPrevented) {
-        return;
-      }
-      var id = decodeURIComponent(href.slice(1));
-      var target = document.getElementById(id) || document.getElementsByName(id)[0];
-      if (!target) {
-        return;
-      }
-      event.preventDefault();
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      try {
-        if (history.replaceState) {
-          history.replaceState(null, '', href);
-        }
-      } catch (e) { /* opaque origin may block history */ }
-    }, true);
+    ${navigationGuard}
     if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
       var __nativeWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
       navigator.clipboard.writeText = function (text) {
