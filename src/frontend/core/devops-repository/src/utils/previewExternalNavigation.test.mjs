@@ -38,6 +38,29 @@ test('authored links classify the same way for html, jsx, and markdown', () => {
     assert.equal(classifyAuthoredHref('https://example.com/raw').url, 'https://example.com/raw')
 })
 
+test('a returned window is not reported as blocked', () => {
+    const messages = []
+    const tab = { opener: {} }
+    const opened = openPreviewExternalUrl('https://example.com/docs', {
+        pageUrl: 'https://preview.example/ui/file',
+        open (url, target, features) {
+            assert.equal(url, 'https://example.com/docs')
+            assert.equal(target, '_blank')
+            assert.equal(features, undefined)
+            return tab
+        },
+        postMessage () {
+            messages.push('posted')
+        },
+        onBlocked () {
+            messages.push('blocked')
+        }
+    })
+    assert.equal(opened, tab)
+    assert.equal(tab.opener, null)
+    assert.deepEqual(messages, [])
+})
+
 test('failed window.open posts open-url and keeps the url for another click', () => {
     const messages = []
     const blocked = []
@@ -97,7 +120,7 @@ test('sandbox guard opens authored absolute links and leaves relative clicks', (
     assert.deepEqual(harness.opened, [{
         url: 'https://example.com/docs',
         target: '_blank',
-        features: 'noopener,noreferrer'
+        features: undefined
     }])
     harness.opened.length = 0
     const relative = click(harness, link('./other.html'))
@@ -105,11 +128,13 @@ test('sandbox guard opens authored absolute links and leaves relative clicks', (
     assert.equal(harness.opened.length, 0)
     assert.equal(harness.location.href, 'about:srcdoc')
     const download = click(harness, link('https://example.com/file.zip', { download: '' }))
-    assert.equal(download.defaultPrevented, false)
+    assert.equal(download.defaultPrevented, true)
+    assert.equal(harness.opened.at(-1).url, 'https://example.com/file.zip')
     const form = formElement('https://example.com/submit', 'post')
     const submit = dispatch(harness, 'submit', form)
     assert.equal(submit.defaultPrevented, false)
     assert.equal(form.getAttribute('target'), '_blank')
+    assert.equal(form.getAttribute('rel'), 'noopener noreferrer')
     assert.equal(form.getAttribute('method'), 'post')
     harness.win.navigator.userActivation.isActive = true
     harness.location.assign('https://example.com/from-script')
@@ -148,7 +173,7 @@ test('activated relative location.href navigates and non-http window.open stays 
     assert.deepEqual(harness.opened, [{
         url: 'https://example.com/docs',
         target: '_blank',
-        features: 'noopener,noreferrer'
+        features: undefined
     }])
     assert.deepEqual(navigated, ['./page.html'])
     harness.win.navigator.userActivation.isActive = false
@@ -171,6 +196,9 @@ test('iframe guard source calls the installer by its runtime name', () => {
     assert.equal(harness.location.href, './page.html')
     assert.equal(harness.win.open('about:blank'), null)
     assert.equal(harness.opened.length, 1)
+    const download = click(harness, link('https://example.com/file.zip', { download: '' }))
+    assert.equal(download.defaultPrevented, true)
+    assert.equal(harness.opened.at(-1).url, 'https://example.com/file.zip')
 })
 
 test('content sandbox allows popups and forms but not top navigation, downloads, or sandbox escape', () => {
@@ -269,7 +297,7 @@ test('markdown root click opens absolute links and does not hook page navigation
     const event = clickOn(root, link('https://example.com/raw'))
     assert.equal(event.defaultPrevented, true)
     assert.equal(opened[0].url, 'https://example.com/raw')
-    assert.equal(opened[0].features, 'noopener,noreferrer')
+    assert.equal(opened[0].features, undefined)
     assert.equal(blocked.length, 0)
     assert.equal(location.href, 'https://preview.example/file')
     const relative = clickOn(root, link('./other.md'))
@@ -281,6 +309,27 @@ test('markdown root click opens absolute links and does not hook page navigation
     const sameHostHttp = clickOn(root, link('http://preview.example:8443/a.html'))
     assert.equal(sameHostHttp.defaultPrevented, true)
     assert.equal(opened.length, 1)
+    const sameOriginDownload = clickOn(root, link('https://preview.example/file.zip', { download: '' }))
+    assert.equal(sameOriginDownload.defaultPrevented, false)
+    assert.equal(opened.length, 1)
+    const crossOriginDownload = clickOn(root, link('https://example.com/file.zip', { download: '' }))
+    assert.equal(crossOriginDownload.defaultPrevented, true)
+    assert.equal(opened.at(-1).url, 'https://example.com/file.zip')
+    const sameHostDownload = clickOn(root, link('http://preview.example/a.html', { download: '' }))
+    assert.equal(sameHostDownload.defaultPrevented, true)
+    assert.equal(opened.length, 2)
+    const relativeDownload = clickOn(root, link('./other.zip', { download: '' }))
+    assert.equal(relativeDownload.defaultPrevented, true)
+    assert.equal(opened.length, 2)
+    const sameHostForm = formElement('//preview.example/web/generic/p/r/a.html?preview=true', 'get')
+    const sameHostSubmit = submitOn(root, sameHostForm)
+    assert.equal(sameHostSubmit.defaultPrevented, true)
+    assert.equal(sameHostForm.getAttribute('target'), null)
+    const externalForm = formElement('https://example.com/submit', 'post')
+    const externalSubmit = submitOn(root, externalForm)
+    assert.equal(externalSubmit.defaultPrevented, false)
+    assert.equal(externalForm.getAttribute('target'), '_blank')
+    assert.equal(externalForm.getAttribute('rel'), 'noopener noreferrer')
 })
 
 function link (href, extra) {
@@ -390,6 +439,22 @@ function createRoot () {
             listeners[type] = listeners[type].filter((item) => item !== fn)
         }
     }
+}
+
+function submitOn (root, target) {
+    const event = {
+        type: 'submit',
+        target,
+        defaultPrevented: false,
+        preventDefault () {
+            this.defaultPrevented = true
+        },
+        stopPropagation () {
+            this.stopped = true
+        }
+    }
+    root.listeners.submit.forEach((fn) => fn(event))
+    return event
 }
 
 function clickOn (root, target) {

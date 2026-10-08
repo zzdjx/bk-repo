@@ -31,6 +31,7 @@
                 class="html-preview-iframe"
                 :srcdoc="htmlSrcdoc"
                 :sandbox="previewContentSandbox"
+                allow="clipboard-write"
                 title="html-preview"
             />
         </div>

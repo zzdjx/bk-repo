@@ -32,10 +32,33 @@ export function classifyAuthoredHref (raw) {
 }
 
 export function planAnchorActivation (input) {
-    if (input && input.download) {
-        return { kind: 'download' }
+    const classified = classifyAuthoredHref(input ? input.href : '')
+    if (input && input.download && classified.kind === 'external') {
+        return { kind: 'download', url: classified.url }
     }
-    return classifyAuthoredHref(input ? input.href : '')
+    return classified
+}
+
+function previewDownloadUsesBrowser (url, pageUrl) {
+    if (!pageUrl) {
+        return false
+    }
+    let target
+    let page
+    try {
+        target = new URL(url)
+        page = new URL(pageUrl)
+    } catch (e) {
+        return false
+    }
+    return target.protocol === page.protocol
+        && target.hostname === page.hostname
+        && target.port === page.port
+}
+
+function markExternalForm (form) {
+    form.setAttribute('target', '_blank')
+    form.setAttribute('rel', 'noopener noreferrer')
 }
 
 export function planFormActivation (input) {
@@ -109,7 +132,9 @@ export function openPreviewExternalUrl (url, deps) {
     }
     let opened = null
     try {
-        opened = deps.open(allowed, '_blank', 'noopener,noreferrer')
+        // The noopener feature makes a successful open return null, so a blocked
+        // popup cannot be told apart from one that already opened.
+        opened = deps.open(allowed, '_blank')
     } catch (e) {
         opened = null
     }
@@ -211,6 +236,12 @@ function attachPreviewContentLinkListeners (root, deps) {
             download: link.hasAttribute('download')
         })
         if (decision.kind === 'download') {
+            if (previewDownloadUsesBrowser(decision.url, deps && deps.pageUrl)) {
+                return
+            }
+            event.preventDefault()
+            event.stopPropagation()
+            openPreviewExternalUrl(decision.url, deps)
             return
         }
         if (decision.kind === 'hash') {
@@ -241,11 +272,16 @@ function attachPreviewContentLinkListeners (root, deps) {
             return
         }
         const decision = planFormActivation({ action: form.getAttribute('action') })
-        if (decision.kind === 'external') {
-            form.setAttribute('target', '_blank')
+        if (decision.kind === 'native') {
             return
         }
-        if (decision.kind === 'native') {
+        if (decision.kind === 'external') {
+            if (!previewExternalUrlAllowed(decision.url, deps && deps.pageUrl)) {
+                event.preventDefault()
+                event.stopPropagation()
+                return
+            }
+            markExternalForm(form)
             return
         }
         event.preventDefault()
@@ -401,8 +437,8 @@ function hookFormSubmit (targetWindow) {
         FormCtor.prototype.submit = function previewGuardedFormSubmit () {
             if (isPreviewUserActivated(targetWindow)) {
                 const decision = planFormActivation({ action: this.getAttribute('action') })
-                if (decision.kind === 'external') {
-                    this.setAttribute('target', '_blank')
+                if (decision.kind === 'external' && previewExternalUrlAllowed(decision.url)) {
+                    markExternalForm(this)
                 } else {
                     return undefined
                 }
@@ -458,6 +494,8 @@ export function previewNavigationGuardSource () {
     const parts = [
         classifyAuthoredHref,
         planAnchorActivation,
+        previewDownloadUsesBrowser,
+        markExternalForm,
         planFormActivation,
         planScriptNavigation,
         buildPreviewOpenUrlMessage,
