@@ -1,5 +1,7 @@
 package com.tencent.bkrepo.preview.service
 
+import org.apache.pdfbox.cos.COSArray
+import org.apache.pdfbox.cos.COSBase
 import org.apache.pdfbox.cos.COSDictionary
 import org.apache.pdfbox.cos.COSName
 import org.apache.pdfbox.cos.COSObject
@@ -17,6 +19,8 @@ import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.util.Collections
+import java.util.IdentityHashMap
 import kotlin.math.min
 
 /**
@@ -90,7 +94,7 @@ object PdfPreviewTitle {
 }
 
 /**
- * 只解析 trailer、目录和 Info。页树只登记根对象号，不读页内容。
+ * 只解析 trailer、目录和 Info。目录里的间接对象只登记自身，不读页内容或附件。
  */
 private class InfoOnlyParser(
     source: RandomAccessRead,
@@ -111,12 +115,7 @@ private class InfoOnlyParser(
             if (isLenient && !root.containsKey(COSName.TYPE)) {
                 root.setItem(COSName.TYPE, COSName.CATALOG)
             }
-            parseDictObjects(root, COSName.PAGES)
-            val pages = root.getItem(COSName.PAGES)
-            if (pages is COSObject) {
-                // 只登记页树根的对象号，避免增量写出目录时把 /Pages 指到新对象。不跟 Kids / Contents。
-                parseObjectDynamically(pages, false)
-            }
+            registerCatalogObjects(root)
             val info = trailer.getDictionaryObject(COSName.INFO)
             if (info is COSDictionary) {
                 parseDictObjects(info)
@@ -128,6 +127,40 @@ private class InfoOnlyParser(
                 IOUtils.closeQuietly(document)
                 document = null
             }
+        }
+    }
+
+    /**
+     * 目录中直接出现的间接对象各解析一次，增量写出时沿用原对象号。
+     * 解析停在这一层，页内容流和附件流仍留在原文件里。
+     */
+    private fun registerCatalogObjects(catalog: COSDictionary) {
+        val seen = Collections.newSetFromMap(IdentityHashMap<COSBase, Boolean>())
+        seen.add(catalog)
+        for (value in catalog.values) {
+            registerCatalogReference(value, seen)
+        }
+    }
+
+    private fun registerCatalogReference(value: COSBase?, seen: MutableSet<COSBase>) {
+        if (value == null || !seen.add(value)) {
+            return
+        }
+        when (value) {
+            is COSObject -> parseObjectDynamically(value, false)
+            is COSArray -> {
+                for (element in value) {
+                    registerCatalogReference(element, seen)
+                }
+            }
+            is COSDictionary -> {
+                if (value.isDirect) {
+                    for (nested in value.values) {
+                        registerCatalogReference(nested, seen)
+                    }
+                }
+            }
+            else -> Unit
         }
     }
 }
