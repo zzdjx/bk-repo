@@ -262,11 +262,12 @@
 - API: GET /preview/api/artifact/share/a/{shareId}
 - API 名称: artifact_share_open_redirect
 - 功能说明:
-  - 中文: 与打开分享使用相同的分享权限校验，通过后返回内嵌预览 HTML。网关把 `/a/{shareId}` 反代到本接口，不 302，地址栏保持短链。`shareId` 为记录主键（32 位 UUID，并兼容历史 ObjectId）
-  - English: same share-permission check as open, then 200 HTML that embeds the preview without changing the short URL. Path parameter is the share primary id
+  - 中文: 与打开分享使用相同的分享权限校验。原生 PDF 在当前短链上直接返回 `application/pdf`，其它类型返回内嵌预览 HTML。网关把 `/a/{shareId}` 反代到本接口，不 302，地址栏保持短链。`shareId` 为记录主键（32 位 UUID，并兼容历史 ObjectId）。PDF 标题读打开时节点上的 `IMATE_ARTIFACT_NAME`，不用分享记录里的 `artifactName`；规则与文件预览的本地 PDF 相同
+  - English: same share-permission check as open. Native PDF is returned as `application/pdf` on this short URL; other types return HTML that embeds the preview. The short URL stays in the address bar. The PDF title comes from the node metadata `IMATE_ARTIFACT_NAME` at open time, not the share record `artifactName`
 - 鉴权: 与打开分享相同；不校验仓库 READ。浏览器访问 `/a/{shareId}` 未登录时，网关回落前端页并由 `getLoginUrl` 跳转企业登录，`c_url` 为该短链；登录后继续打开。独立部署弹出前端登录框
 - 响应:
-  - 有权限: HTTP 200，`text/html`；iframe 加载 UTF-8 百分号编码后的预览地址
+  - 有权限且不是原生 PDF: HTTP 200，`text/html`；iframe 加载 UTF-8 百分号编码后的预览地址
+  - 有权限且为原生 PDF: HTTP 200，`application/pdf`，支持 Range。有节点 `IMATE_ARTIFACT_NAME` 时在末尾追加标题更新，正文仍按 Range 从存储读取，不回写仓库
   - 当前用户不在分享可见范围: HTTP 403，`text/html` 无权限页（含分享创建者，按钮刷新当前短链）
   - 分享不存在、已撤销，或底层文件不存在: HTTP 404，`text/html`
   - 其它错误（如 token 签发失败）仍返回 JSON，与打开分享一致
