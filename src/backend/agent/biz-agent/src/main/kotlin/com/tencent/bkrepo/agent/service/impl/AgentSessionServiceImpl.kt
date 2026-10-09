@@ -27,7 +27,7 @@ import com.tencent.bkrepo.agent.service.AgentRunEventService
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import com.tencent.bkrepo.agent.service.AgentSessionService
 import com.tencent.bkrepo.agent.service.AgentToolCallRecordService
-import com.tencent.bkrepo.agent.session.AgentPendingInterruptStore
+import com.tencent.bkrepo.agent.hitl.AgentInterruptStateRepository
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.api.exception.NotFoundException
@@ -49,7 +49,7 @@ class AgentSessionServiceImpl(
     private val agentRunEventService: AgentRunEventService,
     private val agentToolCallRecordService: AgentToolCallRecordService,
     private val activeRunManager: ActiveRunManager,
-    private val pendingInterruptStore: AgentPendingInterruptStore,
+    private val interruptStateRepository: AgentInterruptStateRepository,
     private val properties: EffectiveAgentRuntimeProperties,
     private val retentionPolicy: AgentRetentionPolicy,
 ) : AgentSessionService {
@@ -159,7 +159,7 @@ class AgentSessionServiceImpl(
         if (activeRunManager.isRunning(ActiveRunKey(userId, projectId, threadId))) {
             throw TooManyRequestsException("Thread[$threadId] is running")
         }
-        pendingInterruptStore.clear(threadId)
+        interruptStateRepository.clearPendingInterrupt(threadId)
         activeRunManager.clearRunState(ActiveRunKey(userId, projectId, threadId))
         val now = LocalDateTime.now()
         agentSessionDao.markDeleted(threadId, now)

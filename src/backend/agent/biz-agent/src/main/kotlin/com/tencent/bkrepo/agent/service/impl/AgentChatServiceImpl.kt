@@ -18,7 +18,7 @@ import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import com.tencent.bkrepo.agent.service.AgentSessionService
 import com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator
 import com.tencent.bkrepo.agent.service.run.AgentRunStreamOrchestrator
-import com.tencent.bkrepo.agent.session.AgentPendingInterruptStore
+import com.tencent.bkrepo.agent.hitl.AgentInterruptStateRepository
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.exception.ParameterInvalidException
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
@@ -34,7 +34,7 @@ class AgentChatServiceImpl(
     private val agentRunStreamOrchestrator: AgentRunStreamOrchestrator,
     private val agentRunRecordService: AgentRunRecordService,
     private val activeRunManager: ActiveRunManager,
-    private val pendingInterruptStore: AgentPendingInterruptStore,
+    private val interruptStateRepository: AgentInterruptStateRepository,
 ) : AgentChatService {
 
     override fun run(userId: String, projectId: String, input: RunAgentInput): SseEmitter {
@@ -59,7 +59,10 @@ class AgentChatServiceImpl(
             runId = runId,
             status = status,
             running = running,
-            hasPendingInterrupt = pendingInterruptStore.get(threadId) != null,
+            // 必须走仓储门面而不是底层 store：门面会把整组已过期的确认卡片当成"没有未决中断"。
+            // 直接问 store 的话，这里会报 true、前端照常渲染卡片，用户一点却被 resume 校验判为
+            // 没有未决中断——正是 §22.2 想消除的那种两处判断不一致。
+            hasPendingInterrupt = interruptStateRepository.getPendingInterrupt(threadId) != null,
         )
     }
 

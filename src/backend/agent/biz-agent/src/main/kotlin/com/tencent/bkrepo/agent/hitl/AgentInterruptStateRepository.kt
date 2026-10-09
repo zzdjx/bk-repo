@@ -12,7 +12,6 @@ import com.tencent.bkrepo.agent.session.AgentPendingInterruptStore
 import com.tencent.bkrepo.agent.session.AgentResumeIdempotencyStore
 import com.tencent.bkrepo.agent.session.PendingInterruptSession
 import com.tencent.bkrepo.agent.session.PendingInterruptSnapshot
-import org.springframework.stereotype.Component
 import java.time.Instant
 
 /**
@@ -34,7 +33,7 @@ interface AgentInterruptStateRepository {
     fun tryMarkResume(threadId: String, interruptId: String, fingerprint: String): Boolean
 }
 
-@Component
+/** 由 [com.tencent.bkrepo.agent.session.AgentSessionConfiguration] 装配，底层两个 store 刻意不是 bean。 */
 class DefaultAgentInterruptStateRepository(
     private val pendingInterruptStore: AgentPendingInterruptStore,
     private val resumeIdempotencyStore: AgentResumeIdempotencyStore,

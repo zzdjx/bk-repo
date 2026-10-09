@@ -35,7 +35,9 @@ import org.springframework.stereotype.Component
 /**
  * 按 [RuntimeContext] 中断 AgentScope 进行中的 run。
  *
- * AgentScope 2.0.0 的 [HarnessAgent] 尚未转发 per-session interrupt，需经 [HarnessAgent.getDelegate]。
+ * 这里走 [HarnessAgent.interrupt] 而不是 `agent.delegate.interrupt`：2.0.4 之前 [HarnessAgent] 没有转发
+ * per-session interrupt，只能伸手拿 delegate；现在它转发了，继续绕过去就等于把自己钉死在当前版本的内部
+ * 结构上——框架哪天在这个方法里补上编排（比如同步清掉 gateway 侧的 turn lease），我们是收不到的。
  */
 @Component
 class AgentSessionInterruptor(
@@ -44,7 +46,7 @@ class AgentSessionInterruptor(
 
     fun interrupt(runtimeContext: RuntimeContext) {
         try {
-            agent.delegate.interrupt(runtimeContext)
+            agent.interrupt(runtimeContext)
         } catch (exception: Exception) {
             logger.debug(
                 "failed to interrupt agent run for user[${runtimeContext.userId}] " +

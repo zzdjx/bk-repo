@@ -81,14 +81,22 @@ class AgentRunOrchestrator(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     fun run(userId: String, projectId: String, input: RunAgentInput): SseEmitter {
+        // 准入段：只做拒绝与回放，中途抛异常不会留下任何需要回滚的痕迹。
+        assertAdmissible(userId, projectId, input)
+        resolveExistingRun(input)?.let { return it }
+
+        // 提交段：从抢运行权起每一步都有副作用，失败必须原路还回去，见 [startOrReleaseLock]。
+        val runKey = ActiveRunKey(userId, projectId, input.threadId)
+        acquireRunLock(runKey)
+        return startOrReleaseLock(userId, projectId, input, runKey)
+    }
+
+    /** 四道无副作用的闸，顺序理由见类注释。放在一起是为了让它和下面的提交段在代码形状上就分得开。 */
+    private fun assertAdmissible(userId: String, projectId: String, input: RunAgentInput) {
         assertAcceptingRequests()
         assertGrayAllowed(userId, projectId)
         inputValidator.validate(input)
         assertAuthorized(userId, projectId, input.threadId)
-        resolveExistingRun(input)?.let { return it }
-        val runKey = ActiveRunKey(userId, projectId, input.threadId)
-        acquireRunLock(runKey)
-        return startOrReleaseLock(userId, projectId, input, runKey)
     }
 
     fun replayTerminal(input: RunAgentInput, existingRun: TAgentRun): SseEmitter {

@@ -2427,3 +2427,148 @@ HITL 确认卡片上的 `expiresAt` 按 `agent.runtime.active-run-ttl` 填（默
 **`ToolRiskLevel.READ_SENSITIVE` / `PROHIBITED` 是死枚举**：目前确实没有工具用这两档，但 `ExternalLocalTool`
 和 `AgentPermissionRulesConfiguration` 的 `when` 都为它们写了分支。这是风险分级的完整取值域，删掉等于把
 防御性处理一并删掉，保留。
+## 23. 一次"整体重构"的调查结果（2026-10）
+
+带着"高标准重构整个模块、尽量用框架自带能力替掉自研逻辑"的目标把 agent 模块过了一遍。结论和出发时的
+预期相反：**五条候选重构里四条被证据否掉，真正的收获是一个当时还活着的 bug**。记下来主要是为了让下一个
+人不用把同样的路再走一遍。
+
+### 23.1 先把规模量出来
+
+biz-agent 137 个主文件 10277 行，平均 75 行一个文件；最大的 `AgentRuntimeProperties.kt` 396 行，其中
+大半是 KDoc。测试 55 个文件 6635 行，比例 0.65。没有上帝类，没有分层倒置。按"拆大类、补测试"那套
+通用标准衡量，这个模块已经过关——所以后面所有判断都必须基于具体证据，不能基于"感觉该拆一拆"。
+
+### 23.2 唯一真正的缺陷：状态接口绕过了 HITL 门面
+
+`AgentChatServiceImpl.getRunStatus` 直接 `pendingInterruptStore.get(threadId) != null` 算
+`hasPendingInterrupt`，绕过了 §22.2 刚加上过期过滤的 `AgentInterruptStateRepository`。四条读路径
+（resume 校验、拒绝审计、coordinator 回灌、断线重连回放）都走门面，唯独这条没走。
+
+后果是整组卡片过期后：状态接口告诉前端"有未决中断"，前端渲染出确认卡片，用户一点，resume 校验回
+"没有未决中断"。§22.2 把死锁改成了一张点不动的卡片，没有改干净。
+
+门面的 KDoc 里当时就写着"分散判断迟早会出现某一处认为还有未决中断、另一处认为没有"——写的时候它
+已经存在了。**写下不变量不等于建立不变量。**
+
+修法不只是改那一行。`AgentPendingInterruptStore` 和 `AgentResumeIdempotencyStore` 两个 bean 已从容器
+中撤掉，改为在 `AgentSessionConfiguration` 里直接 `new` 进 `DefaultAgentInterruptStateRepository`。
+现在再想绕过门面，拿不到 bean，容器启动就报 `NoSuchBeanDefinition`。代价是两个 store 的 TTL 取值挪到了
+装配处、离各自的实现类远了一点；换来的是这条不变量从"靠 review 盯"变成"编译期可验证"。
+
+### 23.3 顺带把准入段和提交段在形状上分开
+
+`run()` 原本是八行平铺的顺序调用，哪几步可以安全中止、哪几步一旦做了就必须回滚，只写在类注释里。
+现在拆成 `assertAdmissible(...)`（四道无副作用的闸）和其后的提交段，中间空一行加一句注释。§22.3 那个
+顺序 bug 的根子就是这个区分在代码形状上不可见。
+
+### 23.4 被否掉的四条，以及否掉的理由
+
+这四条都是看起来很有道理、查完证据站不住的。
+
+**删掉单实现的 service 接口。** `AgentChatService` / `AgentMemoryService` / `AgentMessageArchiveService`
+在 main 里各自只有一个实现、测试里也没有替身，看着是纯样板。但 `service/` 接口 + `service/impl/` 是
+bk-repo 全仓约定——repository 32 个接口、auth 21 个、job 17 个、analyst 14 个。删了 agent 就成了唯一的
+异类，一致性的价值高于省掉三次跳转。
+
+**把 `model` / `dao` 对 api-agent `pojo` 枚举的依赖解开。** 同理：`biz-repository` 的
+`TScheduledDownloadRule` 一样 import 四个 `repository.pojo` 类型。这是约定，不是分层倒置。
+
+**用框架的 `SessionTurnGate` 替掉自研的会话运行权锁。** `io.agentscope.harness.agent.gateway.SessionTurnGate`
++ `TurnLease` + `HarnessAgent.Builder.checkRunning` 看着正是我们手写的 `ActiveRunManager` 那一套。但把
+695 个框架类全扫一遍后发现，只有 `HarnessGateway` 读它（`setSessionTurnGate`），而 `HarnessGateway` 是
+IM 多通道那套运行时（channel / inbound-outbound / wakeup / subagent 暴露）。我们走的是 AG-UI 的
+`AguiRequestProcessor`，根本不经过 `HarnessGateway`。接上去就是死代码。
+
+**把 run 包的单方法 bean 收回主流程。** `AgentRunInputPreparer` / `AgentRunStarter` /
+`AgentRunEventPipeline` / `RunAgentInputValidator` 各自只有一个公开方法，看着像"一步流程被拆成一个
+bean"。但读完发现它们各自带 5-8 个自己的协作者、各自有文档化的内部顺序约束（preparer 四步、starter
+五步登记）。收回去只会造出一个 20 依赖的 `AgentRunOrchestrator`，严格更差。
+
+**用 `DistributedStore` 收拢装配。** 框架的 `HarnessAgent.Builder.distributedStore(...)` 确实是统一
+装配点，`HarnessAgentBuilderSupport` 和 `RemoteFilesystemSpec` 都读它。但它只有一个 `baseStore()`，
+而我们刻意有两个语义不同的 `MongoStore`：任务存储 `refreshTtlOnRead=false`、TTL 取 `retention.task`，
+记忆存储 `refreshTtlOnRead=true`、TTL 取 `retention.memory`。一个槽位表达不了两套保留期策略，换来的
+只是少一次 builder 调用。
+
+### 23.5 框架能力盘点（哪些是框架的，哪些必须自研）
+
+**已经在用框架的**：`MongoAgentStateStore`（带 `ttlDays` 入口，`AgentStateConfiguration` 直接用）、
+`AguiEventEncoder`（`AguiSseEventWriter` 包的就是它）、`AguiResumeCoordinator`、`AguiRequestProcessor`、
+`GracefulShutdownManager`、全部 middleware 钩子。
+
+顺带订正一处旧叙述：7b4302379 的提交说明里"2.0.4 仍无 TTL 入口"说的是 **Redis** 版 `AgentStateStore`，
+Mongo 版一直有 `ttlDays`。
+
+**框架确实没有、必须自研的**：
+
+- 熔断与并发限流。695 个类里与此相关的只有一个 `RateLimitException`（还是 OpenAI 扩展里的异常类型），
+  没有任何熔断/限流设施，`ModelCircuitBreaker` 与 `ModelConcurrencyLimitMiddleware` 保留。
+- 保留期 / TTL 回收 / 孤儿清扫。`Retention|Ttl|Expir|Sweep|Cleanup` 在框架类名里零匹配。
+- `MongoStore`。框架的 `MongoBaseStore` 构造函数只有 `(MongoDatabase, collection[, JsonCodec])`，
+  既没有 TTL，也没有 `AgentMemoryMaintenanceJob` 需要的 `scanNamespaces`。
+## 24. 收掉两处陈述性债务（2026-10）
+
+§23 那轮只看了代码形状，没看代码之外。这一节记两处"写的时候是对的、后来环境变了就不对了"的东西——它们
+不会让编译失败，也不会让测试变红，只会在某个需要它们的时刻给出错误答案。
+
+### 24.1 `AgentSessionInterruptor` 绕过了框架已经提供的入口
+
+这个类一直是这么写的：
+
+```kotlin
+agent.delegate.interrupt(runtimeContext)
+```
+
+类注释解释了原因："AgentScope 2.0.0 的 HarnessAgent 尚未转发 per-session interrupt，需经
+HarnessAgent.getDelegate"。当时属实。但我们在 §18 已经升到 2.0.4，这句话不再成立——`javap` 2.0.4 的
+`HarnessAgent` 能看到七个 `interrupt` 重载，其中就有 `interrupt(RuntimeContext)`。
+
+反编译确认它当前是纯转发，一条 `getfield delegate` 加一条 `invokevirtual`，没有任何额外动作。所以改成
+`agent.interrupt(runtimeContext)` **不改变任何运行时行为**，这点必须说清楚，否则下次有人看到这个提交会以
+为修了个 bug。
+
+那为什么还要改。因为 `getDelegate()` 是框架暴露的内部结构，不是契约。继续从那里伸手进去，等于把我们的停止
+路径钉死在"2.0.4 的 `HarnessAgent.interrupt` 什么都不做"这个事实上。框架哪天在这个方法里补上编排——比如
+顺手清掉 gateway 侧的 turn lease，或者在转发前后发事件——我们是收不到的，而且不会有任何报错提示我们错过
+了。走公开方法的成本是零，收益是以后框架加的东西自动落到我们身上。
+
+### 24.2 运维文档整篇还在讲 Redis
+
+`agui-multi-agent-runtime-operations-guide.md` 是 §20 去 Redis 之前写的，之后没有跟着改。结果是这份文档
+在九个位置给出会把人带偏的指示：架构图写着"Redis — 活跃 run 锁、stop 信号、HITL 中断、session 归属、
+AgentState"；有一整节 `## 4. Redis Key` 列了七个前缀；配置样例里有 `require-redis: false  # 生产建议
+true`，而这个配置项已经不存在了；告警表里有一行"Redis 连接失败"；排障第 7.2 节第 4 步写着"必要时运维清理
+Redis 锁键"。
+
+这比代码里留个 TODO 严重。TODO 是写给开发看的，看不懂可以去读代码；运维文档是出事的时候照着做的，而上面
+每一条关于 Redis 的指示现在都指向一个不存在的组件。第 7.2 步尤其糟：run 卡住是最常见的故障，而文档给出的
+恢复动作是去清理一个没有的键，真正该做的事（什么都不做，等孤儿清扫）反而没写。
+
+集合清单也只列了 4 张（`agent_session` / `agent_message` / `agent_run` / `agent_run_event`），实际有 10 张
+——`agent_active_run`、`agent_pending_interrupt`、`agent_resume_mark`、`agent_tool_call`、`agent_state`、
+`agent_kv_store` 全都是 §20/§21 之后新增的，容量规划和索引核对都会漏。
+
+重写时按"运维真正需要决策什么"重新组织，而不是逐条替换 Redis 为 Mongo：
+
+- 原来的「Redis Key」一节换成「活跃 run 的跨副本协调」，讲租约模型本身——`scopeKey` 唯一索引即 `SET NX`、
+  心跳每 TTL/3 续期、`active-run-ttl` 必须大于 `sse-timeout`。
+- 显式写出三个**有界延迟**，因为没有 Redis 发布订阅之后跨副本全是轮询，运维最容易把正常延迟当成故障：
+  stop 标志的消费上界是 1s 加当前步骤剩余时间（模型调用卡 90s 就得等 90s，这不是故障）；孤儿回收上界是一个
+  `active-run-ttl`；心跳续期间隔是 TTL/3。
+- 新增 `OwnerReplicaLost` 的说明，并把它列为**副本稳定性的直接指标**。同时解释为什么收成 FAILED 而不是
+  CANCELLED（混进 CANCELLED 会让"用户取消率"凭空升高，掩盖副本异常退出）。
+- 新增「Mongo 不可用」一节，明说没有降级路径且这是设计选择，免得有人去找那个在 Redis 时代存在过的内存兜底
+  分支。
+- 回滚策略补一条硬约束：回滚到依赖 Redis 的旧版本时，六张新集合里的在途状态不会被旧版本读取，等于所有活跃
+  run 失去归属，必须挑无活跃 run 的窗口期。
+- HITL 一节补上确认卡片过期的行为，以及 2.0.4 那条"resume 必须覆盖全部未决中断、且该校验先于过期校验"的
+  契约——客户端只回传部分卡片时报的是 `AGUI_INTERRUPT_CONTRACT_ERROR`，不是过期，这个误判很容易发生。
+- `governance` 那一行补上已知限制：`get_repository_governance_info` 权限校验走真实 IAM，但配额与保留策略
+  恒为 `null`。启用前得知道这个工具问不出数据。
+
+### 24.3 还没动的
+
+`GetRepositoryGovernanceInfoTool` 的占位实现本身没有改——它等的是 agent 服务接入仓库服务的 client，不是
+一次重构能解决的。这次只是把"它是占位的"这件事从代码注释里搬到了运维文档上，让决定是否启用 `governance`
+的人看得到。
