@@ -82,21 +82,6 @@ const val LOG_OPERATE_SESSION_DELETE = "AGENT_SESSION_DELETE"
 
 const val LOG_OPERATE_RUN = "AGENT_RUN"
 
-/** Redis 中 threadId -> userId 归属映射的 key 前缀 */
-const val AGENT_SESSION_OWNER_KEY_PREFIX = "bkrepo:agent:session-owner:"
-
-/** Redis 中同会话 run 互斥锁 key 前缀 */
-const val AGENT_RUN_LOCK_KEY_PREFIX = "bkrepo:agent:run-lock:"
-
-/** Redis 中 resume 幂等指纹 key 前缀 */
-const val AGENT_RESUME_IDEMPOTENCY_KEY_PREFIX = "bkrepo:agent:resume-idempotent:"
-
-/** Redis 中 thread 活跃 canonical runId key 前缀 */
-const val AGENT_ACTIVE_RUN_KEY_PREFIX = "bkrepo:agent:active-run:"
-
-/** Redis 中 run 取消信号 key 前缀 */
-const val AGENT_RUN_CANCEL_KEY_PREFIX = "bkrepo:agent:run-cancel:"
-
 const val LOG_OPERATE_RUN_STATUS = "AGENT_RUN_STATUS"
 
 const val LOG_OPERATE_RUN_STOP = "AGENT_RUN_STOP"

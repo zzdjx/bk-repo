@@ -22,7 +22,7 @@ import com.tencent.bkrepo.common.api.pojo.Page
  */
 interface AgentSessionService {
 
-    /** 创建新会话（Redis 归属 + Mongo 元数据）。 */
+    /** 创建新会话。 */
     fun createSession(userId: String, projectId: String): AgentSessionCreateResult
 
     /** 分页列出用户在项目下的 ACTIVE 会话。 */
@@ -44,9 +44,20 @@ interface AgentSessionService {
     fun deleteSession(userId: String, projectId: String, request: AgentSessionDeleteRequest)
 
     /**
-     * 校验会话可被当前用户在本项目下使用（run 链路内部调用）。
+     * 校验会话归当前用户在本项目下所有且处于 ACTIVE，会话不存在直接 404。
+     *
+     * 查询、改标题、停止、重连、删除这些路径都该用它：拿着一个打错的 threadId 调进来，正确的回答是
+     * "没这个会话"，而不是凭空造一条空会话出来。
      */
-    fun assertActiveSession(userId: String, projectId: String, threadId: String)
+    fun assertSessionAccessible(userId: String, projectId: String, threadId: String)
+
+    /**
+     * 同 [assertSessionAccessible]，但会话不存在时按 [threadId] 先补一条再校验（run 链路内部调用）。
+     *
+     * run 接口允许客户端自己生成 threadId 直接发起对话，不强制先调 `createSession`，所以这条路径上
+     * "会话不存在"是正常的首轮情形而不是错误。
+     */
+    fun ensureSessionAccessible(userId: String, projectId: String, threadId: String)
 
     /**
      * 记录最近一次 runId，并刷新会话 updatedAt（run 链路内部调用）。

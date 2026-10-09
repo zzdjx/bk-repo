@@ -40,7 +40,14 @@ enum class ToolRiskLevel {
     /** 可恢复写操作，默认 ASK */
     WRITE_REVERSIBLE,
 
-    /** 删除或不可恢复写操作，ASK 且二次 IAM */
+    /**
+     * 删除或不可恢复写操作，默认 ASK。
+     *
+     * 曾经写作"ASK 且二次 IAM"。实际并没有二次 IAM：resume 时只查过项目读权限，而那正是
+     * [com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 在同一次请求里已经查过的，
+     * 现已删除（原委见 [com.tencent.bkrepo.agent.hitl.AguiResumeValidator]）。本等级目前与
+     * [WRITE_REVERSIBLE] 的差别只在语义标注，不在执行路径。
+     */
     WRITE_DESTRUCTIVE,
 
     /** 禁止调用 */

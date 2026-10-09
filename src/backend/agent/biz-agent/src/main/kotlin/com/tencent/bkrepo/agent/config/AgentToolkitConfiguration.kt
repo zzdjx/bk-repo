@@ -40,9 +40,9 @@ class AgentToolkitConfiguration {
     @Bean
     fun agentToolkit(properties: EffectiveAgentRuntimeProperties): Toolkit {
         // AgentScope 2.0.1 默认改为并行执行；诊断类工具有依赖关系，必须显式串行（手册 §17.1）
-        // 领域工具由 DomainToolRegistrar 注册；frontend tools 由 FrontendToolRegistrar 以 SchemaOnlyTool 注册（Phase G-26）。
+        // 领域工具由 DomainToolRegistrar 注册；frontend tools 由 FrontendToolRegistrar 以 ExternalLocalTool 注册。
         val toolkit = Toolkit(ToolkitConfig.builder().parallel(false).build())
-        logger.info("agent toolkit: frontendToolsEnabled={}", properties.frontendToolsEnabled)
+        logger.info("agent toolkit: frontendToolsEnabled={}", properties.features.frontendToolsEnabled)
         return toolkit
     }
 

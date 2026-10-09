@@ -63,7 +63,8 @@ class AgentRetentionPolicy(
     fun sessionExpiry(projectId: String? = null, userId: String? = null): Instant? =
         expiryOf(properties.retention.sessionFor(projectId, userId))
 
-    private fun expiryOf(retention: Duration): Instant? {
+    /** 保留期换算成过期时刻；`0`/负值表示永不过期，返回 `null`。 */
+    fun expiryOf(retention: Duration): Instant? {
         if (retention.isZero || retention.isNegative) {
             return null
         }

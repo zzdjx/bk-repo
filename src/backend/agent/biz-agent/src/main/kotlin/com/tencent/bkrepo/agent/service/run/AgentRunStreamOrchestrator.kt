@@ -15,7 +15,7 @@ import com.tencent.bkrepo.agent.hitl.AgentInterruptStateRepository
 import com.tencent.bkrepo.agent.model.TAgentRun
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
-import com.tencent.bkrepo.agent.runtime.ActiveRunScope
+import com.tencent.bkrepo.agent.runtime.ActiveRunKey
 import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
 import com.tencent.bkrepo.agent.service.AgentRunEventService
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
@@ -54,16 +54,16 @@ class AgentRunStreamOrchestrator(
         runId: String?,
         lastEventIndex: Long?,
     ): SseEmitter {
-        val runScope = ActiveRunScope(userId, projectId, threadId)
-        val resolvedRunId = resolveRunId(runScope, threadId, runId)
+        val runKey = ActiveRunKey(userId, projectId, threadId)
+        val resolvedRunId = resolveRunId(runKey, threadId, runId)
         val existingRun = agentRunRecordService.findByRunId(resolvedRunId)
             ?: throw ParameterInvalidException("runId: run[$resolvedRunId] not found")
         if (existingRun.threadId != threadId) {
             throw ParameterInvalidException("threadId: run does not belong to thread[$threadId]")
         }
-        val stillRunning = existingRun.status == AgentRunStatus.RUNNING || activeRunManager.isRunning(runScope)
+        val stillRunning = existingRun.status == AgentRunStatus.RUNNING || activeRunManager.isRunning(runKey)
         return if (stillRunning) {
-            streamActiveRun(threadId, resolvedRunId, lastEventIndex, runScope)
+            streamActiveRun(threadId, resolvedRunId, lastEventIndex, runKey)
         } else {
             replayTerminalRun(threadId, resolvedRunId, lastEventIndex ?: -1L, existingRun)
         }
@@ -74,11 +74,11 @@ class AgentRunStreamOrchestrator(
         return replayTerminalRun(input.threadId, input.runId, -1L, existingRun)
     }
 
-    private fun resolveRunId(scope: ActiveRunScope, threadId: String, runId: String?): String {
+    private fun resolveRunId(key: ActiveRunKey, threadId: String, runId: String?): String {
         if (!runId.isNullOrBlank()) {
             return runId
         }
-        activeRunManager.getActiveRunId(scope)?.let { return it }
+        activeRunManager.getActiveRunId(key)?.let { return it }
         return agentRunRecordService.findLatestByThreadId(threadId)?.runId
             ?: throw ParameterInvalidException("runId: no run found for thread[$threadId]")
     }
@@ -110,7 +110,7 @@ class AgentRunStreamOrchestrator(
         threadId: String,
         runId: String,
         lastEventIndex: Long?,
-        runScope: ActiveRunScope,
+        runKey: ActiveRunKey,
     ): SseEmitter {
         logger.info("live stream run[{}] thread[{}]", runId, threadId)
         val completion = StreamCompletion(SseEmitter(properties.reconnectTimeout.toMillis()))
@@ -122,7 +122,7 @@ class AgentRunStreamOrchestrator(
                 if (attachLocalSink(runId, threadId, cursor, completion)) {
                     return@schedule
                 }
-                pollRemoteEvents(runId, threadId, runScope, cursor, completion)
+                pollRemoteEvents(runId, threadId, runKey, cursor, completion)
             } catch (ex: Exception) {
                 completion.completeWithError(ex)
             }
@@ -162,7 +162,7 @@ class AgentRunStreamOrchestrator(
     private fun pollRemoteEvents(
         runId: String,
         threadId: String,
-        runScope: ActiveRunScope,
+        runKey: ActiveRunKey,
         startCursor: Long,
         completion: StreamCompletion,
     ) {
@@ -180,7 +180,7 @@ class AgentRunStreamOrchestrator(
                 }
             }
             val latestRun = agentRunRecordService.findByRunId(runId)
-            if (latestRun?.status != AgentRunStatus.RUNNING && !activeRunManager.isRunning(runScope)) {
+            if (latestRun?.status != AgentRunStatus.RUNNING && !activeRunManager.isRunning(runKey)) {
                 completion.complete()
                 return
             }

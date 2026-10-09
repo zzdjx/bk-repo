@@ -55,8 +55,8 @@ class AgentRetentionBackfillTest {
                 TAgentRunEvent::class.java,
                 TAgentRun::class.java,
                 TAgentToolCall::class.java,
-                TAgentMessage::class.java,
                 TAgentSession::class.java,
+                TAgentMessage::class.java,
             ),
             types.allValues,
         )
@@ -92,6 +92,35 @@ class AgentRetentionBackfillTest {
         verify(mongoTemplate).updateMulti(any(), any<Update>(), eq(TAgentSession::class.java))
     }
 
+    @Test
+    @DisplayName("配了 overrides 的集合应按名单分桶补戳，而不是一刀切用全局默认保留期")
+    fun `stamps each override bucket separately`() {
+        stubUpdateResult(modified = 1)
+        val longLived = EffectiveAgentRetention.Override(
+            projectIds = setOf("audit-project"),
+            userIds = emptySet(),
+            runEvent = Duration.ofDays(365),
+            run = null,
+            toolCall = null,
+            message = null,
+            session = null,
+        )
+
+        backfillWith(EffectiveAgentRetention.defaults().copy(overrides = listOf(longLived)))
+
+        val queries = argumentCaptor<Query>()
+        verify(mongoTemplate, times(2))
+            .updateMulti(queries.capture(), any<Update>(), eq(TAgentRunEvent::class.java))
+
+        val scoped = queries.allValues[0].queryObject["\$and"] as List<*>
+        assertTrue(
+            scoped.any { (it as Document)["projectId"] != null },
+            "第一桶应带上 override 的名单条件",
+        )
+        val fallback = queries.allValues[1].queryObject
+        assertTrue(fallback["\$and"] == null, "兜底桶不应带名单条件，靠'缺 expiresAt'跳过已处理的文档")
+    }
+
     private fun stubUpdateResult(modified: Long) {
         val result = mock<UpdateResult>()
         whenever(result.modifiedCount).thenReturn(modified)
@@ -100,6 +129,6 @@ class AgentRetentionBackfillTest {
 
     private fun backfillWith(retention: EffectiveAgentRetention) {
         val properties = EffectiveAgentRuntimeProperties.defaults().copy(retention = retention)
-        AgentRetentionBackfill(mongoTemplate, AgentRetentionPolicy(properties)).backfillMissingExpiry()
+        AgentRetentionBackfill(mongoTemplate, AgentRetentionPolicy(properties), properties).backfillMissingExpiry()
     }
 }

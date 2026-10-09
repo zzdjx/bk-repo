@@ -21,8 +21,8 @@ import java.util.concurrent.TimeUnit
 /**
  * 会话锁续期看门狗：周期性给本副本在跑的 run 续上会话锁。
  *
- * 不做这件事的后果是"run 的时长上限被锁 TTL 悄悄限定了"。锁（`RedisActiveRunStateStore`）是一把 TTL
- * 固定的 Redis 锁，默认 `agent.runtime.active-run-ttl` = 11 分钟；而一个 run 有多轮推理与工具调用，
+ * 不做这件事的后果是"run 的时长上限被锁 TTL 悄悄限定了"。运行权（`MongoActiveRunStateStore`）是一把 TTL
+ * 固定的锁，默认 `agent.runtime.active-run-ttl` = 11 分钟；而一个 run 有多轮推理与工具调用，
  * 总时长取决于模型和工具，不受我们控制。超过 TTL 后锁自己消失，同一会话上就能并发起第二个 run，两个
  * run 交替写同一份 AgentState——不是变慢，是状态被写坏。压缩单次模型调用的超时预算（见
  * [com.tencent.bkrepo.agent.config.AgentModelBudgetValidator]）只能让单次调用不越界，管不住累计时长。
@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit
  * 不该受别处调度配置影响；单线程足够，续期只是每个在跑 run 两次 EXPIRE。
  *
  * 续期间隔由锁 TTL 推导（TTL 的三分之一，下限 5 秒），不额外开配置项：这两个值必须联动，暴露成两个
- * 独立配置只会制造"间隔比 TTL 还长"这类无意义的错配。取三分之一是为了容忍连续两次续期失败（Redis
+ * 独立配置只会制造"间隔比 TTL 还长"这类无意义的错配。取三分之一是为了容忍连续两次续期失败（存储
  * 抖动、线程被拖住）仍不至于丢锁。
  */
 @Component

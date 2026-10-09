@@ -32,7 +32,7 @@ import org.springframework.beans.factory.NoSuchBeanDefinitionException
 import org.springframework.beans.factory.ObjectProvider
 
 /**
- * 测试用的空 [ObjectProvider]：模拟"没有 Redis、`agentTaskRepository` bean 不存在"的场景，
+ * 测试用的空 [ObjectProvider]：模拟"`agentTaskRepository` bean 不存在"的场景，
  * `getIfAvailable()` 走 [ObjectProvider] 默认实现，捕获 [NoSuchBeanDefinitionException] 后返回 `null`。
  */
 class NoopTaskRepositoryProvider : ObjectProvider<TaskRepository> {

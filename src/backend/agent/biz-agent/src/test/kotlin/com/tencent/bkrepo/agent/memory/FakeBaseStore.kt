@@ -31,9 +31,9 @@ import io.agentscope.harness.agent.filesystem.remote.store.BaseStore
 import io.agentscope.harness.agent.filesystem.remote.store.StoreItem
 
 /**
- * 纯内存的 [BaseStore] 假实现，供 [MemoryFilesystemAccessTest] 使用，不需要真实 Redis 或
- * Mockito 驱动的假 Redis（[com.tencent.bkrepo.agent.task.MongoStoreTest] 用的那种）——
- * 因为这里要测的是 [MemoryFilesystemAccess] 自己的命名空间/路由逻辑是否正确，不是 Redis 交互细节。
+ * 纯内存的 [BaseStore] 假实现，供 [MemoryFilesystemAccessTest] 使用，不需要真实存储或
+ * Mockito 驱动的假 DAO（[com.tencent.bkrepo.agent.task.MongoStoreTest] 用的那种）——
+ * 因为这里要测的是 [MemoryFilesystemAccess] 自己的命名空间/路由逻辑是否正确，不是存储交互细节。
  */
 class FakeBaseStore : BaseStore {
 

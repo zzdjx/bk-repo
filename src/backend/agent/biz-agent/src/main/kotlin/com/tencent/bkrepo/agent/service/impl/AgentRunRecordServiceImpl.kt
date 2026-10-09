@@ -44,8 +44,15 @@ class AgentRunRecordServiceImpl(
     private val retentionPolicy: AgentRetentionPolicy,
 ) : AgentRunRecordService {
 
+    /**
+     * 只为算 `durationMs`：run 记录里的 `startedAt` 是入库时写的，收尾时再查一次库只为了算个时长不划算，
+     * 所以在本副本内存一份。[finishRun] 取用后立即 `remove`，不会随服务运行时长单调增长。
+     *
+     * 这里没有"已收尾 runId"的去重集合：重复收尾由 `AgentRunDao.finishRun` 带的 `status = RUNNING`
+     * 条件挡住，第二次更新匹配不到行、返回 0，天然幂等且跨副本有效。额外维护一个进程内集合既管不住跨副本
+     * 的重复，又因为成功路径上没人删而只增不减——那正是之前的实现，每服务一个 run 就永久多占一条。
+     */
     private val startedAtByRunId = ConcurrentHashMap<String, LocalDateTime>()
-    private val finishedRunIds = ConcurrentHashMap.newKeySet<String>()
 
     override fun findByRunId(runId: String): TAgentRun? = agentRunDao.findByRunId(runId)
 
@@ -92,7 +99,6 @@ class AgentRunRecordServiceImpl(
         cancelReason: String?,
         errorCode: String?,
     ) {
-        if (!finishedRunIds.add(runId)) return
         val startedAt = startedAtByRunId.remove(runId) ?: LocalDateTime.now()
         val finishedAt = LocalDateTime.now()
         try {
@@ -108,7 +114,6 @@ class AgentRunRecordServiceImpl(
                 logger.debug("agent run[$runId] already finished or missing")
             }
         } catch (ex: Exception) {
-            finishedRunIds.remove(runId)
             logger.warn("failed to finish agent run[$runId]", ex)
         }
     }

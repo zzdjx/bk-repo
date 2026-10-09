@@ -57,7 +57,6 @@ data class AgentRuntimeProperties(
      * 可回溯、不能随 Redis 逐出的持久化数据，放 Redis 本身就是定位错误。
      */
     data class State(
-        var collection: String = DEFAULT_COLLECTION,
         /**
          * 会话状态保留天数，到期由 Mongo TTL 索引自动清理。
          *
@@ -67,7 +66,6 @@ data class AgentRuntimeProperties(
         var ttlDays: Int = DEFAULT_TTL_DAYS,
     ) {
         companion object {
-            const val DEFAULT_COLLECTION = "agent_state"
             const val DEFAULT_TTL_DAYS = 30
         }
     }
@@ -97,7 +95,6 @@ data class AgentRuntimeProperties(
         var maintenanceInterval: Duration = DEFAULT_MAINTENANCE_INTERVAL,
     ) {
         companion object {
-            const val DEFAULT_KEY_PREFIX = "bkrepo:agent:memory-store:"
             val DEFAULT_DAILY_LEDGER_RETENTION: Duration = Duration.ofDays(90)
             val DEFAULT_MAINTENANCE_INTERVAL: Duration = Duration.ofHours(24)
         }
@@ -191,17 +188,6 @@ data class AgentRuntimeProperties(
          * 用户对自己的数据始终有完全控制权，这个开关防的是 Agent 误操作，不是冻结整个服务。
          */
         var readOnlyMode: Boolean = DEFAULT_READ_ONLY_MODE,
-        /**
-         * 缺 Redis 时是否拒绝启动（生产应置 true），见 [com.tencent.bkrepo.agent.config.AgentRedisRequirementValidator]。
-         *
-         * 注意这里跟会话状态无关——状态、长期记忆、后台任务、挂起的 interrupt 都落 Mongo，Mongo 本身
-         * 就是全服务硬依赖，没有"退化"一说。真正会在缺 Redis 时静默退化为进程内的只有三样协调能力：
-         * 会话归属锁、活跃 run 注册表、resume 幂等标记。它们退化之后单副本仍然能跑通，但多副本下会出现
-         * 「A 副本起的 run，B 副本停不掉」这种只在生产才暴露的问题，所以需要一个显式开关在启动期拦住。
-         *
-         * 和 [readOnlyMode] 一样默认 `false`：本地开发不接 Redis 也要能起来。
-         */
-        var requireRedis: Boolean = DEFAULT_REQUIRE_REDIS,
     )
 
     /**
@@ -212,7 +198,7 @@ data class AgentRuntimeProperties(
      * 这些启动期就装配好的全局单例改造成按请求动态计算，成本和风险与之前评估过的"委派硬并发限制"是
      * 同一个量级，窄范围内先不做；等有了"按名单决定能用哪些子 Agent/工具"的真实需求再付这个代价。
      *
-     * 默认 [enabled] = false：不开灰度时对现有部署零影响，与 `read-only-mode`/`require-redis` 同样是
+     * 默认 [enabled] = false：不开灰度时对现有部署零影响，与 `read-only-mode` 同样是
      * "限制性功能默认关闭"。
      *
      * ## 运行时热更新
@@ -296,10 +282,8 @@ data class AgentRuntimeProperties(
         val DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration.ofSeconds(15)
         const val DEFAULT_FRONTEND_TOOLS_ENABLED = true
         const val DEFAULT_READ_ONLY_MODE = false
-        const val DEFAULT_REQUIRE_REDIS = false
         const val DEFAULT_MAX_DELEGATIONS = 8
         const val DEFAULT_MAX_PARALLEL_DELEGATIONS = 1
-        const val DEFAULT_MODEL_PROFILE = "default"
         const val DEFAULT_MAX_STEPS = 8
     }
 }
@@ -397,6 +381,27 @@ data class EffectiveAgentRetention(
     fun sessionFor(projectId: String? = null, userId: String? = null): Duration =
         matchOverride(projectId, userId)?.session ?: session
 
+    /**
+     * 把某一项的保留期拆成「名单 → 保留期」的有序分桶，供需要按维度批量处理而不是逐条判断的场景使用
+     * （目前只有 [com.tencent.bkrepo.agent.retention.AgentRetentionBackfill]）。
+     *
+     * [pick] 从一条 override 里取出这一项的覆盖值，为 `null` 表示这条 override 没配这一项、该落回
+     * [global]。返回的最后一桶名单为空，代表"谁都没命中"的全局默认。
+     *
+     * 桶的顺序与 [matchOverride] 的"取第一个命中项"严格一致：按序处理并让后面的桶跳过已处理的文档，
+     * 就能复现逐条判断时的同一套优先级。
+     */
+    fun bucketsOf(pick: (Override) -> Duration?, global: Duration): List<Bucket> =
+        overrides.map { Bucket(it.projectIds, it.userIds, pick(it) ?: global) } +
+            Bucket(emptySet(), emptySet(), global)
+
+    /** 见 [bucketsOf]。名单都为空时表示兜底桶，匹配所有剩余文档。 */
+    data class Bucket(
+        val projectIds: Set<String>,
+        val userIds: Set<String>,
+        val retention: Duration,
+    )
+
     companion object {
         fun from(retention: AgentRuntimeProperties.Retention): EffectiveAgentRetention = EffectiveAgentRetention(
             runEvent = retention.runEvent,
@@ -430,6 +435,10 @@ data class EffectiveAgentRetention(
  * [com.tencent.bkrepo.agent.service.run.AgentRunOrchestrator] 直接注入 live 的
  * [AgentRuntimeProperties] 现读。这里刻意不收录 `gray` 字段——它要是出现在这份快照里，
  * 任何人读到的都是"启动那一刻"的名单，放量改了名单却不生效，而且排查时看不出任何异常。
+ *
+ * 结构与 YAML 严格同构：[AgentRuntimeProperties] 里是嵌套组的，这里也是嵌套组，字段名一一对应。
+ * 所以 `agent.runtime.memory.daily-ledger-retention` 永远读作 `properties.memory.dailyLedgerRetention`，
+ * 从配置项反查使用点直接 grep 末段名字即可，不需要先知道它在快照里被拍平成了什么。
  */
 data class EffectiveAgentRuntimeProperties(
     val name: String,
@@ -444,13 +453,9 @@ data class EffectiveAgentRuntimeProperties(
     val reconnectPollInterval: Duration,
     val reconnectTimeout: Duration,
     val shutdownTimeout: Duration,
-    val stateCollection: String,
-    val stateTtlDays: Int,
-    val requireRedis: Boolean,
-    val memoryDailyLedgerRetention: Duration,
-    val memoryMaintenanceInterval: Duration,
-    val frontendToolsEnabled: Boolean,
-    val readOnlyMode: Boolean,
+    val state: EffectiveAgentState,
+    val memory: EffectiveAgentMemory,
+    val features: EffectiveAgentFeatures,
     val retention: EffectiveAgentRetention,
     val topology: EffectiveAgentTopology,
 ) {
@@ -458,6 +463,21 @@ data class EffectiveAgentRuntimeProperties(
         fun defaults(): EffectiveAgentRuntimeProperties = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
     }
 }
+
+/** 见 [AgentRuntimeProperties.State]。 */
+data class EffectiveAgentState(val ttlDays: Int)
+
+/** 见 [AgentRuntimeProperties.Memory]。 */
+data class EffectiveAgentMemory(
+    val dailyLedgerRetention: Duration,
+    val maintenanceInterval: Duration,
+)
+
+/** 见 [AgentRuntimeProperties.Features]。 */
+data class EffectiveAgentFeatures(
+    val frontendToolsEnabled: Boolean,
+    val readOnlyMode: Boolean,
+)
 
 object AgentRuntimePropertiesResolver {
 
@@ -475,13 +495,15 @@ object AgentRuntimePropertiesResolver {
             reconnectPollInterval = runtime.reconnectPollInterval,
             reconnectTimeout = runtime.reconnectTimeout,
             shutdownTimeout = runtime.shutdownTimeout,
-            stateCollection = runtime.state.collection,
-            stateTtlDays = runtime.state.ttlDays,
-            requireRedis = runtime.features.requireRedis,
-            memoryDailyLedgerRetention = runtime.memory.dailyLedgerRetention,
-            memoryMaintenanceInterval = runtime.memory.maintenanceInterval,
-            frontendToolsEnabled = runtime.features.frontendToolsEnabled,
-            readOnlyMode = runtime.features.readOnlyMode,
+            state = EffectiveAgentState(ttlDays = runtime.state.ttlDays),
+            memory = EffectiveAgentMemory(
+                dailyLedgerRetention = runtime.memory.dailyLedgerRetention,
+                maintenanceInterval = runtime.memory.maintenanceInterval,
+            ),
+            features = EffectiveAgentFeatures(
+                frontendToolsEnabled = runtime.features.frontendToolsEnabled,
+                readOnlyMode = runtime.features.readOnlyMode,
+            ),
             retention = EffectiveAgentRetention.from(runtime.retention),
             topology = EffectiveAgentTopology.from(runtime.topology),
         )

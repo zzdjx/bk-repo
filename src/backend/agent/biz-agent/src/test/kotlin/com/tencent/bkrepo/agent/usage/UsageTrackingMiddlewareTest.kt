@@ -23,9 +23,8 @@ import com.tencent.bkrepo.agent.config.properties.AgentLlmProperties
 import com.tencent.bkrepo.agent.config.properties.AgentLlmPropertiesResolver
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryProperties
 import com.tencent.bkrepo.agent.config.properties.AgentMemoryPropertiesResolver
-import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentFeatures
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
-import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
 import com.tencent.bkrepo.agent.constant.RUNTIME_CONTEXT_RUN_ID
 import com.tencent.bkrepo.agent.subagent.DelegationBudgetMiddleware
 import com.tencent.bkrepo.agent.subagent.DelegationConcurrencyGuard
@@ -78,28 +77,12 @@ class UsageTrackingMiddlewareTest {
 
     @Test
     fun `一轮无工具对话结束后应记录一次成功的模型调用用量`(@TempDir workspace: Path) {
-        val runtimeProperties = EffectiveAgentRuntimeProperties(
+        val runtimeProperties = EffectiveAgentRuntimeProperties.defaults().copy(
             name = "usage-smoke-agent",
             sysPrompt = "test",
             maxIters = 3,
             workspace = workspace.toString(),
-            sseTimeout = Duration.ofMinutes(10),
-            maxMessageLength = 32 * 1024,
-            maxThreadIdLength = 128,
-            sessionTtl = Duration.ofDays(30),
-            activeRunTtl = Duration.ofMinutes(11),
-            reconnectPollInterval = Duration.ofMillis(500),
-            reconnectTimeout = Duration.ofMinutes(10),
-            shutdownTimeout = Duration.ofSeconds(15),
-            stateCollection = "agent_state",
-            stateTtlDays = 30,
-            requireRedis = false,
-            memoryDailyLedgerRetention = Duration.ofDays(90),
-            memoryMaintenanceInterval = Duration.ofHours(24),
-            frontendToolsEnabled = false,
-            readOnlyMode = false,
-            retention = EffectiveAgentRetention.defaults(),
-            topology = EffectiveAgentTopology.defaults(),
+            features = EffectiveAgentFeatures(frontendToolsEnabled = false, readOnlyMode = false),
         )
         val llmProperties = AgentLlmPropertiesResolver.resolve(
             AgentLlmProperties(

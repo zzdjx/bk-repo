@@ -29,8 +29,10 @@ class AgentFactory {
         .description(definition.description)
         .inlineAgentsBody(definition.sysPrompt)
         .tools(definition.allowedToolNames.toList())
+        // `steps` 就是子代理的最大迭代轮数：`HarnessAgentBuilderSupport` 读 `getSteps()` 后直接喂给
+        // `HarnessAgent.Builder.maxIters(int)`。`SubagentDeclaration` 上另有一个 `maxIters` 字段，但
+        // 框架自己从不读它（2.0.4 的 harness 包里 `getMaxIters()` 零调用），设了也没有任何效果。
         .steps(binding.maxSteps)
-        .maxIters(binding.maxSteps)
         .inheritParentPermissions(true)
         .mode(SubagentDeclaration.Mode.SUBAGENT)
         .persistSession(false)

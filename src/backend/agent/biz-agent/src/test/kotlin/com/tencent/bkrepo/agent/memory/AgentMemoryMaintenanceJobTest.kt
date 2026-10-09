@@ -36,7 +36,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.mock
-import org.springframework.beans.factory.ObjectProvider
 import java.time.Duration
 import java.time.LocalDate
 
@@ -47,7 +46,7 @@ import java.time.LocalDate
  * [AgentMemoryMaintenanceJob.extractUserId]/[AgentMemoryMaintenanceJob.namespacePattern]）直接调用验证；
  * [AgentMemoryMaintenanceJob.cleanupUser] 用 [FakeBaseStore] 驱动的 [MemoryFilesystemAccess] 验证真实
  * 删除行为。反查所有用户这一步（[com.tencent.bkrepo.agent.task.MongoStore.scanNamespaces]）不在这里
- * 覆盖——它是纯 Redis 交互细节，已经在 `MongoStoreTest` 里独立验证过，这里只需要保证拿到 userId
+ * 覆盖——它是纯存储交互细节，已经在 `MongoStoreTest` 里独立验证过，这里只需要保证拿到 userId
  * 列表之后的清理逻辑是对的（与 [com.tencent.bkrepo.agent.runtime.ActiveRunLockHeartbeatTest] 同样只测
  * 调度器包装的纯逻辑、不测 `@PostConstruct`/`ScheduledExecutorService` 本身的做法一致）。
  */

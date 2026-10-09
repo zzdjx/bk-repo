@@ -48,7 +48,12 @@ class AgentStateConfiguration {
      * `set(key, value)`，整个 redis extension 里没有 `expire`/`setex`/`ttl` 的调用——所以会话状态写进
      * Redis 之后永不过期，只能靠外部任务扫 key 去清。而会话状态是需要长期可回溯的持久化数据，被 Redis
      * 的内存淘汰策略逐出就等于会话凭空失忆，本来也不该和缓存共用一套存储。换 Mongo 之后到期由 TTL 索引
-     * （框架按 [EffectiveAgentRuntimeProperties.stateTtlDays] 建）自动回收。
+     * （框架按 `agent.runtime.state.ttl-days` 建）自动回收。
+     *
+     * ## 集合名为什么是写死的
+     *
+     * [STATE_COLLECTION] 不开放配置，和本模块其余八张集合（都在各自 `@Document` 注解里写死）保持一致。
+     * 单独给它一个配置项，只会让人以为集合名整体可配，实际改了也只搬得动这一张表。
      *
      * ## 没有降级分支
      *
@@ -67,18 +72,19 @@ class AgentStateConfiguration {
     ): AgentStateStore {
         val databaseName = mongoDatabaseFactory.mongoDatabase.name
         logger.info(
-            "Agent state store: mongodb db[$databaseName] collection[${properties.stateCollection}] " +
-                "ttlDays[${properties.stateTtlDays}]"
+            "Agent state store: mongodb db[$databaseName] collection[$STATE_COLLECTION] " +
+                "ttlDays[${properties.state.ttlDays}]"
         )
         return MongoAgentStateStore.builder()
             .mongoClient(mongoClient)
             .databaseName(databaseName)
-            .collectionName(properties.stateCollection)
-            .ttlDays(properties.stateTtlDays)
+            .collectionName(STATE_COLLECTION)
+            .ttlDays(properties.state.ttlDays)
             .build()
     }
 
     companion object {
+        private const val STATE_COLLECTION = "agent_state"
         private val logger = LoggerFactory.getLogger(AgentStateConfiguration::class.java)
     }
 }

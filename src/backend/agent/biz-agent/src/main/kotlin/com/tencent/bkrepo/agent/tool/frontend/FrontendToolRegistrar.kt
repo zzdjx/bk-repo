@@ -46,14 +46,14 @@ class FrontendToolRegistrar(
 
     @PostConstruct
     fun register() {
-        if (!runtimeProperties.frontendToolsEnabled) {
+        if (!runtimeProperties.features.frontendToolsEnabled) {
             logger.info("frontend tools disabled, skipping ExternalLocalTool registration")
             return
         }
         // 只读模式下写工具压根不注册：模型看不到它们，也就不会承诺"我去帮你改配置/删任务"再被
         // PermissionEngine 拒掉（既省一轮无用调用，回答也更自洽）。PermissionEngine 侧还有一层
         // DENY 兜底（见 AgentPermissionRulesConfiguration），防的是别处又把写工具挂回 toolkit。
-        val readOnly = runtimeProperties.readOnlyMode
+        val readOnly = runtimeProperties.features.readOnlyMode
         val registered = LocalToolDefinitions.allTools()
             .filterNot { readOnly && catalog.isWriteTool(it.name) }
             .onEach { toolkit.registerAgentTool(ExternalLocalTool(it)) }

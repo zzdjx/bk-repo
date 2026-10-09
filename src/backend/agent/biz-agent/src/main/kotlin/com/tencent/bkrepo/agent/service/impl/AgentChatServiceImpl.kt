@@ -12,7 +12,7 @@ import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.pojo.AgentRunStatusInfo
 import com.tencent.bkrepo.agent.pojo.AgentRunStopRequest
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
-import com.tencent.bkrepo.agent.runtime.ActiveRunScope
+import com.tencent.bkrepo.agent.runtime.ActiveRunKey
 import com.tencent.bkrepo.agent.service.AgentChatService
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import com.tencent.bkrepo.agent.service.AgentSessionService
@@ -21,7 +21,6 @@ import com.tencent.bkrepo.agent.service.run.AgentRunStreamOrchestrator
 import com.tencent.bkrepo.agent.session.AgentPendingInterruptStore
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.exception.ParameterInvalidException
-import com.tencent.bkrepo.common.api.util.Preconditions
 import com.tencent.bkrepo.common.metadata.permission.PermissionManager
 import io.agentscope.core.agui.model.RunAgentInput
 import org.springframework.stereotype.Service
@@ -44,8 +43,8 @@ class AgentChatServiceImpl(
 
     override fun getRunStatus(userId: String, projectId: String, threadId: String): AgentRunStatusInfo {
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
-        agentSessionService.assertActiveSession(userId, projectId, threadId)
-        val scope = ActiveRunScope(userId, projectId, threadId)
+        agentSessionService.assertSessionAccessible(userId, projectId, threadId)
+        val scope = ActiveRunKey(userId, projectId, threadId)
         val running = activeRunManager.isRunning(scope)
         val activeRunId = activeRunManager.getActiveRunId(scope)
         val latestRun = agentRunRecordService.findLatestByThreadId(threadId)
@@ -66,8 +65,8 @@ class AgentChatServiceImpl(
 
     override fun stopRun(userId: String, projectId: String, request: AgentRunStopRequest): Boolean {
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
-        agentSessionService.assertActiveSession(userId, projectId, request.threadId)
-        val scope = ActiveRunScope(userId, projectId, request.threadId)
+        agentSessionService.assertSessionAccessible(userId, projectId, request.threadId)
+        val scope = ActiveRunKey(userId, projectId, request.threadId)
         val activeRunId = activeRunManager.getActiveRunId(scope)
             ?: agentRunRecordService.findLatestByThreadId(request.threadId)
                 ?.takeIf { it.status == AgentRunStatus.RUNNING }
@@ -90,7 +89,7 @@ class AgentChatServiceImpl(
         lastEventIndex: Long?,
     ): SseEmitter {
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
-        agentSessionService.assertActiveSession(userId, projectId, threadId)
+        agentSessionService.assertSessionAccessible(userId, projectId, threadId)
         return agentRunStreamOrchestrator.stream(userId, projectId, threadId, runId, lastEventIndex)
     }
 }

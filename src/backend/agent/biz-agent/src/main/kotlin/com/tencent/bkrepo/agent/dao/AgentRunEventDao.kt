@@ -50,7 +50,7 @@ class AgentRunEventDao : SimpleMongoDao<TAgentRunEvent>() {
         return findOne(query)?.eventIndex
     }
 
-    fun removeByRunId(runId: String) {
-        remove(Query(Criteria.where(TAgentRunEvent::runId.name).`is`(runId)))
+    fun removeByThreadId(threadId: String) {
+        remove(Query(Criteria.where(TAgentRunEvent::threadId.name).`is`(threadId)))
     }
 }

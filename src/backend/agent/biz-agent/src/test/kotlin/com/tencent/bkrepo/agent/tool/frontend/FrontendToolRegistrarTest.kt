@@ -8,6 +8,7 @@
 
 package com.tencent.bkrepo.agent.tool.frontend
 
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentFeatures
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
 import com.tencent.bkrepo.agent.tool.local.LocalToolDefinitions
 import io.agentscope.core.tool.Toolkit
@@ -66,6 +67,10 @@ class FrontendToolRegistrarTest {
     }
 
     private fun propertiesOf(readOnlyMode: Boolean, frontendToolsEnabled: Boolean): EffectiveAgentRuntimeProperties =
-        EffectiveAgentRuntimeProperties.defaults()
-            .copy(readOnlyMode = readOnlyMode, frontendToolsEnabled = frontendToolsEnabled)
+        EffectiveAgentRuntimeProperties.defaults().copy(
+            features = EffectiveAgentFeatures(
+                frontendToolsEnabled = frontendToolsEnabled,
+                readOnlyMode = readOnlyMode,
+            ),
+        )
 }

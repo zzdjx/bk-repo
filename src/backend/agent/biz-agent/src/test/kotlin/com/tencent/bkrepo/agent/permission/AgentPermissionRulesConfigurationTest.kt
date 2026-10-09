@@ -8,9 +8,8 @@
 
 package com.tencent.bkrepo.agent.permission
 
-import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRetention
+import com.tencent.bkrepo.agent.config.properties.EffectiveAgentFeatures
 import com.tencent.bkrepo.agent.config.properties.EffectiveAgentRuntimeProperties
-import com.tencent.bkrepo.agent.config.properties.EffectiveAgentTopology
 import com.tencent.bkrepo.agent.tool.local.LocalToolDefinitions
 import io.agentscope.core.permission.PermissionBehavior
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -139,27 +138,7 @@ class AgentPermissionRulesConfigurationTest {
     }
 
     private fun defaultRuntimeProperties(readOnly: Boolean = false): EffectiveAgentRuntimeProperties =
-        EffectiveAgentRuntimeProperties(
-            name = "bkrepo-assistant",
-            sysPrompt = "test",
-            maxIters = 8,
-            workspace = ".",
-            sseTimeout = java.time.Duration.ofMinutes(5),
-            maxMessageLength = 32 * 1024,
-            maxThreadIdLength = 128,
-            sessionTtl = java.time.Duration.ofDays(30),
-            activeRunTtl = java.time.Duration.ofMinutes(11),
-            reconnectPollInterval = java.time.Duration.ofMillis(500),
-            reconnectTimeout = java.time.Duration.ofMinutes(10),
-            shutdownTimeout = java.time.Duration.ofSeconds(15),
-            stateCollection = "agent_state",
-            stateTtlDays = 30,
-            requireRedis = false,
-            memoryDailyLedgerRetention = java.time.Duration.ofDays(90),
-            memoryMaintenanceInterval = java.time.Duration.ofHours(24),
-            frontendToolsEnabled = true,
-            readOnlyMode = readOnly,
-            retention = EffectiveAgentRetention.defaults(),
-            topology = EffectiveAgentTopology.defaults(),
+        EffectiveAgentRuntimeProperties.defaults().copy(
+            features = EffectiveAgentFeatures(frontendToolsEnabled = true, readOnlyMode = readOnly),
         )
 }

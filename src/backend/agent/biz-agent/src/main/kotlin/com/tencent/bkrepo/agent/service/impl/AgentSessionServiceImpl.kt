@@ -22,12 +22,12 @@ import com.tencent.bkrepo.agent.pojo.AgentSessionStatus
 import com.tencent.bkrepo.agent.pojo.AgentSessionUpdateRequest
 import com.tencent.bkrepo.agent.retention.AgentRetentionPolicy
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
-import com.tencent.bkrepo.agent.runtime.ActiveRunScope
+import com.tencent.bkrepo.agent.runtime.ActiveRunKey
+import com.tencent.bkrepo.agent.service.AgentRunEventService
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import com.tencent.bkrepo.agent.service.AgentSessionService
 import com.tencent.bkrepo.agent.service.AgentToolCallRecordService
 import com.tencent.bkrepo.agent.session.AgentPendingInterruptStore
-import com.tencent.bkrepo.agent.session.AgentSessionStore
 import com.tencent.bkrepo.auth.pojo.enums.PermissionAction
 import com.tencent.bkrepo.common.api.constant.StringPool
 import com.tencent.bkrepo.common.api.exception.NotFoundException
@@ -46,8 +46,8 @@ class AgentSessionServiceImpl(
     private val agentSessionDao: AgentSessionDao,
     private val agentMessageDao: AgentMessageDao,
     private val agentRunRecordService: AgentRunRecordService,
+    private val agentRunEventService: AgentRunEventService,
     private val agentToolCallRecordService: AgentToolCallRecordService,
-    private val agentSessionStore: AgentSessionStore,
     private val activeRunManager: ActiveRunManager,
     private val pendingInterruptStore: AgentPendingInterruptStore,
     private val properties: EffectiveAgentRuntimeProperties,
@@ -57,13 +57,7 @@ class AgentSessionServiceImpl(
     override fun createSession(userId: String, projectId: String): AgentSessionCreateResult {
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
         val threadId = AGENT_THREAD_ID_PREFIX + StringPool.uniqueId()
-        agentSessionStore.bindSession(userId, projectId, threadId)
-        return try {
-            insertSessionRecord(threadId, userId, projectId)
-        } catch (ex: Exception) {
-            agentSessionStore.removeSession(projectId, threadId)
-            throw ex
-        }
+        return insertSessionRecord(threadId, userId, projectId)
     }
 
     override fun listSessions(
@@ -85,14 +79,14 @@ class AgentSessionServiceImpl(
         pageSize: Int,
     ): Page<AgentMessageInfo> {
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
-        assertActiveSession(userId, projectId, threadId)
+        assertSessionAccessible(userId, projectId, threadId)
         val page = agentMessageDao.pageByThreadId(threadId, pageNumber, pageSize)
         return Page(page.pageNumber, page.pageSize, page.totalRecords, page.records.map { toMessageInfo(it) })
     }
 
     override fun updateSession(userId: String, projectId: String, request: AgentSessionUpdateRequest) {
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId, userId)
-        assertActiveSession(userId, projectId, request.threadId)
+        assertSessionAccessible(userId, projectId, request.threadId)
         val normalizedTitle = request.title.trim()
         Preconditions.checkNotBlank(normalizedTitle, "title")
         Preconditions.checkArgument(normalizedTitle.length <= properties.maxMessageLength, "title")
@@ -104,7 +98,13 @@ class AgentSessionServiceImpl(
         deleteSessionInternal(userId, projectId, request.threadId)
     }
 
-    override fun assertActiveSession(userId: String, projectId: String, threadId: String) {
+    override fun assertSessionAccessible(userId: String, projectId: String, threadId: String) {
+        val session = agentSessionDao.findByThreadId(threadId)
+            ?: throw NotFoundException(CommonMessageCode.RESOURCE_NOT_FOUND, "Thread[$threadId]")
+        assertAccessible(session, userId, projectId, threadId)
+    }
+
+    override fun ensureSessionAccessible(userId: String, projectId: String, threadId: String) {
         val session = agentSessionDao.findByThreadId(threadId)
             ?: agentSessionDao.insertSession(
                 threadId,
@@ -112,13 +112,16 @@ class AgentSessionServiceImpl(
                 projectId,
                 retentionPolicy.sessionExpiry(projectId, userId),
             )
+        assertAccessible(session, userId, projectId, threadId)
+    }
+
+    private fun assertAccessible(session: TAgentSession, userId: String, projectId: String, threadId: String) {
         if (session.status != AgentSessionStatus.ACTIVE) {
             throw NotFoundException(CommonMessageCode.RESOURCE_NOT_FOUND, "Thread[$threadId]")
         }
         if (session.userId != userId || session.projectId != projectId) {
             throw PermissionException("Thread[$threadId] does not belong to user[$userId] in project[$projectId]")
         }
-        agentSessionStore.bindSession(userId, projectId, threadId)
     }
 
     override fun touchSession(threadId: String, runId: String, userId: String?, projectId: String?) {
@@ -152,20 +155,20 @@ class AgentSessionServiceImpl(
     }
 
     private fun deleteSessionInternal(userId: String, projectId: String, threadId: String) {
-        assertActiveSession(userId, projectId, threadId)
-        if (activeRunManager.isRunning(ActiveRunScope(userId, projectId, threadId))) {
+        assertSessionAccessible(userId, projectId, threadId)
+        if (activeRunManager.isRunning(ActiveRunKey(userId, projectId, threadId))) {
             throw TooManyRequestsException("Thread[$threadId] is running")
         }
         pendingInterruptStore.clear(threadId)
-        activeRunManager.clearActiveRunBinding(ActiveRunScope(userId, projectId, threadId))
+        activeRunManager.clearRunState(ActiveRunKey(userId, projectId, threadId))
         val now = LocalDateTime.now()
         agentSessionDao.markDeleted(threadId, now)
         agentMessageDao.removeByThreadId(threadId)
         agentRunRecordService.removeByThreadId(threadId)
-        // 工具调用审计跟着 run 一起删：run 记录已经硬删了，留下的审计行会指向不存在的 run，
-        // 既查不出完整链路又占着地方。真正需要长期留痕的是网关侧的 @LogOperate 操作日志。
+        // 工具调用审计和 AG-UI 事件流都跟着 run 一起删：run 记录已经硬删了，留下的行会指向不存在的
+        // run，既查不出完整链路又占着地方。真正需要长期留痕的是网关侧的 @LogOperate 操作日志。
         agentToolCallRecordService.removeByThreadId(threadId)
-        agentSessionStore.removeSession(projectId, threadId)
+        agentRunEventService.removeByThreadId(threadId)
         activeRunManager.clearAgentRuntimeState(userId, threadId)
     }
 

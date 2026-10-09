@@ -152,15 +152,14 @@ class AgentPropertiesBindingTest {
                 features = AgentRuntimeProperties.Features(frontendToolsEnabled = false)
                 activeRunTtl = java.time.Duration.ofMinutes(15)
                 maxMessageLength = 16_000
-                state = AgentRuntimeProperties.State(collection = "agent_state_custom", ttlDays = 7)
+                state = AgentRuntimeProperties.State(ttlDays = 7)
             },
         )
 
-        assertFalse(runtime.frontendToolsEnabled)
+        assertFalse(runtime.features.frontendToolsEnabled)
         assertEquals(java.time.Duration.ofMinutes(15), runtime.activeRunTtl)
         assertEquals(16_000, runtime.maxMessageLength)
-        assertEquals("agent_state_custom", runtime.stateCollection)
-        assertEquals(7, runtime.stateTtlDays)
+        assertEquals(7, runtime.state.ttlDays)
     }
 
     @Test
@@ -178,20 +177,18 @@ class AgentPropertiesBindingTest {
     }
 
     @Test
-    fun `只读模式与requireRedis默认关闭可按配置开启`() {
+    fun `只读模式默认关闭可按配置开启`() {
         val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
 
-        assertFalse(defaults.readOnlyMode, "本地开发默认不进只读模式")
-        assertFalse(defaults.requireRedis, "本地开发默认允许退化为进程内存储")
+        assertFalse(defaults.features.readOnlyMode, "本地开发默认不进只读模式")
 
         val hardened = AgentRuntimePropertiesResolver.resolve(
             AgentRuntimeProperties().apply {
-                features = AgentRuntimeProperties.Features(readOnlyMode = true, requireRedis = true)
+                features = AgentRuntimeProperties.Features(readOnlyMode = true)
             },
         )
 
-        assertTrue(hardened.readOnlyMode)
-        assertTrue(hardened.requireRedis)
+        assertTrue(hardened.features.readOnlyMode)
     }
 
     @Test
@@ -385,8 +382,8 @@ class AgentPropertiesBindingTest {
     @Test
     fun `长期记忆daily ledger保留期与整理间隔默认值应有限且可配置覆盖`() {
         val defaults = AgentRuntimePropertiesResolver.resolve(AgentRuntimeProperties())
-        assertEquals(Duration.ofDays(90), defaults.memoryDailyLedgerRetention)
-        assertEquals(Duration.ofHours(24), defaults.memoryMaintenanceInterval)
+        assertEquals(Duration.ofDays(90), defaults.memory.dailyLedgerRetention)
+        assertEquals(Duration.ofHours(24), defaults.memory.maintenanceInterval)
 
         val overridden = AgentRuntimePropertiesResolver.resolve(
             AgentRuntimeProperties().apply {
@@ -396,7 +393,7 @@ class AgentPropertiesBindingTest {
                 )
             },
         )
-        assertEquals(Duration.ofDays(30), overridden.memoryDailyLedgerRetention)
-        assertEquals(Duration.ofHours(6), overridden.memoryMaintenanceInterval)
+        assertEquals(Duration.ofDays(30), overridden.memory.dailyLedgerRetention)
+        assertEquals(Duration.ofHours(6), overridden.memory.maintenanceInterval)
     }
 }

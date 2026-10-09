@@ -26,7 +26,7 @@ class ActiveRunLockHeartbeatTest {
     }
 
     @Test
-    fun `极短锁TTL也应保住最小间隔避免续期把Redis打满`() {
+    fun `极短锁TTL也应保住最小间隔避免续期把存储打满`() {
         assertEquals(Duration.ofSeconds(5), ActiveRunLockHeartbeat.renewInterval(Duration.ofSeconds(3)))
     }
 

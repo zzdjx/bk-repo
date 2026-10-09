@@ -29,7 +29,6 @@ dependencies {
     api(project(":agent:api-agent"))
     api(project(":common:common-artifact:artifact-service"))
     api(project(":common:common-mongo"))
-    implementation(project(":common:common-redis"))
     // AgentScope自带okhttp 5的KMP产物，会与仓库统一管理的okhttp 4共存导致重复类，统一使用后者
     api("io.agentscope:agentscope-harness") {
         exclude(group = "com.squareup.okhttp3", module = "okhttp-jvm")
@@ -37,8 +36,7 @@ dependencies {
     api("io.agentscope:agentscope-extensions-model-openai") {
         exclude(group = "com.squareup.okhttp3", module = "okhttp-jvm")
     }
-    // 持久化状态（agentState / 挂起中断 / 长期记忆 / 后台任务）落 Mongo；Redis 只留缓存与协调原语，
-    // 那三处走 common-redis 的 RedisOperation，不需要 agentscope 的 redis extension
+    // 持久化状态与协调原语（agentState / 挂起中断 / 长期记忆 / 后台任务 / 运行权锁）全部落 Mongo，
     api("io.agentscope:agentscope-extensions-mongodb") {
         exclude(group = "com.squareup.okhttp3", module = "okhttp-jvm")
     }

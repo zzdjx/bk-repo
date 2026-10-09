@@ -2200,3 +2200,230 @@ run 可以有零到多条重连流。那里真正的重复是 `AtomicBoolean` + 
 排列，顺序理由写在类文档里。
 
 `PreparedInput` 随之改名为 `PreparedRunInput` 并提升为顶层类型。
+## 20. 去 Redis：agent 模块不再依赖 Redis
+
+### 20.1 为什么能去掉
+
+Redis 此前承担三件事，没有一件非它不可：
+
+| 用途 | 原实现 | 现在 |
+| --- | --- | --- |
+| 会话归属 | `RedisAgentSessionStore`，TTL 缓存 | 整层删除——`assertSessionOwner` 零生产调用，真正的归属校验一直是 `assertActiveSession` 查 `agent_session` |
+| 运行互斥锁 + 活跃 runId + 停止标志 | 3 个 Redis key | 合成 1 条 `agent_active_run` 文档，单文档 `findAndModify` 天然原子 |
+| resume 幂等 | `getAndSet` | `agent_resume_mark` 唯一索引，语义等价且自带 TTL 回收 |
+
+平台层面本就如此：`common-lock` 的 `LockAutoConfiguration` 默认后端是 MongoDB（`matchIfMissing = true`），Redis 要显式 `lock.type=redis` 才启用。agent 模块绕过这个抽象自己用 `RedisLock` 手搓了一套，等于单方面给部署加了一个基础设施依赖。
+
+没有直接复用平台的 `LockOperation`：它只有 `getLock`/`acquireLock`/`close`，**没有续期**，而长 run 必须心跳续期；它也装不下 `runId` 和停止信号。
+
+### 20.2 前置条件：停止检查必须先节流
+
+`handleCancelIfRequested` 挂在每个 AG-UI 事件上，流式输出时约等于每个 token 查一次共享存储。换 Mongo 会直接拖垮，而这个频率本身就是浪费：同副本点停止走 `abortLocalHandle`，同步、立即、不经过轮询；轮询只服务跨副本那一种情况。
+
+现节流到 1 秒（`AgentRunScope.shouldPollStopFlag`）。跨副本停止最晚延迟 1 秒生效，同副本仍是零延迟。间隔写死为常量而非配置项——它不随环境变化，也没有运维场景需要调。
+
+### 20.3 三个 key 合一带来的额外收益
+
+`RedisActiveRunStateStore.renewLock` 原来有一段自我辩解：锁的 token 是 `RedisLock` 私有的拿不到，只能拿"活跃 run 绑定"当所有权凭证间接比对，而且判断与 `expire` 不是原子的。合成一条文档之后，续期就是一次带 `runId` 条件的单文档更新，这段辩解整个消失。
+
+停止信号也从布尔改成了 `stopRequestedRunId`（记"要停哪个 run"）。这解决两件事：停止请求可能先于 `runId` 绑定到达（run 记录已建、用户就点了停止），记成布尔就无处安放，只能另外维护一张进程内的"早到停止"表，而那张表天然是单副本的；同时上一轮 run 的残留信号不会误伤下一轮，runId 对不上自然不生效，也就不需要在绑定新 run 时专门清一次。
+
+### 20.4 删掉的东西
+
+三个 `Redis*Store`、`AgentRedisRequirementValidator` 及其单测、`agent.runtime.features.require-redis` 配置项（第 19.2 节刚改的名，这轮整个没了）、`common-redis` 的 gradle 依赖、`AgentConstants` 里 5 个已成死代码的 Redis key 前缀常量。
+
+两个 `InMemory*Store` 从 `src/main` 移到 `src/test`（包名不变，测试 import 不受影响）。它们存在的唯一理由就是"Redis 可能没有"，而 Mongo 是硬依赖。放进 `src/test` 让"不存在生产降级路径"这件事在目录结构上一眼可见，顺带消掉了第 19 节记过的双实现语义不一致（`InMemoryAgentSessionStore.touchSessionOwner` 是空操作、内存版 resume 幂等没有 TTL、内存锁永不过期）。
+
+### 20.5 同批修掉的四个 bug
+
+**抢锁后 `start` 抛错泄漏运行权。** `acquireRunLock` 与 `runStarter.start` 之间没有 try/finally，而释放锁的 `AgentRunLifecycleManager` 收尾要等 `attachEventStream` 注册完 handle 才可能触发。`start` 里落 run 记录、归档消息、调 `process()` 任何一处失败，锁都会留到 `active-run-ttl` 过期（默认 11 分钟），用户这个会话期间只会收到 "Session is already running"。现包在 `startOrReleaseLock` 里，捕 `Throwable` 释放后原样抛出。
+
+**`agent_run_event` 没有任何删除路径。** 删会话硬删了 message/run/toolCall，却没删 run event——而唯一能删它的 `AgentRunEventService.cleanup()` 零生产调用，整条链不可达。现把死掉的 `cleanup`/`listEvents` 换成真正接上的 `removeByThreadId`，在 `deleteSessionInternal` 里与 toolCall 并列。
+
+**停止通道四条变两条。** `requestStop` 原来先写标志、再发一个名为 `StopBroadcastEvent` 但 KDoc 自己写着"本 JVM 内"的 Spring 事件（监听器调 `abortLocalHandle`）、紧接着自己又调一次 `abortLocalHandle`——Spring 事件默认同步，这是实打实连续两次。`pendingStopRunIds` 也是冗余的：`registerHandle` 已经先查存储上的标志。事件类与那张表一并删除，`hasLocalHandle` 随之无人使用也删掉。
+
+**resume 校验失败会吃掉幂等名额。** `tryMarkResume` 原来写在 `validateEntry` 中间，后面还有工具 allowlist 与鉴权两个会抛异常的检查。标记不回滚，所以用户补齐条件后再点同一张确认卡片会收到"duplicate resume"，那张卡片在幂等 TTL 内彻底点不动；多条 interrupt 一起 resume 时，前一条已登记、后一条失败，前一条的名额同样白白消耗。现拆成两趟：全部校验通过后再统一登记，方法名也从 `validateAndPrepare` 改为 `validateAndAccept`。
+
+### 20.6 鉴权顺序与那个假的"二次 IAM"
+
+`AgentRunInputPreparer.prepare` 原来整个跑在 `assertAuthorized` 之前，而它要读 thread 的中断现场、写 resume 幂等标记。也就是说只要猜到 threadId，未经鉴权的请求就能读到别人会话的中断信息、并把对方的幂等名额占掉。现在顺序是：停机检查 → 灰度 → 结构校验 → 鉴权 → 输入准备 → 幂等与并发。
+
+`AguiResumeValidator` 里那次 `checkProjectPermission(READ)` 被称为"二次 IAM"（`ToolRiskLevel.WRITE_DESTRUCTIVE` 的注释也这么写），但它查的正是 orchestrator 在同一次请求里已经查过的同一个权限，对删除类工具没有提供任何额外保护。顺序前置之后它更是确定无疑的重复，已删除，两处 KDoc 改成实话。
+
+需要留意的是：resume 涉及的是前端工具，执行在客户端，服务端没有执行时闸门（服务端执行的 domain 工具由 `DomainToolGateway` 逐次做资源级鉴权，不走这条路）。真要给写工具加服务端闸门，应该按工具风险等级查写权限或资源级权限，那会收紧现有行为——只有读权限的用户将无法再批准写工具，属于产品决策，不在本次重构范围内。这里只保证不用一个假检查把这件事盖过去。
+
+删掉这个检查后，`extractApproved`/`isExecutableResume`/`requiresApproval` 那一整套随之成为死代码一并移除——它们存在的唯一目的就是喂给这个假检查，从来没有拒绝过任何东西。
+
+## 21. 配置、命名与孤儿 run 清扫（2026-10）
+
+接着 §19、§20 做完的收尾。这一轮全是"读代码时会绊一下"的东西，没有新功能。
+
+### 21.1 Effective 快照改成与 YAML 同构
+
+`EffectiveAgentRuntimeProperties` 原来是半拍平的：`retention`/`topology` 保持嵌套，`state`/`memory`/`features`
+却被拍成了 `stateTtlDays`、`memoryDailyLedgerRetention`、`readOnlyMode` 这类带前缀（或干脆不带前缀）的平铺字段。
+后果是从配置项反查使用点需要先知道它在快照里被改成了什么名字——`agent.runtime.features.read-only-mode` 要 grep
+`readOnlyMode`，而 `agent.runtime.retention.message` 就是 `retention.message`，同一份文件里两套规则。
+
+现在补上 `EffectiveAgentState`/`EffectiveAgentMemory`/`EffectiveAgentFeatures` 三个小 data class，规则统一成一句话：
+**YAML 里是嵌套组的，快照里也是嵌套组，字段名一一对应**。`gray` 仍然刻意不在快照里（它要热更新，见 §19）。
+
+顺带把三个测试里手抄 18 个字段的 `EffectiveAgentRuntimeProperties(...)` 构造换成 `defaults().copy(...)`——它们
+各自只关心两三个字段，手抄的那些值本来就是从默认值复制过来的，每加一个配置项就要改四个文件。
+
+### 21.2 删掉 `agent.runtime.state.collection`
+
+本模块一共九张集合，另外八张的名字都写死在各自的 `@Document` 注解里，只有 `agent_state` 开放了配置。这个配置项
+的实际作用是让人误以为集合名整体可配，改了也只搬得动这一张表。集合名移到 `AgentStateConfiguration.STATE_COLLECTION`。
+
+### 21.3 `.maxIters(binding.maxSteps)` 是空转
+
+`AgentFactory` 原来把同一个 `max-steps` 同时喂给 `SubagentDeclaration.Builder` 的 `steps()` 和 `maxIters()`，看起来像
+"一个配置撑两个参数"的坏味道。反编译 2.0.x 的 harness 包（331 个类全扫一遍）确认：框架只读 `getSteps()`，并在
+`HarnessAgentBuilderSupport` 里直接把它传给 `HarnessAgent.Builder.maxIters(int)`；`SubagentDeclaration.getMaxIters()`
+零调用。所以 `steps` 本来就是"子代理最大迭代轮数"，`.maxIters()` 那一行设了也没有任何效果，删掉，并在调用处把这个
+结论写成注释，免得下次有人再"补"回去。
+
+### 21.4 两个名字
+
+**`assertActiveSession` 其实会写库。** 它在会话不存在时静默 `insertSession`，而七个调用点里只有 run 入口需要这个行为
+——run 接口允许客户端自己生成 threadId 直接发起对话。其余六个（列消息、改标题、查状态、停止、重连、删除）拿着一个
+打错的 threadId 调进来，正确的回答是 404，而不是凭空造一条空会话。现拆成 `assertSessionAccessible`（不存在即 404）
+与 `ensureSessionAccessible`（不存在就补一条，仅 run 链路用）。
+
+**两个 Scope 现在能分清了。** `runtime.ActiveRunScope` 只是 userId+projectId+threadId 的三元组标识，
+`service.run.AgentRunScope` 是单次 run 的完整上下文（emitter、事件流、中断现场、终态）。前者改名
+`ActiveRunKey`，与 Mongo 文档里的 `scopeKey` 对上；`AgentRunScope.activeRunScope()` 相应改为 `activeRunKey()`。
+
+### 21.5 回填按 overrides 分维度
+
+`AgentRetentionBackfill` 原来对每张表只发一条 `updateMulti`，用全局默认保留期给所有历史文档打同一个戳，完全忽略
+`retention.overrides`。而逐条写入的那条路径（`AgentRetentionPolicy`）是认 overrides 的。结果是：给某个项目单独配的
+长留存只对升级之后的新数据生效，升级之前那批照样按全局默认删掉——偏偏需要长留存的常常就是历史审计数据。
+
+现在把配置拆成 `EffectiveAgentRetention.bucketsOf()` 的有序分桶，一桶一条 `updateMulti`：先按各条 override 的名单
+（`projectId ∈ 名单 或 userId ∈ 名单`）处理，最后用全局默认兜住剩下的。"取第一个命中的 override"这条优先级不需要
+额外表达——前面的桶已经把 `expiresAt` 写上了，后面的桶靠"缺 `expiresAt`"这个条件自然跳过它们。
+
+例外是 `agent_message`：这张表上没有 userId/projectId（消息只按 threadId 归属会话），分维度就得先回查
+`agent_session`，成本与一次性回填不相称，仍按全局默认回填。
+
+同时把"读的是启动快照、改配置要重启"写进了类注释。全模块只有 `agent.runtime.gray` 是热更新的，其余一律是启动期
+快照语义，回填尤其如此——它本来就是一次性迁移动作，不是持续生效的策略。
+
+### 21.6 run 永远卡在 RUNNING
+
+**这是这一轮里唯一的真 bug。** run 走到终态只有一条路径：`AgentRunLifecycleManager.finish`，它跑在持有这个 run 的
+副本进程里。正常结束、用户停止、优雅停机都会经过它，但副本被 `SIGKILL`、OOM 杀掉、节点掉电时这段代码根本没机会
+执行，run 记录就永远停在 RUNNING。
+
+用户不会被锁死（运行权有 TTL，过期后别人还能在这个会话上发起新 run），留下的是一条永不收尾的记录：`getRunStatus`
+一直回 RUNNING、客户端带同一个 runId 重连会撞上 "Run is already running"、审计和用量统计里多出一条没有结束时间的
+运行。§20 里 `stopRun` 那条"锁没了就从 run 记录兜底取 runId"的分支，根子就在这里。
+
+新增 `AgentOrphanRunSweeper`：每 `active-run-ttl` 扫一轮，判定依据不是时间而是**运行权绑定**——一个 run 还活着的
+充要条件是它所在会话的运行权文档还没过期、且绑定的 runId 就是它。心跳每 TTL/3 续一次期，副本还在就一定续得上。
+`startedAt` 只是一道便宜的预筛，把绝大多数正在跑的 run 挡在查询之外，筛出来之后还要再查一次运行权才作数——跑过
+一个 TTL 的长对话完全正常，不能误杀。
+
+收成 `FAILED` 而不是 `CANCELLED`：CANCELLED 的语义是"有人主动停了它"，副本猝死没有任何人做过这个决定，混进
+CANCELLED 会让"用户取消率"这类指标凭空变高，掩盖掉真正该被发现的副本异常退出。错误码 `OwnerReplicaLost` 用于把
+它和真正的业务失败区分开。
+
+多副本不加锁：收尾走的 `AgentRunDao.finishRun` 带 `status = RUNNING` 条件，并发时只有一个改得成功。
+
+### 21.7 顺手删掉的
+
+`AgentCatalog.runtimeEligible()` 恒返回 `true`，注释自己都写了"只读子代理目前没有额外的运行期开关"——这是 client
+子代理拍平到协调者之后的残留，删掉。
+
+## 22. 一次全量复查修掉的四条（2026-10）
+
+把整个 agent 模块的逻辑从入口到收尾重新走了一遍，挑出四条真正会在生产上咬人的问题。四条各自独立，但都落在
+"run 的生命周期"这一段上，放在一起看能说清楚边界在哪。
+
+### 22.1 POST /run 的幂等回放是个越权读
+
+`AgentRunOrchestrator` 入口的鉴权只做两件事：项目级 IAM，以及 `threadId` 属不属于当前用户。两件事都和 `runId`
+无关。而紧随其后的幂等分支按 `runId` 去 `agent_run` 查记录、命中终态就把整段 AG-UI 事件流回放出去——`agent_run`
+和 `agent_run_event` 都以 runId 为主键，查询路径根本不经过 thread。
+
+于是任何登录用户，只要拿自己名下合法的 `threadId`、配上别人的 `runId` 发一次 POST，就能读到对方整段对话：用户
+原话、模型回复、工具调用参数与返回。即使 runId 还在跑，RUNNING 分支抛的 "Run is already running" 也泄漏了
+"这个 runId 存在且正在运行"。
+
+`GET /run/stream` 一直有这道校验（`AgentRunStreamOrchestrator.stream` 里比对 `run.threadId != input.threadId`），
+漏的是 POST 这一半。修法就是把同一道比对补上，且必须排在状态判断**之前**——反过来写的话，别人正在跑的 runId
+会先撞上 RUNNING 分支，错误码本身就是一个存在性预言机。
+
+这条是历史遗留，不是这轮重构引入的。
+
+### 22.2 确认卡片过期会把会话锁死
+
+HITL 确认卡片上的 `expiresAt` 按 `agent.runtime.active-run-ttl` 填（默认 11 分钟），而承载它的
+`agent_pending_interrupt` 文档按 `session-ttl` 回收（默认 30 天）。两个数字差了三个数量级，中间那段时间里用户
+两条路都走不通：点卡片走 resume，被 `AguiResumeValidator.assertNotExpired` 判过期拒掉；换成发一条新消息，又被
+"thread 上有未决 interrupt，必须先 resume" 拦下。会话就这么卡着，要一直等到 30 天后那份文档被 TTL 收走。
+
+这是上一轮我自己加 `assertNotExpired` 时只做了一半留下的——加了过期拦截，没管"过期之后这个 thread 怎么解脱"。
+
+判断放在 `DefaultAgentInterruptStateRepository.getPendingInterrupt` 这个唯一的读入口：整组卡片都过期就视同
+"没有未决中断"，顺手把记录删掉。选这里而不是各个调用方，是因为 resume 校验、拒绝审计、coordinator 回灌、
+运行状态查询、断线重连回放全都从这里取数，分散判断迟早会出现一处认为"还有未决中断"、另一处认为没有。
+
+只在**整组**过期时才算数。同一份快照里的卡片是同一时刻按同一个 TTL 写的，正常会一起过期；万一出现部分过期，
+宁可继续要求 resume，也不能把还有效的卡片一起丢掉——那几张过期的仍由 `assertNotExpired` 逐条拦。
+
+副作用是整组过期时 resume 的报错从 "expired" 变成 "no pending interrupts"。语义上没错（过期的卡片确实不再是
+未决中断），为此多留一个三态返回值不划算。
+
+### 22.3 前置校验的顺序决定了名额会不会被白白吃掉
+
+`run()` 原本的顺序是：停机检查 → 灰度 → 入参校验 → 鉴权 → **prepare** → 幂等回放 → 抢运行权。
+
+`AgentRunInputPreparer.prepare` 会调 `tryMarkResume` 写 resume 幂等标记，这个标记一旦写下就代表"这次 resume
+已经被受理"。可它后面还有两道可能直接抛异常的关卡：幂等回放命中会原路返回，抢运行权失败会抛
+`TooManyRequestsException`。两种情况下 Agent 一步都没执行，名额却已经被消耗掉了，用户重试反而被幂等挡住。
+
+改成鉴权 → 幂等回放 → 抢运行权 → prepare。`prepare` 现在收进 `startOrReleaseLock` 里，和 `runStarter.start`
+共用同一个 try/catch，异常时统一还锁。
+
+### 22.4 `finishedRunIds` 只增不减
+
+`AgentRunRecordServiceImpl` 原本维护一个 `finishedRunIds` 集合做重复收尾去重，但只在 catch 分支里 remove——
+成功路径上没人删。服务每处理一个 run 就永久多占一条，跑上几个月就是实打实的内存泄漏。
+
+直接删掉整个集合。重复收尾本来就由 `AgentRunDao.finishRun` 带的 `status = RUNNING` 条件挡住：第二次更新匹配
+不到行、返回 0。这个办法还顺带比进程内集合更对——跨副本的重复收尾进程内集合根本看不见。
+
+留下的 `startedAtByRunId` 不是同一回事：它只为算 `durationMs`，`finishRun` 取用后立即 `remove`，`insertRun`
+失败时也会回滚，不会单调增长。
+
+### 22.5 给 `findStaleRunning` 补索引
+
+§21.6 的孤儿 run 清扫每 `active-run-ttl` 扫一轮，查询条件是 `status = RUNNING AND startedAt < x`，而
+`TAgentRun` 上没有能支撑它的索引——等于定了个闹钟做周期性全表扫描。
+
+补 `{status: 1, startedAt: 1}`。等值字段必须排在范围字段前面：`{startedAt: 1, status: 1}` 这个顺序下，
+`startedAt` 的范围条件一旦生效，排在它后面的 `status` 就用不上索引了，退化成扫一遍时间窗内的全部 run。
+
+### 22.6 顺手清掉的
+
+- `AgentRuntimeProperties.Memory.DEFAULT_KEY_PREFIX = "bkrepo:agent:memory-store:"`：Redis 时代的 key 前缀，
+  落 Mongo 之后零引用。
+- `AgentRuntimeProperties.DEFAULT_MODEL_PROFILE`：零引用。
+- 三处注释和实现对不上：`AgentToolkitConfiguration` 还在说 frontend tools 用 `SchemaOnlyTool` 注册（实际是
+  `ExternalLocalTool`，`FrontendToolRegistrar` 的注释里写了为什么）；`AgentMemoryFilesystemConfiguration` 说
+  单测能"绕开真实 Lettuce 连接"；`AgentPermissionRulesConfiguration` 管 `memory_save` 叫"唯一写入入口"，而
+  `memory_delete` 就定义在它下面三行。
+
+### 22.7 复查中确认是误报的两条
+
+**`MemoryFilesystemAccess` 的路径穿越**：记忆工具的 key 里带 `..` 并不能跨用户。`MongoStore` 把
+`(scope, namespace, key)` 存成三个独立字段，`namespace` 由 `NamespaceFactory` 硬编码成
+`listOf("agents", agentId, "users", uid, segment)`，key 字符串没有任何途径影响到 namespace。最坏结果是在自己
+的记忆段里留一个长得奇怪的 key。
+
+**`ToolRiskLevel.READ_SENSITIVE` / `PROHIBITED` 是死枚举**：目前确实没有工具用这两档，但 `ExternalLocalTool`
+和 `AgentPermissionRulesConfiguration` 的 `when` 都为它们写了分支。这是风险分级的完整取值域，删掉等于把
+防御性处理一并删掉，保留。

@@ -40,14 +40,14 @@ import io.agentscope.core.tool.ToolParam
  * 需要先用 `memory_search`/`memory_get` 定位到具体行号，再调用本工具精确删除那几行，而不是提供整篇文件
  * 级别的粗粒度删除——这样即使用户只想撤回某一条记忆，也不会连带清掉同一个文件里其它无关的记忆。
  *
- * 通过 [MemoryFilesystemAccess] 直接操作底层 Redis 存储（原理与命名空间对齐规则见该类 kdoc），不经过
+ * 通过 [MemoryFilesystemAccess] 直接操作底层存储（原理与命名空间对齐规则见该类 kdoc），不经过
  * 框架内部私有的 `WorkspaceManager`——`memory_save`/`memory_get`/`memory_search` 用的那个实例没有公开
  * 的注入点可以复用。
  *
  * 是一个普通 POJO（不是 `ToolBase` 子类），通过
  * `io.agentscope.core.tool.Toolkit#registerTool(Object)` 反射扫描 `@Tool` 方法注册，与框架自己的
- * `MemorySaveTool`/`MemoryGetTool` 注册方式完全一致；只在 Redis 可用（[MemoryFilesystemAccess.isAvailable]）
- * 时由 [com.tencent.bkrepo.agent.config.AgentHarnessConfigurer] 注册进协调者 toolkit——与 `memory_save`
+ * `MemorySaveTool`/`MemoryGetTool` 注册方式完全一致；只在长期记忆能力开启时
+ * 由 [com.tencent.bkrepo.agent.config.AgentHarnessConfigurer] 注册进协调者 toolkit——与 `memory_save`
  * 等工具的可见性开关保持同步。权限侧接入
  * [com.tencent.bkrepo.agent.permission.AgentPermissionRulesConfiguration] 的 ASK 规则，与 `memory_save`
  * 同构，删除前需要用户在前端弹窗确认。

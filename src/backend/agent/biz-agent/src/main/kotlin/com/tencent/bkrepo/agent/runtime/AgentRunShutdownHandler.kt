@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 挂钟在 [ContextClosedEvent] 而不是 `@PreDestroy`：Spring 关闭时先发 ContextClosedEvent，再走
  * Lifecycle 停止（Web 容器排空请求），最后才销毁 bean。选最早的这个点，既能在 HTTP 排空之前就把 SSE
- * emitter complete 掉（排空不用干等），也确保释放锁时 Redis 相关 bean 还完全可用。
+ * emitter complete 掉（排空不用干等），也确保释放运行权时相关的存储 bean 还完全可用。
  *
  * 时序上先 [GracefulShutdownManager.performGracefulShutdown] 再中止 run：前者把管理器切到
  * SHUTTING_DOWN，新的 Agent 调用会直接抛 `AgentShuttingDownException`（K8s 摘流量是异步的，这段窗口

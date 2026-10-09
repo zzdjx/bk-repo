@@ -32,7 +32,6 @@ import io.agentscope.core.agent.RuntimeContext
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.LocalDate
@@ -63,7 +62,7 @@ import java.util.concurrent.TimeUnit
  * 任务是唯一需要"这个 agent 一共有哪些用户存过 daily ledger"的场景，[MemoryFilesystemAccess] 没有为此
  * 设计索引，因此这里走 [MongoStore.scanNamespaces]（对 `namespace` 列做 distinct + 客户端 glob 过滤）
  * 反查——只在这一条路径上使用，
- * 且是低频（默认每 [EffectiveAgentRuntimeProperties.memoryMaintenanceInterval] 一次，默认 24 小时）
+ * 且是低频（默认每 [EffectiveAgentMemory.maintenanceInterval] 一次，默认 24 小时）
  * 后台任务，不影响正常读写的性能特征。
  *
  * ## 调度方式
@@ -74,7 +73,7 @@ import java.util.concurrent.TimeUnit
  *
  * ## 何时不启动
  *
- * [EffectiveAgentRuntimeProperties.memoryDailyLedgerRetention] 配成 `0`/负值（"永不清理"）时，
+ * [EffectiveAgentMemory.dailyLedgerRetention] 配成 `0`/负值（"永不清理"）时，
  * `@PostConstruct` 阶段直接不启动调度，避免空跑。长期记忆本身已经是无条件可用（存储落 Mongo，是全服务
  * 硬依赖），不再有"记忆整体关闭"这种状态。
  */
@@ -91,12 +90,12 @@ class AgentMemoryMaintenanceJob(
 
     @PostConstruct
     fun start() {
-        val retention = properties.memoryDailyLedgerRetention
+        val retention = properties.memory.dailyLedgerRetention
         if (retention.isZero || retention.isNegative) {
             logger.info("memory daily ledger retention configured as never-expire, maintenance job not started")
             return
         }
-        val interval = properties.memoryMaintenanceInterval
+        val interval = properties.memory.maintenanceInterval
         scheduler.scheduleWithFixedDelay(::runOnce, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS)
         logger.info(
             "agent memory maintenance job started: interval={}, dailyLedgerRetention={}",
@@ -117,7 +116,7 @@ class AgentMemoryMaintenanceJob(
      */
     private fun runOnce() {
         try {
-            val cutoff = dailyLedgerCutoffDate(LocalDate.now(), properties.memoryDailyLedgerRetention)
+            val cutoff = dailyLedgerCutoffDate(LocalDate.now(), properties.memory.dailyLedgerRetention)
             val userIds = memoryStore.scanNamespaces(namespacePattern(properties.name))
                 .mapNotNull { namespace -> extractUserId(namespace) }
                 .distinct()

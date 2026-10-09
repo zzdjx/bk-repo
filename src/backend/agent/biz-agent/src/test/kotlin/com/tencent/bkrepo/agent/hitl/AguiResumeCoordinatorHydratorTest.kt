@@ -26,7 +26,7 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.mock
 
-@DisplayName("Redis pending interrupt 回灌 AguiResumeCoordinator")
+@DisplayName("持久化的 pending interrupt 回灌 AguiResumeCoordinator")
 class AguiResumeCoordinatorHydratorTest {
 
     private val pendingStore = InMemoryAgentPendingInterruptStore()
@@ -47,7 +47,7 @@ class AguiResumeCoordinatorHydratorTest {
     }
 
     @Test
-    fun `从 Redis 快照回灌后同一 resume 应通过框架契约校验`() {
+    fun `从持久化快照回灌后同一 resume 应通过框架契约校验`() {
         val processor = newProcessor()
         pendingStore.save(
             THREAD_ID,
@@ -124,7 +124,7 @@ class AguiResumeCoordinatorHydratorTest {
         hydrator.hydrateIfNeeded(processor, resumeInput(THREAD_ID, "int-stale"))
 
         val liveResult = validateResume(processor, THREAD_ID, liveId)
-        assertFalse(isError(liveResult)) { "已有内存 pending 不应被 Redis 快照覆盖，实际=${errorMessage(liveResult)}" }
+        assertFalse(isError(liveResult)) { "已有内存 pending 不应被持久化快照覆盖，实际=${errorMessage(liveResult)}" }
     }
 
     private fun newProcessor(): AguiRequestProcessor {

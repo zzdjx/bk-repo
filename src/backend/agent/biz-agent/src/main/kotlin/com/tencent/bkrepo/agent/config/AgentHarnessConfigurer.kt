@@ -116,17 +116,17 @@ class AgentHarnessConfigurer(
             modelResilience.fallbackModel?.let { builder = builder.fallbackModel(it) }
         }
 
-        // 没有 Redis 时 taskRepository 为 null：交给框架退回默认的本地文件系统实现（见
+        // taskRepository 为 null 时交给框架退回默认的本地文件系统实现（见
         // AgentTaskRepositoryConfiguration 的 kdoc），与升级前行为一致。
         if (taskRepository != null) {
             builder = builder.taskRepository(taskRepository)
         }
 
-        // 没有 Redis 时 memoryFilesystemSpec 为 null：长期记忆能力整体关闭（见
+        // memoryFilesystemSpec 为 null 时长期记忆能力整体关闭（见
         // AgentMemoryFilesystemConfiguration 的 kdoc，为什么这里不像 taskRepository 一样退回本地实现）。
         builder = if (memoryFilesystemSpec != null) {
             // memory_delete 是框架没有的补充工具（只有 save/search/get），用 MemoryFilesystemAccess
-            // 直接读写同一份 Redis 存储；可见性开关跟其它 memory_* 工具保持同步，只在这个分支注册。
+            // 直接读写同一份存储；可见性开关跟其它 memory_* 工具保持同步，只在这个分支注册。
             toolkit.registerTool(MemoryDeleteTool(memoryFilesystemAccess))
             builder.filesystem(memoryFilesystemSpec)
         } else {
@@ -160,10 +160,10 @@ class AgentHarnessConfigurer(
      */
     private fun effectiveSysPrompt(properties: EffectiveAgentRuntimeProperties): String {
         val parts = mutableListOf(properties.sysPrompt)
-        if (properties.frontendToolsEnabled) {
+        if (properties.features.frontendToolsEnabled) {
             parts += ClientAgentPrompt.DEFAULT
         }
-        if (properties.readOnlyMode) {
+        if (properties.features.readOnlyMode) {
             parts += AgentSystemPrompts.READ_ONLY_MODE
         }
         return parts.joinToString("\n\n")

@@ -27,7 +27,7 @@ import org.springframework.context.annotation.Configuration
  *
  * 1. `ContextClosedEvent`：[com.tencent.bkrepo.agent.runtime.AgentRunShutdownHandler] 立即让管理器
  *    进入 SHUTTING_DOWN（新的 Agent 调用直接抛 `AgentShuttingDownException`），并中止本副本在跑的
- *    run、释放 Redis 会话锁——这一步不等待，耗时可忽略；
+ *    run、释放会话运行权——这一步不等待，耗时可忽略；
  * 2. Spring Boot graceful shutdown 排空 HTTP 请求：上限 `spring.lifecycle.timeout-per-shutdown-phase`
  *    （application-agent.yml 配 5s；上一步已经 complete 了 SSE emitter，正常情况下瞬间排空）；
  * 3. bean 销毁：`HarnessAgent` 实现了 AutoCloseable，Spring 推断出 `close()` 并调用，框架顺带停掉

@@ -10,7 +10,6 @@ package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
 import com.tencent.bkrepo.agent.agui.AguiMessageArchiveHandler
-import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
 import com.tencent.bkrepo.agent.runtime.AgentRunAbortReason
 import com.tencent.bkrepo.agent.service.AgentRunEventService
@@ -86,7 +85,8 @@ class AgentRunEventPipeline(
     }
 
     private fun handleCancelIfRequested(scope: AgentRunScope): Boolean {
-        if (!activeRunManager.isStopRequested(scope.runId)) return false
+        if (!scope.shouldPollStopFlag(STOP_POLL_INTERVAL_MILLIS)) return false
+        if (!activeRunManager.isStopRequested(scope.activeRunKey(), scope.runId)) return false
         messageArchiveHandler.forceFinalizeAssistant(
             scope.threadId,
             scope.runId,
@@ -104,5 +104,15 @@ class AgentRunEventPipeline(
     private fun handleError(scope: AgentRunScope, error: Throwable) {
         logger.error("agent ag-ui run failed, user[{}] session[{}]", scope.userId, scope.threadId, error)
         lifecycleManager.finish(scope, AgentRunLifecycleManager.FinishReason.Failed(error))
+    }
+
+    companion object {
+        /**
+         * 跨副本停止的生效上限，见 [AgentRunScope.shouldPollStopFlag]。
+         *
+         * 不做成配置项：它既不随环境变化，也没有哪个运维场景需要调它——真要更快停止，同副本路径本来就是
+         * 立即的，慢的只有"停止请求打到了没在跑的那个副本"这一种，1 秒在交互上已经感知不到。
+         */
+        private const val STOP_POLL_INTERVAL_MILLIS = 1000L
     }
 }

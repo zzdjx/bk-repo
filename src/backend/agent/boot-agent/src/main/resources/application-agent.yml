@@ -45,8 +45,8 @@ agent:
   runtime:
     # 停机时等待在跑 Agent 调用收尾的上限，必须是有限值，且与 K8s terminationGracePeriodSeconds 对齐
     shutdown-timeout: 15s
-    # 数据保留期：Agent 自己产生的运行数据多久之后自动清理。Mongo 侧靠写入时打的 expiresAt + TTL 索引，
-    # Redis 侧靠 key TTL；改配置只影响之后新写入的数据。任一项配 0 表示永不过期。
+    # 数据保留期：Agent 自己产生的运行数据多久之后自动清理。靠写入时打的 expiresAt + Mongo TTL 索引；
+    # 改配置只影响之后新写入的数据。任一项配 0 表示永不过期。
     # 约束：run-event 不应大于 run（事件流不能比 run 元数据活得久），
     #      session 不应小于 message（会话行先过期会让消息成为列不出来的孤儿数据）
     # retention:
@@ -55,10 +55,10 @@ agent:
     #   tool-call: 90d     # 工具调用审计
     #   message: 180d     # 会话消息（用户可见的聊天记录）
     #   session: 180d     # 会话元数据，按最后活跃时间滚动续期
-    #   task: 7d          # 被 promote 出的后台子任务记录（Redis）
-    #   memory: 180d      # 长期记忆（Redis），按最后一次使用滚动续期
+    #   task: 7d          # 被 promote 出的后台子任务记录
+    #   memory: 180d      # 长期记忆，按最后一次使用滚动续期
     #   # 按项目/用户维度覆盖上面的全局默认值，只对 run-event/run/tool-call/message/session 生效
-    #   # （task/memory 是 Redis key 级 TTL，见 AgentTaskRepositoryConfiguration/
+    #   # （task/memory 由 store 统一持有 TTL，见 AgentTaskRepositoryConfiguration/
     #   # AgentMemoryFilesystemConfiguration，本次未做维度化）。project-ids/user-ids 是 OR 关系，
     #   # 列表内第一个命中的 override 生效；某一项留空则沿用上面的全局默认值。
     #   overrides:
@@ -82,10 +82,6 @@ agent:
       # 生产应急阀：置为 true 后 Agent 的写能力整体停用（客户端写工具不再注册给模型，
       # 记忆的 memory_save/memory_delete 由 ASK 收紧为 DENY）；用户自己的记忆管理接口不受影响
       # read-only-mode: false
-      # 生产环境应置为 true——缺 Redis 时直接启动失败，而不是静默退化为进程内。
-      # 退化的只有会话归属缓存、活跃 run 注册表、resume 幂等标记这三项协调能力（持久化数据都在 Mongo），
-      # 单副本能跑通，多副本下会出现"A 副本起的 run，B 副本停不掉"这类只在生产暴露的问题。
-      # require-redis: true
     # 灰度总闸：只回答"这个项目/用户能不能进"，不区分能用哪些子 Agent 或工具（那需要更大的改造）。
     # 默认关闭；开启后项目名单与用户名单是 OR 关系，任一命中即放行。判断点读的是 live 的配置 bean，
     # 配置中心（Consul）推送变更后无需重启即可生效；本地开发不接配置中心时改这里仍需重启进程。

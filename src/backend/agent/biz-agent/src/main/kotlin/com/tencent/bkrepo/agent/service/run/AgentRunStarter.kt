@@ -16,11 +16,10 @@ import com.tencent.bkrepo.agent.context.AgentChatContextResolver
 import com.tencent.bkrepo.agent.hitl.AguiInterruptTracker
 import com.tencent.bkrepo.agent.pojo.AgentRunTriggerType
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
-import com.tencent.bkrepo.agent.runtime.ActiveRunScope
+import com.tencent.bkrepo.agent.runtime.ActiveRunKey
 import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
 import com.tencent.bkrepo.agent.service.AgentRunRecordService
 import com.tencent.bkrepo.agent.service.AgentSessionService
-import com.tencent.bkrepo.agent.session.AgentSessionStore
 import com.tencent.bkrepo.agent.session.AguiRuntimeContextCarrier
 import com.tencent.bkrepo.common.api.constant.StringPool
 import io.agentscope.core.agui.processor.AguiRequestProcessor
@@ -52,24 +51,23 @@ class AgentRunStarter(
     private val agentChatContextResolver: AgentChatContextResolver,
     private val agentRunRecordService: AgentRunRecordService,
     private val agentSessionService: AgentSessionService,
-    private val agentSessionStore: AgentSessionStore,
     private val activeRunManager: ActiveRunManager,
     private val replaySinkRegistry: AgentRunReplaySinkRegistry,
     private val messageArchiveHandler: AguiMessageArchiveHandler,
     private val aguiRequestProcessor: AguiRequestProcessor,
 ) {
 
-    fun start(userId: String, projectId: String, prepared: PreparedRunInput, runScope: ActiveRunScope): AgentRunScope {
+    fun start(userId: String, projectId: String, prepared: PreparedRunInput, runKey: ActiveRunKey): AgentRunScope {
         val executionId = AGENT_RUN_ID_PREFIX + StringPool.uniqueId()
         val chatContext = agentChatContextResolver.resolve(userId, projectId, prepared.input, executionId)
-        registerRunState(chatContext, prepared, runScope)
+        registerRunState(chatContext, prepared, runKey)
         return buildRunScope(chatContext, prepared)
     }
 
     private fun registerRunState(
         chatContext: AgentChatContext,
         prepared: PreparedRunInput,
-        runScope: ActiveRunScope,
+        runKey: ActiveRunKey,
     ) {
         agentRunRecordService.startRun(
             runId = prepared.runId,
@@ -86,8 +84,7 @@ class AgentRunStarter(
             },
         )
         agentSessionService.touchSession(prepared.threadId, prepared.runId, chatContext.userId, chatContext.projectId)
-        agentSessionStore.touchSessionOwner(chatContext.userId, chatContext.projectId, prepared.threadId)
-        activeRunManager.bindActiveRun(runScope, prepared.runId)
+        activeRunManager.bindActiveRun(runKey, prepared.runId)
         replaySinkRegistry.open(prepared.runId)
     }
 

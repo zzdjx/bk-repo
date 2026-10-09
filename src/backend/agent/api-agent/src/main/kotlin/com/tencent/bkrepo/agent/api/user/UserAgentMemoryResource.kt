@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RequestParam
  *
  * 与会话/对话接口不同，长期记忆按 [io.agentscope.harness.agent.IsolationScope.USER] 隔离
  * （见 `AgentMemoryFilesystemConfiguration`），只按 `userId` 归属，不区分 `projectId`，因此这里的
- * 接口都不需要 `projectId` 参数。所有接口均需登录；未开启长期记忆能力（无 Redis）时统一返回资源不存在。
+ * 接口都不需要 `projectId` 参数。所有接口均需登录；未开启长期记忆能力时统一返回资源不存在。
  */
 @Tag(name = "Agent长期记忆接口")
 @RequestMapping(AGENT_API_PREFIX)

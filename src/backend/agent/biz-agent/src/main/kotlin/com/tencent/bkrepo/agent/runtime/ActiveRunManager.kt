@@ -12,17 +12,14 @@ import com.tencent.bkrepo.agent.runtime.store.ActiveRunStateStore
 import io.agentscope.core.agent.RuntimeContext
 import io.agentscope.core.state.AgentStateStore
 import org.slf4j.LoggerFactory
-import org.springframework.context.ApplicationEventPublisher
-import org.springframework.context.event.EventListener
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 运行态唯一入口：分布式 lock/active/stop + 本机 handle + 早到 stop + AgentState 清理。
+ * 运行态唯一入口：共享的运行权/活跃 run/停止信号 + 本机 handle + AgentState 清理。
  */
 class ActiveRunManager(
     private val stateStore: ActiveRunStateStore,
     private val agentStateStore: AgentStateStore,
-    private val eventPublisher: ApplicationEventPublisher,
 ) {
 
     data class LocalHandle(
@@ -34,63 +31,67 @@ class ActiveRunManager(
     )
 
     private val localHandles = ConcurrentHashMap<String, LocalHandle>()
-    private val pendingStopRunIds = ConcurrentHashMap<String, String>()
 
-    fun tryAcquire(scope: ActiveRunScope): Boolean {
-        return stateStore.tryAcquireLock(scope.userId, scope.threadId)
+    fun tryAcquire(key: ActiveRunKey): Boolean {
+        return stateStore.tryAcquireLock(key.userId, key.threadId)
     }
 
-    fun isRunning(scope: ActiveRunScope): Boolean {
-        return stateStore.isLockHeld(scope.userId, scope.threadId)
+    fun isRunning(key: ActiveRunKey): Boolean {
+        return stateStore.isLockHeld(key.userId, key.threadId)
     }
 
-    fun bindActiveRun(scope: ActiveRunScope, runId: String) {
-        stateStore.bindActiveRun(scope.userId, scope.threadId, runId)
-        stateStore.clearStop(runId)
-        pendingStopRunIds.remove(scopeKey(scope))
+    fun bindActiveRun(key: ActiveRunKey, runId: String) {
+        stateStore.bindActiveRun(key.userId, key.threadId, runId)
     }
 
-    fun getActiveRunId(scope: ActiveRunScope): String? {
-        return stateStore.getActiveRunId(scope.userId, scope.threadId)
+    fun getActiveRunId(key: ActiveRunKey): String? {
+        return stateStore.getActiveRunId(key.userId, key.threadId)
     }
 
-    fun releaseRun(scope: ActiveRunScope, runId: String) {
-        if (stateStore.getActiveRunId(scope.userId, scope.threadId) != runId) {
-            return
-        }
-        stateStore.clearActiveRun(scope.userId, scope.threadId)
-        stateStore.clearStop(runId)
-        stateStore.releaseLock(scope.userId, scope.threadId)
-        pendingStopRunIds.remove(scopeKey(scope))
+    /** 释放运行权；带 runId 条件由存储层保证，避免误删后一个 run 刚抢到的锁。 */
+    fun releaseRun(key: ActiveRunKey, runId: String) {
+        stateStore.releaseRun(key.userId, key.threadId, runId)
     }
 
-    fun requestStop(scope: ActiveRunScope, runId: String) {
-        stateStore.requestStop(runId)
-        eventPublisher.publishEvent(AgentRunStopBroadcastEvent(scope, runId))
-        abortLocalHandle(scope, runId)
-        if (!hasLocalHandle(scope, runId)) {
-            pendingStopRunIds[scopeKey(scope)] = runId
-        }
+    /**
+     * 请求停止 [runId]，两条通道各管一边：
+     *
+     * 共享存储上的停止标志是跨副本的唯一手段——真正在跑这个 run 的副本会轮询到它（见
+     * [com.tencent.bkrepo.agent.service.run.AgentRunScope.shouldPollStopFlag]）。而如果 run 就在本副本，
+     * [abortLocalHandle] 同步中止，用户感知不到延迟，不必等轮询。
+     *
+     * run 还没 [registerHandle] 就被停的窗口不需要单独兜底：[registerHandle] 自己会查一次停止标志，
+     * 而标志在这里已经先写了。
+     *
+     * [runId] 来自已过期的运行权（调用方从 run 记录兜底取到的）时，停止标志会落空——没有活文档可写。
+     * 这是对的：运行权过期说明续期已经停了，持有它的副本要么已经没了，要么下一轮心跳就会因
+     * [AgentRunAbortReason.LOCK_LOST] 自行中止；跨副本通知一个不存在的听众没有意义。真在本副本的话，
+     * [abortLocalHandle] 这一条仍然生效。
+     */
+    fun requestStop(key: ActiveRunKey, runId: String) {
+        stateStore.requestStop(key.userId, key.threadId, runId)
+        abortLocalHandle(key, runId)
     }
 
-    fun isStopRequested(runId: String): Boolean {
-        return stateStore.isStopRequested(runId)
+    fun isStopRequested(key: ActiveRunKey, runId: String): Boolean {
+        return stateStore.isStopRequested(key.userId, key.threadId, runId)
     }
 
     fun registerHandle(
-        scope: ActiveRunScope,
+        key: ActiveRunKey,
         runId: String,
         runtimeContext: RuntimeContext,
         abort: (AgentRunAbortReason) -> Unit,
     ) {
-        localHandles[scopeKey(scope)] = LocalHandle(
-            userId = scope.userId,
-            threadId = scope.threadId,
+        localHandles[localKey(key)] = LocalHandle(
+            userId = key.userId,
+            threadId = key.threadId,
             runId = runId,
             runtimeContext = runtimeContext,
             abort = abort,
         )
-        if (stateStore.isStopRequested(runId) || pendingStopRunIds[scopeKey(scope)] == runId) {
+        // 兜住"停止请求比 handle 注册先到"：此时 requestStop 找不到本地 handle，只留下了存储上的标志。
+        if (stateStore.isStopRequested(key.userId, key.threadId, runId)) {
             abort(AgentRunAbortReason.USER_STOP)
         }
     }
@@ -99,7 +100,7 @@ class ActiveRunManager(
      * 中止本副本所有在跑的 run，返回实际中止的条数；供停机流程调用（见
      * [com.tencent.bkrepo.agent.runtime.AgentRunShutdownHandler]）。
      *
-     * 只处理本进程的 [localHandles]，不去扫 Redis：其它副本的 run 由它们各自停机时处理，跨副本代劳
+     * 只处理本进程的 [localHandles]，不去扫共享存储：其它副本的 run 由它们各自停机时处理，跨副本代劳
      * 会把还在正常服务的 run 也一起杀掉。每个 handle 的 abort 回调走的是与用户停止完全相同的收尾路径
      * （中断 Agent、落 CANCELLED 终态、关事件流、释放会话锁、complete SSE），所以这里不需要重复清理。
      */
@@ -121,15 +122,15 @@ class ActiveRunManager(
     }
 
     /**
-     * 给本副本所有在跑的 run 续上会话锁，返回续期成功的条数；由 [ActiveRunLockHeartbeat] 周期调用。
+     * 给本副本所有在跑的 run 续上运行权，返回续期成功的条数；由 [ActiveRunLockHeartbeat] 周期调用。
      *
-     * 会话锁是一把 TTL 固定的 Redis 锁，没有续期就意味着"run 必须在 TTL 内结束"，而一个 run 的时长
-     * 取决于模型和工具，不受我们控制。锁先于 run 过期的后果不是慢，而是同一会话上能并发起第二个 run，
-     * 两个 run 交替写同一份 AgentState。
+     * 运行权有固定 TTL，没有续期就意味着"run 必须在 TTL 内结束"，而一个 run 的时长取决于模型和工具，
+     * 不受我们控制。锁先于 run 过期的后果不是慢，而是同一会话上能并发起第二个 run，两个 run 交替写
+     * 同一份 AgentState。
      *
      * 发现归属已经不在（[ActiveRunStateStore.renewLock] 返回 false）时中止本地这个 run：此时会话已经
-     * 被别人接管，继续跑只会污染状态。中止走的是与用户停止同一条收尾路径，其中的 [releaseRun] 会先比对
-     * 活跃 run 绑定，因此不会误删接管方的锁。
+     * 被别人接管，继续跑只会污染状态。中止走的是与用户停止同一条收尾路径，其中的 [releaseRun] 带 runId
+     * 条件，因此不会误删接管方的锁。
      */
     fun renewLocalRunLocks(): Int {
         var renewed = 0
@@ -145,24 +146,20 @@ class ActiveRunManager(
                     handle.abort(AgentRunAbortReason.LOCK_LOST)
                 }
             } catch (exception: Exception) {
-                // 续期失败大多是 Redis 抖动，下一轮还会再试；这里不能把 run 直接中止掉。
+                // 续期失败大多是存储抖动，下一轮还会再试；这里不能把 run 直接中止掉。
                 logger.warn("failed to renew session lock for run[${handle.runId}]", exception)
             }
         }
         return renewed
     }
 
-    fun removeHandle(scope: ActiveRunScope) {
-        localHandles.remove(scopeKey(scope))
+    fun removeHandle(key: ActiveRunKey) {
+        localHandles.remove(localKey(key))
     }
 
-    fun clearActiveRunBinding(scope: ActiveRunScope) {
-        stateStore.clearActiveRun(scope.userId, scope.threadId)
-        pendingStopRunIds.remove(scopeKey(scope))
-    }
-
-    fun hasLocalHandle(scope: ActiveRunScope, runId: String): Boolean {
-        return localHandles[scopeKey(scope)]?.runId == runId
+    /** 无条件清除会话运行态：删除会话时收尾，以及 run 还没起来就失败时把刚抢到的运行权还回去。 */
+    fun clearRunState(key: ActiveRunKey) {
+        stateStore.clear(key.userId, key.threadId)
     }
 
     fun clearAgentRuntimeState(userId: String, threadId: String) {
@@ -173,18 +170,13 @@ class ActiveRunManager(
         }
     }
 
-    @EventListener
-    fun onStopBroadcast(event: AgentRunStopBroadcastEvent) {
-        abortLocalHandle(event.scope, event.runId)
-    }
-
-    private fun abortLocalHandle(scope: ActiveRunScope, runId: String) {
-        localHandles[scopeKey(scope)]
+    private fun abortLocalHandle(key: ActiveRunKey, runId: String) {
+        localHandles[localKey(key)]
             ?.takeIf { it.runId == runId }
             ?.abort?.invoke(AgentRunAbortReason.USER_STOP)
     }
 
-    private fun scopeKey(scope: ActiveRunScope): String = "${scope.userId}:${scope.threadId}"
+    private fun localKey(key: ActiveRunKey): String = "${key.userId}:${key.threadId}"
 
     companion object {
         private val logger = LoggerFactory.getLogger(ActiveRunManager::class.java)

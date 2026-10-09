@@ -54,9 +54,7 @@ class AgentCatalog(
         if (!runtimeProperties.topology.coordinator.enabled) {
             return emptyList()
         }
-        return definitionsById.values.filter { definition ->
-            bindingFor(definition).enabled && runtimeEligible(definition)
-        }
+        return definitionsById.values.filter { bindingFor(it).enabled }
     }
 
     fun resolveSubagentDeclarations(): List<SubagentDeclaration> =
@@ -71,10 +69,6 @@ class AgentCatalog(
             AgentIds.GOVERNANCE -> runtimeProperties.topology.agents.governance
             else -> error("Unknown agent id: ${definition.agentId}")
         }
-
-    // client 本地工具已拍平到协调者自身（不再以 DomainAgentDefinition/子代理形式声明），因此这里
-    // 不再需要按 agentId 特判；只读子代理目前没有额外的运行期开关。
-    private fun runtimeEligible(definition: DomainAgentDefinition): Boolean = true
 
     private fun validateDefinitions(
         definitions: List<DomainAgentDefinition>,

@@ -10,7 +10,7 @@ package com.tencent.bkrepo.agent.service.run
 
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
-import com.tencent.bkrepo.agent.runtime.ActiveRunScope
+import com.tencent.bkrepo.agent.runtime.ActiveRunKey
 import com.tencent.bkrepo.agent.runtime.AgentRunAbortReason
 import com.tencent.bkrepo.agent.runtime.AgentSessionInterruptor
 import com.tencent.bkrepo.agent.service.AgentRunEventService
@@ -62,7 +62,7 @@ class AgentRunLifecycleManager(
 
     fun registerHandle(scope: AgentRunScope) {
         activeRunManager.registerHandle(
-            scope = scope.activeRunScope(),
+            key = scope.activeRunKey(),
             runId = scope.runId,
             runtimeContext = scope.runtimeContext,
             abort = { reason -> finish(scope, FinishReason.Cancelled(reason)) },
@@ -116,8 +116,8 @@ class AgentRunLifecycleManager(
 
     private fun cleanup(scope: AgentRunScope) {
         runEventService.closeRun(scope.runId)
-        activeRunManager.removeHandle(scope.activeRunScope())
-        activeRunManager.releaseRun(scope.activeRunScope(), scope.runId)
+        activeRunManager.removeHandle(scope.activeRunKey())
+        activeRunManager.releaseRun(scope.activeRunKey(), scope.runId)
     }
 
     private fun completeEmitter(emitter: SseEmitter) {
@@ -129,4 +129,4 @@ class AgentRunLifecycleManager(
     }
 }
 
-fun AgentRunScope.activeRunScope(): ActiveRunScope = ActiveRunScope(userId, projectId, threadId)
+fun AgentRunScope.activeRunKey(): ActiveRunKey = ActiveRunKey(userId, projectId, threadId)

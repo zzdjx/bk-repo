@@ -21,8 +21,6 @@ interface AgentRunEventService {
 
     fun hasEvents(runId: String): Boolean
 
-    fun listEvents(runId: String): List<TAgentRunEvent>
-
     fun listAfterIndex(runId: String, afterIndex: Long): List<TAgentRunEvent>
 
     /** 将已持久化事件按序写入 SSE，返回最后写入的 eventIndex（无事件时返回 afterIndex）。 */
@@ -30,5 +28,6 @@ interface AgentRunEventService {
 
     fun closeRun(runId: String)
 
-    fun cleanup(runId: String)
+    /** 随会话一起删除事件流，由 [AgentSessionService] 的删除流程调用。 */
+    fun removeByThreadId(threadId: String)
 }

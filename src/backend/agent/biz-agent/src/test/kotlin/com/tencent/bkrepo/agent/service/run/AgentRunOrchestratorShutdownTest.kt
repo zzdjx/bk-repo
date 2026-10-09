@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
+import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
@@ -57,11 +58,13 @@ class AgentRunOrchestratorShutdownTest {
     fun `正常运行时前置检查应放行并继续走入参校验`() {
         whenever(shutdownManager.isAcceptingRequests).thenReturn(true)
         val input = input()
-        whenever(inputPreparer.prepare("user-1", "project-1", input)).thenThrow(MarkerException())
+        // prepare 现在排在抢运行权之后（见 AgentRunOrchestrator 的类注释），放行的标记要等拿到锁才会抛出。
+        whenever(activeRunManager.tryAcquire(any())).thenReturn(true)
+        whenever(inputPreparer.prepare(input)).thenThrow(MarkerException())
 
         assertThrows(MarkerException::class.java) { orchestrator().run("user-1", "project-1", input) }
 
-        verify(inputPreparer).prepare("user-1", "project-1", input)
+        verify(inputPreparer).prepare(input)
     }
 
     private fun input(): RunAgentInput = RunAgentInput.builder()
@@ -76,6 +79,7 @@ class AgentRunOrchestratorShutdownTest {
         agentSessionService = sessionService,
         agentRunRecordService = runRecordService,
         activeRunManager = activeRunManager,
+        inputValidator = mock<RunAgentInputValidator>(),
         inputPreparer = inputPreparer,
         runStarter = mock<AgentRunStarter>(),
         agentRunStreamOrchestrator = mock<AgentRunStreamOrchestrator>(),

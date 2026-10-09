@@ -73,14 +73,14 @@ import org.springframework.context.annotation.Configuration
  * （[com.tencent.bkrepo.agent.tool.memory.MemoryDeleteTool]），它们都需要绕开
  * `HarnessAgent` 内部私有的 `WorkspaceManager`、直接访问同一份底层存储。把 [MongoStore] 单独
  * 拆成一个 bean（而不是像最初实现那样只在 `agentMemoryFilesystemSpec` 内部 `new`），
- * 是为了让这几处共用同一条 Redis 连接，而不是各自重新创建连接。
+ * 是为了让这几处共用同一个存储实例，而不是各自重新创建。
  *
  * ## `memoryFilesystemAccess` 为什么不用 `@Component` 自注册
  *
  * [MemoryFilesystemAccess] 依赖抽象的 `BaseStore` 接口而不是具体的 [MongoStore]，构造函数只接受
  * `(store: BaseStore?, agentId: String)`。这里像阶段 9 `AgentTaskRepositoryConfiguration` 构造
  * `LimitedWorkspaceTaskRepository` 一样，用 `@Bean` 工厂方法而不是类自身 `@Component` 注解来完成 Spring
- * 装配——这样单测可以绕开 Spring 容器和真实 Lettuce 连接，直接 `new MemoryFilesystemAccess(fakeStore, id)`
+ * 装配——这样单测可以绕开 Spring 容器和真实 Mongo 连接，直接 `new MemoryFilesystemAccess(fakeStore, id)`
  * 传入一个内存态的 `BaseStore` 假实现。
  */
 @Configuration(proxyBeanMethods = false)

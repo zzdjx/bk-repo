@@ -15,7 +15,7 @@ import com.tencent.bkrepo.agent.pojo.AgentMemoryFileInfo
  * [com.tencent.bkrepo.agent.memory.MemoryFilesystemAccess] 与 `memory_save`/`memory_search`/
  * `memory_get`/`memory_delete` 读写同一份存储，按 `userId` 隔离（不区分 `projectId`）。
  *
- * 未启用长期记忆（无 Redis）时统一按资源不存在处理。
+ * 未启用长期记忆时统一按资源不存在处理。
  */
 interface AgentMemoryService {
 

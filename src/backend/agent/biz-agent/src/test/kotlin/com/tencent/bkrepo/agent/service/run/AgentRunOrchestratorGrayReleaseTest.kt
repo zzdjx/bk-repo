@@ -75,7 +75,7 @@ class AgentRunOrchestratorGrayReleaseTest {
             orchestrator(gray).run("stranger-user", "stranger-project", input())
         }
 
-        verify(inputPreparer, never()).prepare(any(), any(), any())
+        verify(inputPreparer, never()).prepare(any())
         verifyNoInteractions(activeRunManager, runRecordService, sessionService)
     }
 
@@ -110,7 +110,9 @@ class AgentRunOrchestratorGrayReleaseTest {
         orchestrator(AgentRuntimeProperties(gray = gray))
 
     private fun orchestrator(runtimeProperties: AgentRuntimeProperties): AgentRunOrchestrator {
-        whenever(inputPreparer.prepare(any(), any(), any())).thenThrow(MarkerException())
+        // prepare 现在排在抢运行权之后（见 AgentRunOrchestrator 的类注释），放行的标记要等拿到锁才会抛出。
+        whenever(activeRunManager.tryAcquire(any())).thenReturn(true)
+        whenever(inputPreparer.prepare(any())).thenThrow(MarkerException())
         return AgentRunOrchestrator(
             runtimeProperties = runtimeProperties,
             shutdownManager = shutdownManager,
@@ -118,6 +120,7 @@ class AgentRunOrchestratorGrayReleaseTest {
             agentSessionService = sessionService,
             agentRunRecordService = runRecordService,
             activeRunManager = activeRunManager,
+            inputValidator = mock<RunAgentInputValidator>(),
             inputPreparer = inputPreparer,
             runStarter = mock<AgentRunStarter>(),
             agentRunStreamOrchestrator = mock<AgentRunStreamOrchestrator>(),

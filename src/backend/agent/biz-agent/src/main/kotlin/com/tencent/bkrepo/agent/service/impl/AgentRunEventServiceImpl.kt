@@ -66,10 +66,6 @@ class AgentRunEventServiceImpl(
         return runEventDao.maxEventIndex(runId) != null
     }
 
-    override fun listEvents(runId: String): List<TAgentRunEvent> {
-        return runEventDao.listByRunId(runId)
-    }
-
     override fun listAfterIndex(runId: String, afterIndex: Long): List<TAgentRunEvent> {
         return runEventDao.listByRunIdAfterIndex(runId, afterIndex)
     }
@@ -88,8 +84,7 @@ class AgentRunEventServiceImpl(
         replaySinkRegistry.close(runId)
     }
 
-    override fun cleanup(runId: String) {
-        replaySinkRegistry.close(runId)
-        runEventDao.removeByRunId(runId)
+    override fun removeByThreadId(threadId: String) {
+        runEventDao.removeByThreadId(threadId)
     }
 }

@@ -55,6 +55,14 @@ import java.time.LocalDateTime
         def = "{'userId': 1, 'projectId': 1, 'startedAt': -1}",
         background = true,
     ),
+    // 支撑 AgentRunDao.findStaleRunning：孤儿 run 清扫（AgentOrphanRunSweeper）每个 active-run-ttl
+    // 扫一轮，没有这个索引就是周期性全表扫描。status 在前、startedAt 在后：等值条件必须排在范围条件
+    // 之前，否则范围之后的字段用不上索引。
+    CompoundIndex(
+        name = "status_startedAt_idx",
+        def = "{'status': 1, 'startedAt': 1}",
+        background = true,
+    ),
 )
 data class TAgentRun(
     var id: String? = null,

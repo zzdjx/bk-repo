@@ -55,6 +55,21 @@ class AgentRunDao : SimpleMongoDao<TAgentRun>() {
     }
 
     /**
+     * 找出启动时间早于 [before]、却仍挂在 [AgentRunStatus.RUNNING] 的记录，供
+     * [com.tencent.bkrepo.agent.runtime.AgentOrphanRunSweeper] 判定它们是不是已经没人在跑了。
+     *
+     * 这里只按时间粗筛，不代表这些 run 真的卡住了——长对话跑过 [before] 是完全正常的，是否收尾由调用方
+     * 再查一次运行权归属来定。[limit] 限制单轮处理量，避免历史脏数据一次性撑爆内存。
+     */
+    fun findStaleRunning(before: LocalDateTime, limit: Int): List<TAgentRun> {
+        val query = Query(
+            Criteria.where(TAgentRun::status.name).`is`(AgentRunStatus.RUNNING)
+                .and(TAgentRun::startedAt.name).lt(before),
+        ).limit(limit)
+        return find(query)
+    }
+
+    /**
      * 将仍处于 [AgentRunStatus.RUNNING] 的记录更新为终态。
      *
      * @return 是否成功写入（重复终态写入返回 false）

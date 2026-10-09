@@ -25,7 +25,7 @@ class FrontendToolSanitizer(
 ) {
 
     fun sanitize(input: RunAgentInput): RunAgentInput {
-        if (!properties.frontendToolsEnabled) {
+        if (!properties.features.frontendToolsEnabled) {
             if (input.hasTools()) {
                 throw ParameterInvalidException("tools: local tools are disabled")
             }

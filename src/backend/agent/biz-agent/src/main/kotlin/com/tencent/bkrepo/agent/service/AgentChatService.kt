@@ -16,7 +16,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 /**
  * AG-UI 对话 run 业务编排。
  *
- * 负责 run、status、stop 与 stream/reconnect 的业务入口；不直接操作 Redis、Mongo 或 SSE 编码细节。
+ * 负责 run、status、stop 与 stream/reconnect 的业务入口；不直接操作 Mongo 或 SSE 编码细节。
  * [userId] 来自已认证请求上下文，[projectId] 为 bk-repo 权限域。
  */
 interface AgentChatService {

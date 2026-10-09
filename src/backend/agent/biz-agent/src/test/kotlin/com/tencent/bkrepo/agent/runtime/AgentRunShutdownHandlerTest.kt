@@ -17,7 +17,6 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
-import org.springframework.context.ApplicationEventPublisher
 
 /**
  * 用的是真实的框架单例 [GracefulShutdownManager]（构造器私有、无法替换），因此每个用例结束后必须
@@ -29,7 +28,6 @@ class AgentRunShutdownHandlerTest {
     private val activeRunManager = ActiveRunManager(
         stateStore = stateStore,
         agentStateStore = InMemoryAgentStateStore(),
-        eventPublisher = ApplicationEventPublisher { },
     )
     private val shutdownManager = GracefulShutdownManager.getInstance()
     private val handler = AgentRunShutdownHandler(activeRunManager, shutdownManager)
@@ -41,7 +39,7 @@ class AgentRunShutdownHandlerTest {
 
     @Test
     fun `停机时应拒绝新调用并中止在跑run释放会话锁`() {
-        val scope = ActiveRunScope("user-1", "project-1", "thread-1")
+        val scope = ActiveRunKey("user-1", "project-1", "thread-1")
         val reasons = mutableListOf<AgentRunAbortReason>()
         activeRunManager.tryAcquire(scope)
         activeRunManager.bindActiveRun(scope, "run-1")
@@ -60,7 +58,7 @@ class AgentRunShutdownHandlerTest {
 
     @Test
     fun `重复触发停机只生效一次`() {
-        val scope = ActiveRunScope("user-1", "project-1", "thread-1")
+        val scope = ActiveRunKey("user-1", "project-1", "thread-1")
         var abortCount = 0
         activeRunManager.registerHandle(scope, "run-1", runtimeContext = runtimeContext()) { abortCount++ }
 

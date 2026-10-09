@@ -41,7 +41,7 @@ class AgentPermissionRulesConfiguration {
     @Bean
     fun agentPermissionContext(properties: EffectiveAgentRuntimeProperties): PermissionContextState {
         val builder = PermissionContextState.builder()
-        val readOnly = properties.readOnlyMode
+        val readOnly = properties.features.readOnlyMode
         HARNESS_ORCHESTRATION_TOOLS.forEach { toolName ->
             builder.addAllowRule(toolName, toolRule(toolName, PermissionBehavior.ALLOW))
         }
@@ -53,7 +53,7 @@ class AgentPermissionRulesConfiguration {
         MEMORY_WRITE_TOOLS.forEach { toolName ->
             registerWriteRule(builder, toolName, readOnly)
         }
-        if (properties.frontendToolsEnabled) {
+        if (properties.features.frontendToolsEnabled) {
             LocalToolDefinitions.allTools().forEach { definition ->
                 registerRule(builder, definition.name, definition.riskLevel, readOnly)
             }
@@ -129,7 +129,7 @@ class AgentPermissionRulesConfiguration {
         val MEMORY_READ_TOOLS: List<String> = listOf("memory_search", "memory_get")
 
         /**
-         * 长期记忆的唯一写入入口（框架内置 `MemorySaveTool`）。产品要求"记忆写入需用户明确同意"，
+         * 长期记忆的保存入口（框架内置 `MemorySaveTool`）；删除走 [MEMORY_DELETE_TOOL]。产品要求"记忆写入需用户明确同意"，
          * 这里复用现有 HITL 确认弹窗机制，走 ASK——跟其它写工具同构，不需要新建单独的同意 UI。
          */
         const val MEMORY_SAVE_TOOL = "memory_save"

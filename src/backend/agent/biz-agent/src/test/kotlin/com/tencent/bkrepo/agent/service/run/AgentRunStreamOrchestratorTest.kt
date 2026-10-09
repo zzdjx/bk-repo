@@ -17,7 +17,6 @@ import com.tencent.bkrepo.agent.model.TAgentRunEvent
 import com.tencent.bkrepo.agent.pojo.AgentRunStatus
 import com.tencent.bkrepo.agent.pojo.AgentRunTriggerType
 import com.tencent.bkrepo.agent.runtime.ActiveRunManager
-import com.tencent.bkrepo.agent.runtime.ActiveRunScope
 import com.tencent.bkrepo.agent.runtime.AgentRunReplaySinkRegistry
 import com.tencent.bkrepo.agent.runtime.store.InMemoryActiveRunStateStore
 import com.tencent.bkrepo.agent.service.AgentRunEventService
@@ -32,7 +31,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.LocalDateTime
 import java.util.concurrent.CountDownLatch
@@ -111,7 +109,6 @@ class AgentRunStreamOrchestratorTest {
         val activeRunManager = ActiveRunManager(
             stateStore = InMemoryActiveRunStateStore(),
             agentStateStore = InMemoryAgentStateStore(),
-            eventPublisher = ApplicationEventPublisher { },
         )
         return AgentRunStreamOrchestrator(
             properties = properties,
@@ -182,7 +179,6 @@ class AgentRunStreamOrchestratorTest {
 
         override fun append(scope: AgentRunScope, event: AguiEvent): Long = 0L
         override fun hasEvents(runId: String): Boolean = hasEvents
-        override fun listEvents(runId: String): List<TAgentRunEvent> = emptyList()
         override fun listAfterIndex(runId: String, afterIndex: Long): List<TAgentRunEvent> = emptyList()
         override fun replayTo(emitter: SseEmitter, runId: String, afterIndex: Long): Long {
             replayCalls.add(runId)
@@ -190,6 +186,6 @@ class AgentRunStreamOrchestratorTest {
             return afterIndex
         }
         override fun closeRun(runId: String) = Unit
-        override fun cleanup(runId: String) = Unit
+        override fun removeByThreadId(threadId: String) = Unit
     }
 }

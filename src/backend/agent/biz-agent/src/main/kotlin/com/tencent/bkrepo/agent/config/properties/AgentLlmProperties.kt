@@ -80,7 +80,7 @@ data class AgentLlmProperties(
      * 精确配额，只做本地的尽力而为限流）。任一项 ≤ 0 表示不限制该维度。
      *
      * 默认两项都不限制：这是一个会主动拒绝合法请求的限流开关，不像熔断那样默认打开也不影响健康流量，
-     * 因此需要显式配置才生效，与 `read-only-mode`/`require-redis` 一样"限制性功能默认关闭"。
+     * 因此需要显式配置才生效，与 `read-only-mode` 一样"限制性功能默认关闭"。
      */
     data class Concurrency(
         var maxGlobal: Int = DEFAULT_UNLIMITED,
