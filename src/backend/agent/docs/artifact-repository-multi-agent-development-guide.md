@@ -2569,6 +2569,83 @@ Redis 锁键"。
 
 ### 24.3 还没动的
 
-`GetRepositoryGovernanceInfoTool` 的占位实现本身没有改——它等的是 agent 服务接入仓库服务的 client，不是
-一次重构能解决的。这次只是把"它是占位的"这件事从代码注释里搬到了运维文档上，让决定是否启用 `governance`
-的人看得到。
+`GetRepositoryGovernanceInfoTool` 的占位实现本身没有改。这次只是把"它是占位的"这件事从代码注释搬到了运维
+文档上，让决定是否启用 `governance` 的人看得到。
+
+> **订正**：上面这段当时还引用了工具 KDoc 里"等 agent 服务接入仓库服务 client"的说法。那个说法是错的，
+> §25 查实后已连同代码一起改掉——所需的 client 早就在依赖里了。
+
+## 25. 四个占位域工具，填掉其中两个（2026-10）
+
+### 25.1 先把占位的范围量出来
+
+§24.3 写完"还有一个占位工具"之后，顺手扫了一遍全部域工具。结果是**六个里有四个**在返回占位结果：
+
+| 工具 | 所属 Agent | 默认 | 当时状态 |
+|------|-----------|------|---------|
+| `list_repositories` | discovery | 启用 | 真实 |
+| `get_repository_detail` | discovery | **启用** | **占位** |
+| `explain_repository_permission` | governance | 关闭 | 真实 |
+| `get_repository_governance_info` | governance | 关闭 | 占位 |
+| `get_transfer_task_status` | transfer-diagnostics | 关闭 | 占位 |
+| `get_transfer_error_detail` | transfer-diagnostics | 关闭 | 占位 |
+
+最要紧的不是数量，是 `get_repository_detail` **随默认配置发布**。它的 description 写着"返回 projectId、
+repoName、type 等结构化字段"，实际只回：
+
+```json
+{"ok":true,"projectId":"p","repoName":"r","note":"repository detail pending backend integration"}
+```
+
+连 `type` 都没有。这比工具不存在更糟——工具不存在时模型会老实说做不到；工具存在且描述承诺了 `type`，模型
+会自信地调用，拿回一个空壳，然后要么含糊其辞要么顺着编。占位结果里那句 `note` 是写给人看的，模型不一定
+当回事。
+
+### 25.2 "尚未接入对应 client"是假的
+
+两个仓库侧工具的 KDoc 都说治理配置"分散在仓库服务的独立接口里，agent 服务尚未接入对应 client"。查下来
+这句话站不住：
+
+- `RepositoryClient` **早就是依赖**，`ListRepositoriesTool` 正在用它的 `listPermissionRepo`。
+- `getRepoDetail(projectId, repoName)` 返回的 `RepositoryDetail` 上直接挂着 `type`、`category`、`public`、
+  `description`、`createdBy`、`quota`、`used`。
+- 清理策略也在同一个对象上：`configuration.getSetting<Map<String, Any>>("cleanupStrategy")`，
+  `ArtifactCleanupJob` 和 `RepositoryServiceHelper` 都是这么读的。
+
+也就是说这两个工具**一次 `getRepoDetail` 就能全填上，不需要任何新依赖**。那句注释大概是工具契约先行、
+实现留白时写的，之后没人回来核对，就这么固化成了"有人在等别的团队"的印象。
+
+传输诊断那两个是真的缺依赖——`ReplicaTaskClient` 在 `replication/api-replication`，引它是一个新的模块
+依赖决策，本轮不做，只在运维文档上写明"这个 Agent 现在启用等于启用两个问不出数据的工具"。
+
+### 25.3 出参必须是白名单，不是黑名单
+
+填实现时真正需要想清楚的只有一件事：`RepositoryDetail` 上挂着两处绝不能进模型上下文的东西。
+`storageCredentials` 是存储凭证本身；`configuration` 对远程/代理/组合仓库会在 settings 里带上游通道的
+用户名口令。
+
+工具结果的去向决定了这件事的严重性：它会原样进入对话历史，并落 `agent_message` 归档（默认保留 180 天），
+中间没有任何环节会再做脱敏。漏一次就是长期泄漏。
+
+所以两个工具都**逐字段列白名单**，而不是写"排除 storageCredentials 和 configuration"的黑名单——黑名单在
+上游给 `RepositoryDetail` 加字段时会默默失效，而且失效的方式是静默泄漏。治理工具连 `cleanupStrategy` 那个
+map 也是按键取四个字段（`enable` / `cleanupType` / `cleanupValue` / `cleanTargets`）组装成视图，没有把
+settings 整个序列化出去，理由同上：上游往同一个 map 里塞别的东西时不会跟着漏。
+
+两个工具各有一条测试专门钉这个约束，断言结果文本里不出现预埋的 `super-secret-proxy-password` 与
+`old-credentials-key`。
+
+### 25.4 两个小决定
+
+**仓库不存在返回 `ok=false` 而不是抛异常。** 项目管理员对不存在的仓库也能通过 IAM 校验，所以
+`getRepoDetail` 返回 null 是正常可达的结果，不是故障。抛出去只会被基类转成一句
+`Error: upstream_error: ...`，模型没法据此告诉用户"没有这个仓库"。
+
+**`cleanupType` 原样透传，不翻译成枚举。** 取值（`retentionDays` / `retentionDate` / `retentionNums`）的
+权威定义是 `job` 模块里 `ArtifactCleanupJob.CleanupStrategyEnum` 这个嵌套枚举，agent 既够不着也不该为此
+依赖 `biz-job`。在这里照抄一份映射，等于埋一个在上游加清理类型时会静默过时的分支——届时新类型会被我们
+翻译成"未知"，比直接给出原值更糟。所以原值照出，含义写进工具描述交给模型解释。
+
+**配额同时留在 `get_repository_detail` 里，与治理工具重叠。** 本来按职责该只放 governance，但那个 Agent
+默认关闭，而"这仓库用了多少、还剩多少"是最常见的提问之一。只在 governance 里提供等于默认答不出来。重叠
+是有意的，已在 KDoc 里写明理由，免得后人当成冗余清掉。

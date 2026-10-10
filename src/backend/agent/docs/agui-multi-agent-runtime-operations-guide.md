@@ -398,14 +398,33 @@ store 统一持有，不参与维度化。
 | Client | `client` | 启用 | frontend SchemaOnlyTools |
 | Discovery | `discovery` | 启用 | 制品检索 |
 | Transfer Diagnostics | `transfer-diagnostics` | **关闭** | 传输任务诊断 |
-| Governance | `governance` | **关闭** | 权限判定解释（`explain_repository_permission`）、仓库治理配置查询 |
+| Governance | `governance` | **关闭** | 权限判定解释、仓库配额与清理策略查询 |
+
+### 9.1 服务端领域工具
+
+这些工具全部只读，统一在 `AbstractReadOnlyDomainTool` 里过 PermissionEngine，并在各自的 `execute` 内走真实
+IAM 校验。**出参一律是字段白名单**：仓库的存储凭证与 `configuration` 整体绝不进模型上下文（远程/代理仓库
+会在 settings 里带上游口令），而工具结果会原样落 `agent_message` 归档，漏一次就是长期泄漏。
+
+| 工具 | 所属 | IAM 校验 | 状态 |
+|------|------|----------|------|
+| `list_repositories` | discovery | PROJECT READ，再取 IAM 有权仓库名单 | 可用 |
+| `get_repository_detail` | discovery | REPO READ | 可用 |
+| `explain_repository_permission` | governance | 只解释不拦截，仅限当前认证用户 | 可用 |
+| `get_repository_governance_info` | governance | REPO READ | 可用 |
+| `get_transfer_task_status` | transfer-diagnostics | PROJECT READ | **占位** |
+| `get_transfer_error_detail` | transfer-diagnostics | PROJECT READ | **占位** |
+
+仓库不存在时，前四个工具返回 `{"ok":false,"error":"repository_not_found"}` 而不是报错——项目管理员对不存在
+的仓库也能通过 IAM 校验，这是正常可达的结果，让模型能直接告诉用户而不是只剩一句 `upstream_error`。
 
 启用 `transfer-diagnostics` 前请完成 §11.4 评估集与权限验收。启用 `governance` 前同样建议先跑一轮真实
 IAM 判定结果的抽样核对，避免 `explain_repository_permission` 的解释与实际生效权限出现偏差。
 
-> **`governance` 的已知限制**：`get_repository_governance_info` 目前是占位实现，权限校验走的是真实 IAM，
-> 但配额与保留策略字段恒为 `null`，返回体带 `"note": "repository governance info pending backend
-> integration"`。agent 服务尚未接入仓库服务对应的 client。启用该 Agent 前需知悉这个工具问不出实际数据。
+> **`transfer-diagnostics` 的已知限制**：`get_transfer_task_status` 与 `get_transfer_error_detail` 目前都是
+> 占位实现，权限校验走真实 IAM，但状态恒为 `unknown`、错误码恒为 `null`，返回体带
+> `"note": "... pending backend integration"`。agent 服务尚未引入 `replication` 模块的 `ReplicaTaskClient`。
+> **这个 Agent 现在启用等于启用两个问不出数据的工具**，评估集通过前不要打开。
 
 ---
 
