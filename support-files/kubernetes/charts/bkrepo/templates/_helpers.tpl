@@ -143,9 +143,10 @@ Return the value of auth url
 {{- end -}}
 
 {{/*
-True if value is a Platform auth header: "Platform " + base64(accessKey:secretKey).
+Decode a Platform auth header ("Platform " + base64(accessKey:secretKey)) to
+"accessKey:secretKey". Empty output means the header is malformed.
 */}}
-{{- define "bkrepo.platformAuth.valid" -}}
+{{- define "bkrepo.platformAuth.decode" -}}
 {{- $auth := . | toString | trim -}}
 {{- if hasPrefix "Platform " $auth -}}
 {{- $payload := trimPrefix "Platform " $auth | trim -}}
@@ -153,35 +154,74 @@ True if value is a Platform auth header: "Platform " + base64(accessKey:secretKe
 {{- $decoded := $payload | b64dec -}}
 {{- $parts := splitn ":" 2 $decoded -}}
 {{- if and $parts._0 $parts._1 -}}
-true
+{{- $decoded -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Return the value of authorization.
+True when "accessKey:secretKey" uses the publicly known default pair.
+*/}}
+{{- define "bkrepo.platformAuth.isDefault" -}}
+{{- $parts := splitn ":" 2 (. | toString) -}}
+{{- if or (eq $parts._0 "18b61c9c-901b-4ea3-89c3-1f74be944b66") (eq $parts._1 "Us8ZGDXPqk86cwMukYABQqCZLAkM3K") -}}
+true
+{{- end -}}
+{{- end -}}
 
-New installs must set gateway.accessKey and gateway.secretKey.
-Upgrades may keep a valid gateway.authorization and leave accessKey/secretKey empty.
+{{/*
+Fail when "accessKey:secretKey" uses the publicly known default pair.
+*/}}
+{{- define "bkrepo.platformAuth.rejectDefault" -}}
+{{- if include "bkrepo.platformAuth.isDefault" . -}}
+{{- fail "gateway accessKey/secretKey must not use the publicly known default pair. Set unique values via gateway.authorization, or via gateway.accessKey/gateway.secretKey." -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return "accessKey:secretKey" for the gateway platform account.
+
+gateway.authorization wins, as long as it decodes to a pair and is not the
+default shipped in values.yaml. Otherwise gateway.accessKey + gateway.secretKey
+are used. New installs reject the publicly known default pair either way.
+*/}}
+{{- define "bkrepo.platformCredential" -}}
+{{- $ak := .Values.gateway.accessKey | toString | trim -}}
+{{- $sk := .Values.gateway.secretKey | toString | trim -}}
+{{- $authPair := include "bkrepo.platformAuth.decode" (.Values.gateway.authorization | toString) -}}
+{{- if and $authPair (not (include "bkrepo.platformAuth.isDefault" $authPair)) -}}
+{{- $authPair -}}
+{{- else if and $ak $sk -}}
+{{- $pair := printf "%s:%s" $ak $sk -}}
+{{- include "bkrepo.platformAuth.rejectDefault" $pair -}}
+{{- $pair -}}
+{{- else if not $authPair -}}
+{{- if .Release.IsInstall -}}
+{{- fail "New installs must set gateway.authorization ('Platform <base64(accessKey:secretKey)>'), or both gateway.accessKey and gateway.secretKey. Example: --set gateway.accessKey=<ak> --set gateway.secretKey=<sk>" -}}
+{{- else -}}
+{{- fail "Upgrade requires a valid gateway.authorization (Platform <base64(accessKey:secretKey)>) or both gateway.accessKey and gateway.secretKey." -}}
+{{- end -}}
+{{- else if .Release.IsInstall -}}
+{{- include "bkrepo.platformAuth.rejectDefault" $authPair -}}
+{{- else -}}
+{{- $authPair -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return the value of authorization.
 */}}
 {{- define "bkrepo.authorization" -}}
-{{- $ak := .Values.gateway.accessKey | toString -}}
-{{- $sk := .Values.gateway.secretKey | toString -}}
-{{- if and $ak $sk -}}
-{{- if or (eq $ak "18b61c9c-901b-4ea3-89c3-1f74be944b66") (eq $sk "Us8ZGDXPqk86cwMukYABQqCZLAkM3K") -}}
-{{- fail "gateway.accessKey/secretKey must not use the publicly known default pair. Set unique values." -}}
+{{- printf "Platform %s" (include "bkrepo.platformCredential" . | b64enc) -}}
 {{- end -}}
-{{- printf "Platform %s" (printf "%s:%s" $ak $sk | b64enc) -}}
-{{- else if .Release.IsInstall -}}
-{{- fail "New installs must set gateway.accessKey and gateway.secretKey (do not rely on gateway.authorization). Example: --set gateway.accessKey=<ak> --set gateway.secretKey=<sk>" -}}
-{{- else -}}
-{{- $auth := .Values.gateway.authorization | toString | trim -}}
-{{- if ne (include "bkrepo.platformAuth.valid" $auth | trim) "true" -}}
-{{- fail "Upgrade requires a valid gateway.authorization (Platform <base64(accessKey:secretKey)>) or set both gateway.accessKey and gateway.secretKey." -}}
+
+{{- define "bkrepo.platform.accessKey" -}}
+{{- (splitn ":" 2 (include "bkrepo.platformCredential" .))._0 -}}
 {{- end -}}
-{{- $auth -}}
-{{- end -}}
+
+{{- define "bkrepo.platform.secretKey" -}}
+{{- (splitn ":" 2 (include "bkrepo.platformCredential" .))._1 -}}
 {{- end -}}
 
 
@@ -359,25 +399,24 @@ Must be explicitly set and must not be a publicly known default.
 
 {{/*
 Return the in-cluster MongoDB password.
-Must be explicitly set when mongodb.enabled=true and must not be the public default.
+Must be set, otherwise the URI does not match the password the subchart generates.
 */}}
 {{- define "bkrepo.mongodb.password" -}}
 {{- $password := .Values.mongodb.auth.password | toString -}}
-{{- if or (eq $password "") (eq $password "bkrepo") -}}
-{{- fail "mongodb.auth.password must be set to a strong value when mongodb.enabled=true (do not use empty or 'bkrepo'). Example: --set mongodb.auth.password=<your-password>" -}}
+{{- if eq $password "" -}}
+{{- fail "mongodb.auth.password must be set when mongodb.enabled=true. Example: --set mongodb.auth.password=<your-password>" -}}
 {{- else -}}
 {{- $password -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Return the external MongoDB URI.
-Required when mongodb.enabled=false; reject the hardcoded default credentials.
+Return the external MongoDB URI. Required when mongodb.enabled=false.
 */}}
 {{- define "bkrepo.externalMongodb.uri" -}}
 {{- $uri := .Values.externalMongodb.uri | toString -}}
-{{- if or (eq $uri "") (contains "bkrepo:bkrepo@" $uri) -}}
-{{- fail "externalMongodb.uri must be set to a real MongoDB URI when mongodb.enabled=false (do not use default credentials bkrepo/bkrepo)." -}}
+{{- if eq $uri "" -}}
+{{- fail "externalMongodb.uri must be set when mongodb.enabled=false. Example: --set externalMongodb.uri=mongodb://<user>:<password>@<host>:27017/bkrepo" -}}
 {{- else -}}
 {{- $uri -}}
 {{- end -}}

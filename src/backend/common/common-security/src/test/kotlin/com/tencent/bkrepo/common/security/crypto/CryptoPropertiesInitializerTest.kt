@@ -81,21 +81,94 @@ internal class CryptoPropertiesInitializerTest {
     }
 
     @Test
+    @DisplayName("DB 已有完整记录时覆盖本地配置")
+    fun testDbRecordWins() {
+        val stored = properties()
+        init(stored)
+        val candidate = properties(privateKeyStr = RSA().privateKeyBase64, publicKeyStr = "")
+        CryptoPropertiesInitializer(candidate, storeOf(stored)).afterPropertiesSet()
+        Assertions.assertEquals(stored.privateKeyStr, candidate.privateKeyStr)
+        Assertions.assertEquals(stored.publicKeyStr, candidate.publicKeyStr)
+        Assertions.assertEquals(stored.fingerprint(), candidate.fingerprint())
+    }
+
+    @Test
+    @DisplayName("本地配置非法时仍以 DB 为准，不先被本地校验挡住")
+    fun testInvalidLocalConfigDoesNotBlockDb() {
+        val stored = properties()
+        init(stored)
+        val candidate = properties(aesKey = "0".repeat(20), aesIv = "0".repeat(16))
+        CryptoPropertiesInitializer(candidate, storeOf(stored)).afterPropertiesSet()
+        Assertions.assertEquals(stored.aesKey, candidate.aesKey)
+        Assertions.assertEquals(stored.fingerprint(), candidate.fingerprint())
+    }
+
+    @Test
+    @DisplayName("DB 缺的密钥用配置补齐，DB 已有的不被覆盖")
+    fun testFillMissingFromConfig() {
+        val stored = properties()
+        init(stored)
+        stored.privateKeyStr2048PKCS1 = ""
+        stored.publicKeyStr2048PKCS1 = ""
+        val candidate = properties()
+        init(candidate)
+        val pkcs1 = candidate.privateKeyStr2048PKCS1
+        CryptoPropertiesInitializer(candidate, storeOf(stored)).afterPropertiesSet()
+        Assertions.assertEquals(pkcs1, candidate.privateKeyStr2048PKCS1)
+        Assertions.assertEquals(stored.privateKeyStr, candidate.privateKeyStr)
+    }
+
+    @Test
+    @DisplayName("DB 查询失败时禁止当成无记录重新生成")
+    fun testQueryFailureDoesNotGenerate() {
+        val candidate = properties()
+        CryptoPropertiesInitializer(candidate).afterPropertiesSet()
+        val fingerprint = candidate.fingerprint()
+        val store = object : CryptoPropertiesStore {
+            override fun load(): CryptoProperties? {
+                throw IllegalStateException("security.crypto keyring query failed")
+            }
+
+            override fun insertIfAbsent(candidate: CryptoProperties) = candidate
+
+            override fun patch(expectedFingerprint: String, merged: CryptoProperties) = merged
+        }
+        val error = Assertions.assertThrows(IllegalStateException::class.java) {
+            CryptoPropertiesInitializer(candidate, store).afterPropertiesSet()
+        }
+        Assertions.assertTrue(error.message.orEmpty().contains("query failed"))
+        Assertions.assertEquals(fingerprint, candidate.fingerprint())
+    }
+
+    @Test
     @DisplayName("AES 密钥长度非法时启动失败")
     fun testAesLength() {
         val keyError = Assertions.assertThrows(IllegalStateException::class.java) {
             init(properties(aesKey = "0".repeat(20)))
         }
-        Assertions.assertTrue(keyError.message!!.contains("16, 24 or 32 bytes"))
+        Assertions.assertTrue(keyError.message.orEmpty().contains("16, 24 or 32 bytes"))
 
         val ivError = Assertions.assertThrows(IllegalStateException::class.java) {
             init(properties(aesIv = "0".repeat(8)))
         }
-        Assertions.assertTrue(ivError.message!!.contains("16 bytes"))
+        Assertions.assertTrue(ivError.message.orEmpty().contains("16 bytes"))
     }
 
     private fun init(properties: CryptoProperties) =
         CryptoPropertiesInitializer(properties).afterPropertiesSet()
+
+    private fun storeOf(existing: CryptoProperties) = object : CryptoPropertiesStore {
+        private var current = existing
+        override fun load() = current
+        override fun insertIfAbsent(candidate: CryptoProperties) = candidate
+        override fun patch(expectedFingerprint: String, merged: CryptoProperties): CryptoProperties? {
+            if (current.fingerprint() != expectedFingerprint) {
+                return null
+            }
+            current = merged
+            return merged
+        }
+    }
 
     private fun properties(
         privateKeyStr: String = pkcs8Key,

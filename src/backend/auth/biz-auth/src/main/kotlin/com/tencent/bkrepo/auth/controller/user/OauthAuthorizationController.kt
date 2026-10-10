@@ -37,6 +37,7 @@ import com.tencent.bkrepo.auth.pojo.oauth.OidcConfiguration
 import com.tencent.bkrepo.auth.pojo.oauth.UserInfo
 import com.tencent.bkrepo.auth.service.OauthAuthorizationService
 import com.tencent.bkrepo.common.api.pojo.Response
+import com.tencent.bkrepo.common.security.util.SecurityUtils
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import io.swagger.v3.oas.annotations.Operation
 import org.springframework.beans.factory.annotation.Autowired
@@ -79,7 +80,8 @@ class OauthAuthorizationController @Autowired constructor(
     @Operation(summary = "获取oauth token信息")
     @GetMapping("/token")
     fun getToken(accessToken: String): Response<OauthToken?> {
-        return ResponseBuilder.success(oauthAuthorizationService.getToken(accessToken))
+        val userId = SecurityUtils.getUserId()
+        return ResponseBuilder.success(oauthAuthorizationService.getUserToken(accessToken, userId))
     }
 
     @Operation(summary = "创建或刷新oauth token")

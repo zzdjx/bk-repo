@@ -101,4 +101,12 @@ data class TArtifactShare(
      * 创建/更新分享时签发的下载临时 token（明文存库，对外 API 不返回）。
      */
     var downloadToken: String? = null,
+    /**
+     * sidecar inode，来自源节点元数据 IMATE_ARTIFACT_THUMBNAIL_INO。
+     */
+    var thumbnailIno: Long? = null,
+    /**
+     * sidecar 完整路径，来自源节点元数据 IMATE_ARTIFACT_THUMBNAIL。
+     */
+    var thumbnailFullPath: String? = null,
 )

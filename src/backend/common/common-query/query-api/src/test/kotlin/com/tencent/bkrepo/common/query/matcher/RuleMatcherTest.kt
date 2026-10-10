@@ -170,6 +170,11 @@ internal class RuleMatcherTest {
         rule = Rule.QueryRule(FIELD_PROJECT_ID, "", OperationType.NOT_NULL)
         assertTrue(RuleMatcher.match(Rule.FixedRule(rule), valuesToMatch))
         assertFalse(RuleMatcher.match(rule.copy(field = "notExists"), valuesToMatch))
+
+        // EXISTS
+        rule = Rule.QueryRule(FIELD_PROJECT_ID, "", OperationType.EXISTS)
+        assertTrue(RuleMatcher.match(rule, valuesToMatch))
+        assertFalse(RuleMatcher.match(rule.copy(field = "notExists"), valuesToMatch))
     }
 
     @Test

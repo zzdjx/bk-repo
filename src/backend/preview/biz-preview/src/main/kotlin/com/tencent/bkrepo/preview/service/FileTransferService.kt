@@ -31,6 +31,9 @@
 
 package com.tencent.bkrepo.preview.service
 
+import com.tencent.bkrepo.common.api.constant.HttpStatus
+import com.tencent.bkrepo.common.api.exception.ErrorCodeException
+import com.tencent.bkrepo.common.api.message.CommonMessageCode
 import com.tencent.bkrepo.common.artifact.api.ArtifactInfo
 import com.tencent.bkrepo.common.artifact.constant.ARTIFACT_INFO_KEY
 import com.tencent.bkrepo.common.artifact.constant.REPO_KEY
@@ -43,8 +46,11 @@ import com.tencent.bkrepo.common.artifact.repository.context.ArtifactDownloadCon
 import com.tencent.bkrepo.common.artifact.repository.context.ArtifactUploadContext
 import com.tencent.bkrepo.common.artifact.repository.core.ArtifactService
 import com.tencent.bkrepo.common.artifact.resolve.file.ArtifactFileFactory
+import com.tencent.bkrepo.common.artifact.resolve.response.ArtifactResource
+import com.tencent.bkrepo.common.artifact.resolve.response.ArtifactResourceWriter
 import com.tencent.bkrepo.common.artifact.stream.ArtifactInputStream
 import com.tencent.bkrepo.common.artifact.stream.Range
+import com.tencent.bkrepo.common.artifact.util.http.HttpRangeUtils
 import com.tencent.bkrepo.common.metadata.service.repo.RepositoryService
 import com.tencent.bkrepo.common.metadata.util.ProjectServiceHelper
 import com.tencent.bkrepo.common.service.util.HttpContextHolder
@@ -65,7 +71,10 @@ import com.tencent.bkrepo.preview.utils.FileUtils
 import com.tencent.bkrepo.repository.pojo.node.NodeDetail
 import com.tencent.bkrepo.repository.pojo.repo.RepositoryDetail
 import jakarta.servlet.http.HttpServletRequest
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
+import java.io.SequenceInputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -79,7 +88,8 @@ class FileTransferService(
     private val createIfAbsentService: CreateIfAbsentService,
     private val enableMultiTenant: EnableMultiTenantProperties,
     private val drivePreviewDownloadService: DrivePreviewDownloadService,
-    private val nodeResourceFactory: NodeResourceFactory
+    private val nodeResourceFactory: NodeResourceFactory,
+    private val artifactResourceWriter: ArtifactResourceWriter,
 ) : ArtifactService() {
 
     /**
@@ -155,6 +165,69 @@ class FileTransferService(
             )
     }
 
+    /**
+     * 按存储偏移读取一段原文件，供 PDF 增量改标题时只取 xref / Info。
+     */
+    fun readAt(fileAttribute: FileAttribute, offset: Long, length: Int, total: Long): ByteArray {
+        if (length <= 0 || offset >= total) {
+            return ByteArray(0)
+        }
+        val capped = minOf(length.toLong(), total - offset).toInt()
+        val end = offset + capped - 1
+        return loadOriginalRange(fileAttribute, Range(offset, end, total)).use { it.readBytes() }
+    }
+
+    /**
+     * 原文件按 Range 从存储读，末尾再接上增量更新。总长度是两者之和。
+     */
+    fun sendAppendedBytes(fileAttribute: FileAttribute, originalSize: Long, suffix: ByteArray) {
+        prepareOriginalContext(fileAttribute)
+        setInlinePreviewContentType(fileAttribute.suffix.orEmpty(), fileAttribute.fileName)
+        val total = originalSize + suffix.size
+        val range = resolveHttpRange(total)
+        val body = openVirtualRange(fileAttribute, originalSize, suffix, range)
+        val name = fileAttribute.fileName?.trim()?.takeIf { it.isNotEmpty() } ?: "preview.pdf"
+        val stream = ArtifactInputStream(body, range)
+        val resource = ArtifactResource(stream, name)
+        resource.contentType = MediaPreviewContentType.fromSuffix(fileAttribute.suffix.orEmpty())
+            ?: "application/pdf"
+        resource.useDisposition = false
+        artifactResourceWriter.write(resource)
+    }
+
+    private fun openVirtualRange(
+        fileAttribute: FileAttribute,
+        originalSize: Long,
+        suffix: ByteArray,
+        range: Range,
+    ): InputStream {
+        val start = range.start
+        val end = range.end
+        if (end < originalSize) {
+            return loadOriginalRange(fileAttribute, Range(start, end, originalSize))
+        }
+        if (start >= originalSize) {
+            val from = (start - originalSize).toInt()
+            val length = (end - start + 1).toInt()
+            return ByteArrayInputStream(suffix, from, length)
+        }
+        val head = loadOriginalRange(fileAttribute, Range(start, originalSize - 1, originalSize))
+        val tailLength = (end - originalSize + 1).toInt()
+        return SequenceInputStream(head, ByteArrayInputStream(suffix, 0, tailLength))
+    }
+
+    private fun resolveHttpRange(total: Long): Range {
+        val request = HttpContextHolder.getRequestOrNull() ?: return Range.full(total)
+        return try {
+            HttpRangeUtils.resolveRange(request, total)
+        } catch (_: IllegalArgumentException) {
+            throw ErrorCodeException(
+                status = HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+                messageCode = CommonMessageCode.REQUEST_RANGE_INVALID,
+            )
+        }
+    }
+
     private fun openOriginal(fileAttribute: FileAttribute): Pair<ArtifactInfo, RepositoryDetail> {
         val artifactInfo = requireArtifactInfo(fileAttribute)
         prepareOriginalContext(fileAttribute)
@@ -202,7 +275,7 @@ class FileTransferService(
     }
 
     fun download(fileAttribute: FileAttribute): DownloadResult? {
-        var result: DownloadResult? = if (fileAttribute.storageType == 1) {
+        val result: DownloadResult? = if (fileAttribute.storageType == 1) {
             downloadUtils.downLoad(fileAttribute, config)
         } else {
             downloadFromRepo(fileAttribute)

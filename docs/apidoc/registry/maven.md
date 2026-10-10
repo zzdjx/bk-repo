@@ -155,6 +155,8 @@
 
 - API: GET /ext/search/gavc/{projectId}?g={groupId}&a={artifactId}&v={version}&c{classifier}&repos={repo[,repo]}
 
+- 鉴权：未指定 repos 时校验项目 READ；指定 repos 时逐个校验仓库 READ
+
 - API 名称: gavc_search
 
 - 功能说明：

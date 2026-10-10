@@ -13,7 +13,7 @@ class PypiProperties {
     var enableSimpleIndexCache: Boolean = false
     /**
      * 单包 simple HTML 缓存 TTL。按缓存节点 lastModifiedDate 判断过期；
-     * 过期后按 miss 处理并允许重建。小于等于 0 表示不过期。
+     * 过期后仍返回旧 HTML，由抢到锁的请求重建。小于等于 0 表示不过期。
      */
     var simpleIndexCacheTtl: Duration = Duration.ofMinutes(1)
 }

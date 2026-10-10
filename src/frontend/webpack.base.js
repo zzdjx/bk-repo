@@ -120,11 +120,12 @@ module.exports = ({ entry, publicPath, dist, port = 8080, argv, env }) => {
                 // 导致 @vue-office/excel 内部 import { ref, reactive, ... } from 'vue-demi' 拿到 undefined。
                 // 在 Vue 2 环境下 vue-demi 的 API 与 @vue/composition-api 完全一致，直接重定向即可。
                 'vue-demi$': path.resolve(__dirname, 'node_modules/@vue/composition-api'),
-                // pptx-vanilla-viewer 的 AI / 协同为可选依赖，预览只做本地放映
+                // pptx-vanilla-viewer 的 AI / 协同 / Node canvas 为可选依赖，预览只做本地放映
                 ai$: false,
                 yjs$: false,
                 'y-webrtc$': false,
-                'y-websocket$': false
+                'y-websocket$': false,
+                '@napi-rs/canvas$': false
             }
         },
         devServer: {

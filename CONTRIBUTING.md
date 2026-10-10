@@ -8,8 +8,7 @@
 
 ## 设计文档
 
-任何功能和特性都应该要有相应的设计文档。设计文档需要归档到**docs/fetures**目录中，方便团队进行审阅，也方便后续加入的开发者了解特性设计
-详情。
+任何功能和特性都应该要有相应的设计文档。进行中的需求放在 [docs/requirements/](docs/requirements/)，已交付功能说明放在 [docs/features/](docs/features/)。跨服务、改存储语义或鉴权边界时，先写 [docs/superpowers/](docs/superpowers/) 再拆需求。
 
 ## 贡献功能与特性
 
@@ -31,7 +30,7 @@
 
 ## GIT提交规范
 
-因不同团队不同的项目管理下会有不同的代码提交注释，规范化开源下对不同团队提交信息，做了不同的提交标记以规范化区分提交内容：
+因不同团队不同的项目管理下会有不同的代码提交注释，规范化开源下对不同团队提交信息，做了不同的提交标记以规范化区分提交内容。内部工蜂 / TAPD 分支（`--story=` / `--issue=`）见 [docs/specification/commit-spec.md](docs/specification/commit-spec.md)。
 
 ```
 git commit -m '标记: 提交的概要注释 issue #123'

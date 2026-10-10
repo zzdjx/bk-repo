@@ -1,0 +1,42 @@
+---
+description: bk-repo 开发工作流：先读 docs 再改代码，做完同步文档
+alwaysApply: true
+---
+
+# 不丢上下文
+
+本仓库的用户文档在 `docs/apidoc*`、`docs/install`。开发上下文在 `docs/README.md`。
+
+## 动手前
+
+多文件或跨模块改动前，先读并在回复里声明读了什么：
+
+1. `docs/progress.md` — 是否属于当前迭代
+2. 对应 `docs/architecture/*.md` — 模块职责、主流程、禁止事项
+3. 跨服务、改存储语义或鉴权边界：先读或写 `docs/superpowers/`，不要直接开码
+4. 若有进行中需求：`docs/requirements/NNN-*/` 的 requirements / solution / task-items
+
+不要凭聊天记忆覆盖文档里已记录的决策。文档没有、代码也看不清时，先查再写。
+
+## 动手后
+
+- 对外或服务间接口变更：同步 `docs/apidoc` 或 `docs/apidoc-user`（URL、参数、错误码、鉴权）
+- 模块职责或主流程变了：更新对应架构文档和 `docs/architecture/README.md`
+- 当前迭代状态变了：更新 `docs/progress.md`（进行中 / 待办 / 卡点 / 决策表）
+- 功能已交付：补 `docs/features/`，不要把进行中方案写进去
+- 事故或里程碑：用 `@postmortem` 写入 `docs/postmortem/`
+
+## 规则与 Skill
+
+- 后端 Kotlin 分层规范：`src/backend/.cursor/rules/`（不要复制到仓库根）
+- 前端 / 网关：`.cursor/rules/frontend.mdc`、`gateway.mdc`
+- 路由无 `projectId/repoName` 时必须显式鉴权：`src/backend/.cursor/rules/route-auth.mdc`
+- 统一入口：仓库根 `AGENTS.md`
+- 大改动方案 / 新建需求 / 存档 / 恢复 / 复盘：`new-design`、`new-requirement`、`checkpoint`、`recap`、`postmortem`
+- 改上传、存储、鉴权、分发、扫描时走对应领域 Skill，不要只凭通用 Kotlin 规范
+
+## 禁止
+
+- 不要用新实现替换 `docs/` 里已写明的边界（例如把 blob 存进 repository，或把鉴权下沉到网关替代服务内校验）
+- 不要在 progress 里堆已完成历史；完成后改需求状态即可
+- 不要创建 `docs/memory/` 或按日工作日志

@@ -38,7 +38,7 @@ if bk_ticket == nil and bk_token == nil then
 end
 
 if bk_ticket ~= nil then
-    username = oauthUtil:verify_ticket(bk_ticket, "ticket")
+    username = oauthUtil:verify_bk_ticket(bk_ticket)
     token = bk_ticket
 end
 

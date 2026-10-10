@@ -87,6 +87,7 @@
   | --- | --- | --- | --- | --- |
   | X-BKREPO-OVERWRITE | boolean | 否 | false | 是否覆盖已存在文件 |
   | X-BKREPO-SHA256 | string | 否 | 无 | 期望文件 sha256 |
+  | X-BKREPO-META / X-BKREPO-META-* | string | 否 | 无 | 与 [节点上传](./node.md) 相同；含 `IMATE_ARTIFACT_NAME` 时生成作品缩略图 sidecar（当前 `image`/`pdf`/`slides`/`table`/`video`/`markdown`/`html`）。客户端提交的 `IMATE_ARTIFACT_THUMBNAIL` / `IMATE_ARTIFACT_THUMBNAIL_INO` 入库前丢弃 |
 
 - 请求体: [文件流]
 - 响应体: 与 [Drive 节点上传](./node.md) 一致，返回 `DriveNode`

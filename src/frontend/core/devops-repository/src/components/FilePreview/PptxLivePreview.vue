@@ -64,13 +64,18 @@
             document.addEventListener('fullscreenchange', this.onFullscreenChange)
             document.addEventListener('webkitfullscreenchange', this.onFullscreenChange)
             window.addEventListener('keydown', this.onKeydown)
-            if (typeof ResizeObserver !== 'undefined' && this.$refs.stageWrap) {
+            if (typeof ResizeObserver !== 'undefined') {
                 this.resizeObserver = new ResizeObserver(() => {
                     if (this.player) {
                         this.player.resize()
                     }
                 })
-                this.resizeObserver.observe(this.$refs.stageWrap)
+                if (this.$refs.stageWrap) {
+                    this.resizeObserver.observe(this.$refs.stageWrap)
+                }
+                if (this.$refs.thumbsHost) {
+                    this.resizeObserver.observe(this.$refs.thumbsHost)
+                }
             }
             this.reload()
         },
@@ -225,11 +230,20 @@
     background: #111;
     color: #eee;
     z-index: 10000000;
+    container-type: size;
 }
 .pptx-live-thumbs {
+    --pptx-live-thumb-visible: 10;
+    --pptx-live-thumb-gap: 8px;
+    --pptx-live-thumb-chrome: 36px;
+    --pptx-live-thumb-min-w: 128px;
+    --pptx-live-thumb-packed-h: calc((100cqh - var(--pptx-live-thumb-chrome) - (var(--pptx-live-thumb-visible) - 1) * var(--pptx-live-thumb-gap)) / var(--pptx-live-thumb-visible));
+    --pptx-live-thumb-min-h: calc(var(--pptx-live-thumb-min-w) / var(--pptx-slide-aspect, 1.7777778));
+    --pptx-live-thumb-h: max(var(--pptx-live-thumb-min-h), var(--pptx-live-thumb-packed-h));
+    --pptx-live-thumb-w: calc(var(--pptx-live-thumb-h) * var(--pptx-slide-aspect, 1.7777778));
     flex: none;
-    width: 176px;
-    min-width: 176px;
+    width: calc(var(--pptx-live-thumb-w) + 52px);
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
     background: #161616;
@@ -242,10 +256,47 @@
     border-right: 0;
     background: transparent;
 }
+.pptx-live-thumbs ::v-deep .pptxv-thumbs-list {
+    height: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumbs-window {
+    gap: var(--pptx-live-thumb-gap);
+}
 .pptx-live-thumbs ::v-deep .pptxv-thumbs-footer,
 .pptx-live-thumbs ::v-deep .pptxv-thumbs-add,
 .pptx-live-thumbs ::v-deep .pptxv-thumb-section-actions {
     display: none !important;
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumb {
+    flex: none;
+    height: calc(var(--pptx-live-thumb-h) + 4px);
+    min-height: calc(var(--pptx-live-thumb-h) + 4px);
+    max-height: calc(var(--pptx-live-thumb-h) + 4px);
+    width: max-content;
+    box-sizing: content-box;
+    overflow: visible;
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumb-frame {
+    box-sizing: content-box;
+    flex: none;
+    height: var(--pptx-live-thumb-h) !important;
+    width: var(--pptx-live-thumb-w) !important;
+    overflow: hidden;
+    background: transparent !important;
+    border-width: 2px !important;
+}
+/* 切页或滚动会整段重建缩略图，内联 zoom 会丢。变量挂在侧栏上，新节点立刻吃到同一比例。 */
+.pptx-live-thumbs.is-sized ::v-deep .pptxv-thumb-frame > .pptxv-stage {
+    transform: none !important;
+    transform-origin: 0 0 !important;
+    zoom: var(--pptx-thumb-scale);
+}
+.pptx-live-thumbs ::v-deep .pptxv-thumb.is-active .pptxv-thumb-frame {
+    border-color: #3a84ff;
+    box-shadow: 0 0 0 3px #3a84ff;
 }
 .pptx-live-main {
     flex: 1;
@@ -353,6 +404,13 @@ html.pptx-live-presenting .pptxv-presenter,
 }
 .pptx-live-preview:not(.is-presenting) .pptxv-thumbs {
     display: flex !important;
+}
+.pptx-live-thumbs .pptxv-thumbs-list::-webkit-scrollbar {
+    width: 6px;
+}
+.pptx-live-thumbs .pptxv-thumbs-list::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
 }
 .pptx-live-stage .pptxv-media.pptx-live-has-audio {
     overflow: visible;

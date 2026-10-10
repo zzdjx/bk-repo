@@ -103,7 +103,7 @@ mongodb:
     enabled: true
     database: bkrepo
     username: bkrepo
-    ## 必须通过 --set / 自定义 values 显式指定，禁止使用默认口令 bkrepo
+    ## 必须通过 --set / 自定义 values 显式指定，留空无法与子 chart 生成的口令对上
     password: ""
   persistence:
     subPath: mongodb
@@ -154,7 +154,7 @@ tls:
 
 ## 如果mongodb.enabled为false，bkrepo将使用下面的参数连接外部mongodb
 externalMongodb:
-  ## mongodb 标准连接字符串（mongodb.enabled=false 时必填，禁止使用默认凭据 bkrepo/bkrepo）
+  ## mongodb 标准连接字符串（mongodb.enabled=false 时必填）
   uri: ""
 
 ## 数据持久化配置, 当使用filesystem方式存储时需要配置
@@ -339,11 +339,13 @@ gateway:
   helmHost: helm.bkrepo.example.com
   ## dns服务器地址，用于配置nginx resolver。local=on为openrestry语法，取本机/etc/resolv.conf配置
   dnsServer: local=on
-  ## 网关访问微服务认证信息。新安装请改用 accessKey/secretKey；升级时可继续使用已有且格式正确的 authorization。
+  ## 网关访问微服务认证信息，形如 Platform <base64(accessKey:secretKey)>。
+  ## 改成自己的值后优先于 accessKey/secretKey 生效；保持下面这个公开默认值则回落到
+  ## accessKey/secretKey，且新安装会被拒绝。
   authorization: "Platform MThiNjFjOWMtOTAxYi00ZWEzLTg5YzMtMWY3NGJlOTQ0YjY2OlVzOFpHRFhQcWs4NmN3TXVrWUFCUXFDWkxBa00zSw=="
-  ## 网关平台账号 accessKey（新安装必填，禁止使用仓库内公开默认值）
+  ## 网关平台账号 accessKey（authorization 仍为默认值时生效，需与 secretKey 同时配置）
   accessKey: ""
-  ## 网关平台账号 secretKey（新安装必填，禁止使用仓库内公开默认值）
+  ## 网关平台账号 secretKey（authorization 仍为默认值时生效，需与 accessKey 同时配置）
   secretKey: ""
   ## 部署模式，standalone: 独立模式，ci: 与ci搭配模式 , saas模式: 蓝鲸saas部署模式
   deployMode: standalone
@@ -357,22 +359,14 @@ gateway:
   bkciPort:
   ## ci模式必填，蓝鲸paas域名
   bkPaasUrl: paas.example.com
-  ## ci模式必填，登录地址
+  ## ci模式必填，登录地址；ticket 模式同时作为登录服务根地址拼 get_info
   bkLoginUrl: http://paas.example.com/login/
   ## 是否开启多租户
   enableMultiTenantMode: false
   ## 运营租户默认
   oPTenantId: system
-  ## ci模式必填，ssm ip
-  ssmIP0:
-  ## ci模式必填，ssm host
-  ssmHost:
-  ## ci模式必填，ssm port
-  ssmPort:
-  ## ci模式必填，ssm token url
+  ## odc/太湖登录使用，不要删
   ssmTokenUrl:
-  ## ci模式必填，ssm env
-  ssmEnv:
   ## 蓝鲸apigw地址
   bkApigwUrl:
   ## ci模式必填，app code
@@ -500,6 +494,8 @@ repository:
 
 ## 认证服务配置
 auth:
+  ## 写入 auth ConfigMap 根级的额外 application.yml，没有则留空 map
+  commonConfig: {}
   config:
     ## 是否允许使用内置默认口令 password 登录。生产环境必须为 false
     allowDefaultPwd: false

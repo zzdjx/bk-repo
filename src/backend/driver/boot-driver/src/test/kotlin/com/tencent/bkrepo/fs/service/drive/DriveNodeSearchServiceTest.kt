@@ -75,7 +75,7 @@ class DriveNodeSearchServiceTest {
     }
 
     @Test
-    fun `search passes filters to dao`() = runBlocking {
+    fun `search passes filters to dao`() = runBlocking<Unit> {
         whenever(
             driveNodeDao.searchPage(
                 projectId = any(),
@@ -144,7 +144,7 @@ class DriveNodeSearchServiceTest {
     }
 
     @Test
-    fun `searchCount uses distinct series count when distinctByMetadataKeys provided`() = runBlocking {
+    fun `searchCount uses distinct series count when distinctByMetadataKeys provided`() = runBlocking<Unit> {
         val metadata = listOf(
             DriveMetadataQueryRule(key = "IMATE_ARTIFACT_TYPE", value = "pdf", operation = OperationType.EQ),
             DriveMetadataQueryRule(key = "IMATE_AGENT_ID", value = "agent-1", operation = OperationType.EQ),
@@ -180,7 +180,7 @@ class DriveNodeSearchServiceTest {
     }
 
     @Test
-    fun `searchCount returns groups when groupByMetadataKey provided with distinct`() = runBlocking {
+    fun `searchCount returns groups when groupByMetadataKey provided with distinct`() = runBlocking<Unit> {
         val distinctKeys = listOf("IMATE_AGENT_ID", "IMATE_CONVERSATION_ID", "IMATE_ARTIFACT_NAME")
         val groups = listOf(
             RDriveNodeDao.MetadataGroupCount(value = "image", count = 2L),

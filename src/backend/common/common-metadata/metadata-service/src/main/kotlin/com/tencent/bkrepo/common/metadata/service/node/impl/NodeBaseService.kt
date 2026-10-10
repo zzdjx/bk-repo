@@ -150,7 +150,13 @@ abstract class NodeBaseService(
             option.hasPermissionPath = hasPermissionPaths
             option.noPermissionPath = noPermissionPaths
             var query = NodeQueryHelper.nodeListQuery(projectId, repoName, getArtifactFullPath(), option)
-            val totalNum = getTotalNodeNum(artifact, query)
+            // 与 listNodePage 相同：不需要总数则不 count，截断用目录 nodeNum
+            val totalNum = if (option.includeTotalRecords) {
+                getTotalNodeNum(artifact, query)
+            } else {
+                val subNodeNum = getSubNodeNum(artifact)
+                if (subNodeNum < 0) Long.MAX_VALUE else subNodeNum
+            }
             if (totalNum > repositoryProperties.listCountLimit) {
                 val pageRequest = Pages.ofRequest(1, repositoryProperties.listCountLimit.toInt())
                 query = query.with(pageRequest)

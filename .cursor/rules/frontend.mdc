@@ -1,0 +1,25 @@
+---
+description: bk-repo 前端约定（仓库页与运营后台）
+globs: src/frontend/**/*.{js,vue,scss}
+alwaysApply: false
+---
+
+# 前端
+
+- 用户侧：`src/frontend/core/devops-repository`（Vue 2 + Vuex，axios 在 `src/utils/request.js`）
+- 运营侧：`src/frontend/core/devops-op`（请求在 `src/api/*.js`）
+- 启动见 `src/frontend/README.md`。先复用现有 store action / `src/api`，不要平行再写一套 axios
+
+## 请求
+
+- 仓库页走 `$ajax`：`baseURL` 为 `{origin}{BK_SUBPATH}web`，对应网关 `/web/{service}/...`
+- 必须带 cookie；CSRF：`ci/saas` 用 `bk_token`，独立部署用 `bkrepo_ticket`，Header `X-CSRFToken`
+- 请求拦截器已写 `X-BKREPO-PROJECT-ID`、`X-BKREPO-TIME-ZONE`，不要在单个页面再抄一套
+- 401/402 走登录弹窗或 `getLoginUrl()`；440 跳项目配额页。不要在业务页把 403 吞掉，用 `IamDenyDialog`
+- store 路径按微服务拼：`repository/api/...`、`generic/api/user/...`，与 `docs/apidoc-user` 对齐
+
+## 页面
+
+- 路由在 `core/devops-repository/src/router`，history + `routeBase`；改路由同时看共用 store 的页面
+- `MODE_CONFIG`（`ci` / `saas` / standalone）会改 cookie 和登录，不要写死一种
+- 接口字段变更必须同步 `docs/apidoc-user` 或对应后端 DTO

@@ -35,29 +35,109 @@ import com.tencent.bkrepo.common.metadata.service.node.NodeService
 import com.tencent.bkrepo.preview.config.configuration.PreviewConfig
 import com.tencent.bkrepo.preview.pojo.FileAttribute
 import com.tencent.bkrepo.preview.service.FileTransferService
+import com.tencent.bkrepo.preview.service.PdfPreviewArtifactNameSource
+import com.tencent.bkrepo.preview.service.PdfPreviewDisplayName
+import com.tencent.bkrepo.preview.service.PdfPreviewTitle
+import com.tencent.bkrepo.preview.service.PdfRangedRandomAccess
 import com.tencent.bkrepo.preview.service.cache.impl.PreviewFileCacheServiceImpl
 import org.springframework.stereotype.Service
+import java.util.LinkedHashMap
+import kotlin.math.min
 
 /**
- * 本地 PDF 按 Range 原样流出，供浏览器内置阅读器内联预览；远程 PDF 仍走转换缓存链路。
+ * 本地 PDF 按 Range 流出。有作品名时在文件末尾追加标题补丁，正文仍从存储按 Range 读。
  */
 @Service
 class PdfFilePreviewImpl(
     config: PreviewConfig,
     private val fileTransferService: FileTransferService,
     previewFileCacheService: PreviewFileCacheServiceImpl,
-    nodeService: NodeService
+    nodeService: NodeService,
+    private val artifactNameSource: PdfPreviewArtifactNameSource,
 ) : AbstractFilePreview(
     config,
     fileTransferService,
     previewFileCacheService,
     nodeService
 ) {
-    override fun filePreviewHandle(fileAttribute: FileAttribute) {
-        if (fileAttribute.storageType == 0) {
-            fileTransferService.sendOriginalFileAsResponse(fileAttribute)
-        } else {
-            super.filePreviewHandle(fileAttribute)
+    private val suffixCache = object : LinkedHashMap<String, ByteArray>(CACHE_CAPACITY, LOAD_FACTOR, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean {
+            return size > CACHE_CAPACITY
         }
+    }
+
+    override fun filePreviewHandle(fileAttribute: FileAttribute) {
+        if (fileAttribute.storageType != 0) {
+            super.filePreviewHandle(fileAttribute)
+            return
+        }
+        val title = PdfPreviewDisplayName.normalize(artifactNameSource.read(fileAttribute))
+        if (title == null) {
+            fileTransferService.sendOriginalFileAsResponse(fileAttribute)
+            return
+        }
+        val size = fileTransferService.originalFileSize(fileAttribute)
+        val suffix = titleSuffix(fileAttribute, title, size)
+        if (suffix == null) {
+            fileTransferService.sendOriginalFileAsResponse(fileAttribute)
+            return
+        }
+        fileTransferService.sendAppendedBytes(fileAttribute, size, suffix)
+    }
+
+    private fun titleSuffix(fileAttribute: FileAttribute, title: String, size: Long): ByteArray? {
+        val key = cacheKey(fileAttribute, title, size)
+        synchronized(suffixCache) {
+            suffixCache[key]?.let { cached ->
+                return cached.takeIf { it.isNotEmpty() }
+            }
+        }
+        val suffix = PdfPreviewTitle.incrementalUpdate(
+            PdfRangedRandomAccess(size) { offset, length ->
+                fileTransferService.readAt(fileAttribute, offset, length, size)
+            },
+            title,
+        )
+        synchronized(suffixCache) {
+            suffixCache[key] = suffix ?: ByteArray(0)
+        }
+        return suffix
+    }
+
+    private fun cacheKey(fileAttribute: FileAttribute, title: String, size: Long): String {
+        val tailLength = min(TAIL_BYTES, size).toInt()
+        val tail = if (tailLength == 0) {
+            ByteArray(0)
+        } else {
+            fileTransferService.readAt(fileAttribute, size - tailLength, tailLength, size)
+        }
+        return listOf(
+            fileAttribute.projectId,
+            fileAttribute.repoName,
+            fileAttribute.artifactUri,
+            size.toString(),
+            title,
+            hex(tail),
+        ).joinToString("|")
+    }
+
+    private fun hex(bytes: ByteArray): String {
+        val out = StringBuilder(bytes.size * 2)
+        for (byte in bytes) {
+            val value = byte.toInt() and BYTE_MASK
+            out.append(HEX[value ushr NIBBLE])
+            out.append(HEX[value and NIBBLE_MASK])
+        }
+        return out.toString()
+    }
+
+    private companion object {
+        const val CACHE_CAPACITY = 32
+        const val LOAD_FACTOR = 0.75f
+        const val TAIL_BYTES = 32L
+        const val BYTE_MASK = 0xFF
+        const val NIBBLE = 4
+        const val NIBBLE_MASK = 0x0F
+        val HEX = "0123456789abcdef".toCharArray()
     }
 }

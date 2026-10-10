@@ -101,7 +101,7 @@ class UserShareController(
         @RequestParam id: String
     ): Response<UserShareRecordInfo> {
         permissionManager.checkProjectPermission(PermissionAction.READ, projectId)
-        return ResponseBuilder.success(userShareService.info(id))
+        return ResponseBuilder.success(userShareService.info(projectId, id))
     }
 
     @PostMapping("/approval/create/{shareId}")

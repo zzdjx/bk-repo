@@ -1,58 +1,71 @@
 # 代码提交规范
 
-## 代码检查建议
-BK-CI/BK-REPO 工程一共涉及 JavaScript/Golang/Kotlin/Java/Lua 5种语言，我们开发团队默认使用如下工具进行代码检查，为了提高Merge效率，请提交前自行检测。
-- ESLint
-- Gometalinter
-- detekt
+内部工蜂开发按本文。开源 GitHub 贡献者仍看仓库根 [CONTRIBUTING.md](../../CONTRIBUTING.md) 的 `type: 说明 #issue`。
 
+## 代码检查
 
-## commit相关格式
+提交 MR 前自行跑过：
 
-个人分支提交commit消息格式
+- 后端 Kotlin / Java：detekt
+- 前端：ESLint
+
+## commit 格式
 
 ```
-type:messsge issue
+[--story=<id>|--issue=<id>] type: 说明 [#github-issue]
 ```
 
-* type 范围信息
-    * feature 新功能
-    * fix 错误修复
-    * docs 文档更改
-    * style （格式化，缺少半冒号等;没有代码更改）
-    * refactor 代码重构重构
-    * test 添加缺失的测试，重构测试;没有生产代码更改
-    * chore 构建脚本，任务等相关代码
-* message 本次提交的描述
-* issue 本次提交关联的issue id
+- TAPD 需求分支（`story_*`）用 `--story=<TAPD id>`
+- TAPD 缺陷分支（`issue_*`）用 `--issue=<TAPD id>`
+- `type` 与说明之间用冒号+空格
+- 说明写清改了什么 / 为什么，用中文即可
+- 若同时对应 GitHub issue，末尾加 `#编号`
 
-## Merge Request/Pull Request建议
+当前 `story_*` 分支上可以只写 `--story=<id> 说明`；合进 master / squash MR 时建议带上 `type:`。
 
-开发者在各自fork分支可能会存在一些简单commit信息，提交Merge Request前建议使用git rebase进行commit精简。精简信息请参照上一
-节。相关操作请参照如下流程：
+示例：
+
+```text
+--story=138501338 优化 configmap
+--story=138440985 fix: 预加载执行器满载测试改用独立线程池
+fix: PyPI simple 索引过期脏读单飞覆盖写 #4474
+feat: 支持本地仓 GLB 三维在线预览 #4628
+```
+
+### type
+
+与 [CONTRIBUTING.md](../../CONTRIBUTING.md) 一致，常用：
+
+| type | 说明 |
+|------|------|
+| feat / feature | 新功能 |
+| fix / bug / bugfix | 缺陷修复 |
+| refactor / perf | 重构或优化 |
+| test | 测试 |
+| docs | 文档 |
+| chore | 构建脚本、任务、工程配置 |
+| format | 仅格式化，无逻辑变化 |
+| depend | 依赖增删改 |
+| merge | 仅分支合并 |
+| del | 删除仍可能有人用的功能或 API |
+
+## Merge Request
+
+个人分支上可以有多笔小提交。提 MR 前建议 rebase 收成可读的几笔，标题与 commit 一样带 TAPD 前缀和 `type:`。
 
 ```shell
-#使用新分支做特性开发
-git checkout feature1-pick
-#多次调试与提交
-git commit -m "xxx"
-git commit -m "yyy"
-git commit -m "zzz"
-#如有引入新的第三方引用，使用dep管理引用
-dep ensure -v -add github.com/org/project
+git checkout story_<tapd-id>
+# …开发与多次 commit…
 
-#变基操作，合并多次变化（以下为3次），在feature1-pick分支下
-#重新填写标准commit信息
-git rebase -i HEAD~3
+# 如需把最近 N 笔收成规范说明
+git rebase -i HEAD~N
 
-#推送到仓库远端
-git push origin feature1-pick:feature1-pick
+git push origin HEAD
+```
 
-#提交PR/MR，等待合并
-#......................
-#......................
+合入 master 后，本地再跟进：
 
-#PR/MR合并完成后，本地master分支跟进
-git fetch upstream
-git rebase upstream/master
+```shell
+git fetch origin
+git rebase origin/master
 ```

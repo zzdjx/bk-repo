@@ -72,5 +72,10 @@ object Versions {
     const val CommonsNet = "3.9.0"
     const val JuniversalCharDet = "1.0.3"
     const val EmbeddedMongo = "4.11.0"
+    const val PdfBox = "2.0.32"
+    const val Commonmark = "0.30.0"
+    const val OpenHtmlToPdf = "1.1.37"
+    const val Jsvg = "2.1.0"
+    const val Playwright = "1.55.0"
     const val AgentScope = "2.0.4"
 }

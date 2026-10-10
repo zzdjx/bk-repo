@@ -39,6 +39,8 @@ import com.tencent.bkrepo.common.metadata.service.packages.PackageService
 import com.tencent.bkrepo.common.metadata.service.packages.PackageStatisticsService
 import com.tencent.bkrepo.common.query.model.QueryModel
 import com.tencent.bkrepo.common.security.permission.Permission
+import com.tencent.bkrepo.common.security.permission.Principal
+import com.tencent.bkrepo.common.security.permission.PrincipalType
 import com.tencent.bkrepo.common.service.util.ResponseBuilder
 import com.tencent.bkrepo.repository.pojo.packages.PackageListOption
 import com.tencent.bkrepo.repository.pojo.packages.PackageSummary
@@ -51,6 +53,7 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestAttribute
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -163,12 +166,15 @@ class UserPackageController(
     }
 
     @Operation(summary = "仓库 包数量 总览")
+    @Principal(type = PrincipalType.GENERAL)
     @GetMapping("/package/search/overview")
     fun packageOverview(
+        @RequestAttribute userId: String,
         @RequestParam repoType: String,
         @RequestParam projectId: String,
         @RequestParam packageName: String?
     ): Response<List<ProjectPackageOverview>> {
-        return ResponseBuilder.success(packageStatisticsService.packageOverview(repoType, projectId, packageName))
+        val overview = packageStatisticsService.packageOverview(userId, repoType, projectId, packageName)
+        return ResponseBuilder.success(overview)
     }
 }

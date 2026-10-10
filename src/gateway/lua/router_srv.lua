@@ -45,9 +45,8 @@ if service_name == "" then
     return
 end
 
--- 哪些服务需要转到容器中 --
-local service_in_container = config.service_in_container
-if service_in_container ~= nil and string.find(service_in_container, service_name) ~= nil then
+-- 哪些服务需要转到容器中（逗号分隔，精确匹配服务名） --
+if stringUtil:containsService(config.service_in_container, service_name) then
     ngx.var.target = config.container_url .. "/" .. service_name
     return
 end

@@ -154,6 +154,7 @@ class PermissionFilterFunction(
             "/drive/oplog/",
             "/drive/temporary/upload/", "/drive/temporary/download/",
             "/drive/temporary/token/create", "/drive/temporary/url/create",
+            "/drive/admin/thumbnail/backfill",
         )
     }
 }

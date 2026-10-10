@@ -55,26 +55,38 @@ class MetadataRuleInterceptor : QueryRuleInterceptor {
     override fun intercept(rule: Rule, context: QueryContext): Criteria {
         require(rule is Rule.QueryRule)
         val key = rule.field.removePrefix(METADATA_PREFIX)
-        val keyRule = Rule.QueryRule(TMetadata::key.name, key, OperationType.EQ).toFixed()
-        val valueRule = Rule.QueryRule(TMetadata::value.name, rule.value, rule.operation).toFixed()
-        val nestedAndRule = Rule.NestedRule(mutableListOf(keyRule, valueRule))
-
-        // 历史数据以X-BKREPO-META-{key}设置元数据时未忽略大小写，查询时需要同时查询大小写key
-        val criteria = if (key.contains(Regex(ALPHA_PATTERN))) {
-            val lowerKeyRule =
-                Rule.QueryRule(TMetadata::key.name, key.lowercase(Locale.getDefault()), OperationType.EQ).toFixed()
-            val lowerKeyNestedAndRule = Rule.NestedRule(mutableListOf(lowerKeyRule, valueRule))
-            val nestedOrRule =
-                Rule.NestedRule(mutableListOf(nestedAndRule, lowerKeyNestedAndRule), Rule.NestedRule.RelationType.OR)
-            context.interpreter.resolveRule(nestedOrRule, context)
+        val valueRule = if (rule.operation == OperationType.EXISTS) {
+            null
         } else {
-            context.interpreter.resolveRule(nestedAndRule, context)
+            Rule.QueryRule(TMetadata::value.name, rule.value, rule.operation).toFixed()
         }
+        val criteria = resolveKeyCriteria(key, valueRule, context)
         // 在流水线含有pipelineId或者buildId时，使用METADATA_IDX查询效率更高
         if (isInPipelineSearch(key)) {
             context.mongoQuery.withHint(TNode.METADATA_IDX)
         }
         return Criteria.where(TNode::metadata.name).elemMatch(criteria)
+    }
+
+    /**
+     * 匹配 metadata 数组元素的 key；[valueRule] 为 null 时只判断 key 存在。
+     * 历史数据以 X-BKREPO-META-{key} 写入时未忽略大小写，需同时查原值与小写 key。
+     */
+    private fun resolveKeyCriteria(key: String, valueRule: Rule?, context: QueryContext): Criteria {
+        val primary = combineKeyRule(key, valueRule)
+        if (!ALPHA_REGEX.containsMatchIn(key)) {
+            return context.interpreter.resolveRule(primary, context)
+        }
+        val lower = combineKeyRule(key.lowercase(Locale.getDefault()), valueRule)
+        return context.interpreter.resolveRule(
+            Rule.NestedRule(mutableListOf(primary, lower), Rule.NestedRule.RelationType.OR),
+            context,
+        )
+    }
+
+    private fun combineKeyRule(key: String, valueRule: Rule?): Rule {
+        val keyRule = Rule.QueryRule(TMetadata::key.name, key, OperationType.EQ).toFixed()
+        return valueRule?.let { Rule.NestedRule(mutableListOf(keyRule, it)) } ?: keyRule
     }
 
     /**
@@ -88,5 +100,6 @@ class MetadataRuleInterceptor : QueryRuleInterceptor {
         const val ALPHA_PATTERN = "[A-Z]"
         const val PIPELINE_ID = "pipelineId"
         const val BUILD_ID = "buildId"
+        private val ALPHA_REGEX = Regex(ALPHA_PATTERN)
     }
 }
