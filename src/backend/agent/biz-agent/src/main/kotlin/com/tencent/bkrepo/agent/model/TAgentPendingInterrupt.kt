@@ -39,6 +39,6 @@ data class TAgentPendingInterrupt(
     var payload: String,
     var updatedAt: Instant,
     /** 到期由 Mongo TTL 索引回收，兜住"用户再也不回来点确认"的中断现场。 */
-    @Indexed(expireAfter = "0s", background = true)
+    @Indexed(expireAfterSeconds = 0, background = true)
     var expiresAt: Instant,
 )

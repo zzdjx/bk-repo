@@ -55,6 +55,6 @@ data class TAgentActiveRun(
      * 窗口里仍然读得到，所以抢锁和读取都按 [expiresAt] 自己判一次。TTL 索引只负责回收持锁副本崩溃后
      * 再也没人来抢的残留文档。
      */
-    @Indexed(expireAfter = "0s", background = true)
+    @Indexed(expireAfterSeconds = 0, background = true)
     var expiresAt: Instant,
 )

@@ -89,6 +89,6 @@ data class TAgentRun(
     /** 本次 run 内所有模型调用耗时之和，非 run 总时长（run 总时长见 [durationMs]）。 */
     var totalModelDurationMs: Long = 0,
     /** 见 [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy]；`null` 表示不参与 TTL 清理。 */
-    @Indexed(expireAfter = "0s", background = true)
+    @Indexed(expireAfterSeconds = 0, background = true)
     var expiresAt: Instant? = null,
 )

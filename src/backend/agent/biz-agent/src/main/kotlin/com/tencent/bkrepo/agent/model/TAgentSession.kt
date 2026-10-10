@@ -66,6 +66,6 @@ data class TAgentSession(
      *
      * 与其它三张表不同，这个字段会在每次 run 开始时随 [updatedAt] 一起往后推，语义是"最后活跃之后再放多久"。
      */
-    @Indexed(expireAfter = "0s", background = true)
+    @Indexed(expireAfterSeconds = 0, background = true)
     var expiresAt: Instant? = null,
 )

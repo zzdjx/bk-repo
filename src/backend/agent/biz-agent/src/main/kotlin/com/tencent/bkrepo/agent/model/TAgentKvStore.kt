@@ -42,6 +42,6 @@ data class TAgentKvStore(
     /** 乐观锁版本，由 `$inc` 维护，`putIfVersion` 的 CAS 就比它。 */
     var version: Long,
     /** 到期由 Mongo TTL 索引回收；`null` 表示不参与清理。 */
-    @Indexed(expireAfter = "0s", background = true)
+    @Indexed(expireAfterSeconds = 0, background = true)
     var expiresAt: Instant? = null,
 )

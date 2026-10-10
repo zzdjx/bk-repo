@@ -39,6 +39,6 @@ data class TAgentResumeMark(
      * 和 [TAgentActiveRun.expiresAt] 一样，正确性不依赖 TTL 索引：过期判断在查询条件里自己做，TTL 索引
      * 只负责回收。
      */
-    @Indexed(expireAfter = "0s", background = true)
+    @Indexed(expireAfterSeconds = 0, background = true)
     var expiresAt: Instant,
 )

@@ -22,9 +22,22 @@ import java.time.Instant
  * 那样连新字段都不用加，历史文档也立刻生效。但 Spring Data 的 `@Indexed(expireAfter = ...)` 只接受编译期
  * 常量，保留期就写死在注解里了——想按环境调整只能手工 `collMod` 改索引，配置中心失去作用。
  *
- * 因此这里沿用 `agent_run_event` 已有的做法：索引统一是 `expireAfter = "0s"` 挂在 `expiresAt` 上
- * （"到点即删"），具体保留多久由写入时算好的时刻决定。代价是保留期只对之后新写入的文档生效，已有文档保持
- * 旧的过期时刻；以及历史上没有这个字段的文档永远不会被 TTL 清理——后者由 [AgentRetentionBackfill] 兜底。
+ * 因此这里沿用 `agent_run_event` 已有的做法：索引统一是 `@Indexed(expireAfterSeconds = 0)` 挂在
+ * `expiresAt` 上（"到点即删"），具体保留多久由写入时算好的时刻决定。代价是保留期只对之后新写入的文档生效，
+ * 已有文档保持旧的过期时刻；以及历史上没有这个字段的文档永远不会被 TTL 清理——后者由
+ * [AgentRetentionBackfill] 兜底。
+ *
+ * ## 必须用 `expireAfterSeconds = 0`，不能用 `expireAfter = "0s"`
+ *
+ * 两者看起来等价，实际只有前者能建出 TTL 索引。`MongoPersistentEntityIndexResolver` 对两条路径的判断不同：
+ * `expireAfterSeconds` 走的是 `if (seconds >= 0) index.expire(...)`，`0` 能通过；而 `expireAfter` 字符串
+ * 先被 `computeIndexTimeout` 解析成 [java.time.Duration]，再撞上 `if (!timeout.isZero())` 这道门——
+ * `"0s"` 正好是零，`Index.expire(...)` 被整个跳过，最后建出来的是一个**普通索引**。
+ *
+ * 这个坑没有任何报错或告警：索引建成功了、名字也对，只是不会过期，数据无声无息地一直涨。2026-10-10 在
+ * kurt 环境实测时才发现，当时 8 张集合的 `expiresAt` 全是普通索引，`agent_run_event` 已经堆了 1.6 万条
+ * 本该 7 天清掉的数据。改注解只对**新建集合**生效，已存在的索引需要先 `dropIndex("expiresAt")`
+ * 再让应用重建，或用 `collMod` 原地加 `expireAfterSeconds`——Mongo 不允许 `ensureIndex` 就地改索引选项。
  *
  * ## 返回 `null` 的含义
  *

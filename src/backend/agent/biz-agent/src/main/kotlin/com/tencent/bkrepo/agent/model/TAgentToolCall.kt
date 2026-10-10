@@ -87,6 +87,6 @@ data class TAgentToolCall(
     var resolvedAt: LocalDateTime? = null,
     var durationMs: Long? = null,
     /** 见 [com.tencent.bkrepo.agent.retention.AgentRetentionPolicy]；`null` 表示不参与 TTL 清理。 */
-    @Indexed(expireAfter = "0s", background = true)
+    @Indexed(expireAfterSeconds = 0, background = true)
     var expiresAt: Instant? = null,
 )
