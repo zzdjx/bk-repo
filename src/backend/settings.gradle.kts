@@ -29,15 +29,6 @@
  * SOFTWARE.
  */
 
-val localPropertiesFile = file("local.properties")
-if (localPropertiesFile.exists()) {
-    java.util.Properties().apply {
-        localPropertiesFile.inputStream().use { load(it) }
-    }.getProperty("org.gradle.java.home")?.let { jdkHome ->
-        System.setProperty("org.gradle.java.home", jdkHome)
-    }
-}
-
 rootProject.name = "bk-repo-backend"
 
 pluginManagement {
@@ -66,7 +57,12 @@ pluginManagement {
     }
 }
 
-fun File.directories() = listFiles()?.filter { it.isDirectory && it.name != "build" }?.toList() ?: emptyList()
+// 排除 docs：根 build.gradle.kts 的 allprojects 会给每个子项目套上 devops.boot 与 jacoco，
+// 被登记成子项目的文档目录会因此拿到 jar / publish 任务，发布时会产出一个空构件。
+fun File.directories() = listFiles()
+    ?.filter { it.isDirectory && it.name != "build" && it.name != "docs" }
+    ?.toList()
+    ?: emptyList()
 
 fun includeAll(module: String) {
     include(module)

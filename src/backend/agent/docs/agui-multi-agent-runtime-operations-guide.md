@@ -253,6 +253,28 @@ agent:
 
 **`OwnerReplicaLost` 的出现率是副本稳定性的直接指标**，见 §6。
 
+### 4.4 跨副本重连占线程，有一条容量上限
+
+`GET /run/stream` 有两条实现路径，代价差别很大：
+
+- **同副本**（run 归本副本所有）走 `attachLocalSink`，挂上内存里的事件 sink 就立刻返回，不占线程。
+- **跨副本**（客户端连到 A、run 归 B）走 `pollRemoteEvents`：A 自己轮询 `agent_run_event` 往外吐，
+  循环里 `Thread.sleep(reconnect-poll-interval)`，直到读到 terminal 事件、或确认 run 已不活跃、
+  或 `reconnect-timeout` 到点。
+
+第二条路跑在 Reactor 的 `Schedulers.boundedElastic()` 上。这是给阻塞活儿用的调度器，所以**阻塞本身不是
+问题**，但要知道它的上限：`boundedElastic` 默认最多 `10 × CPU 核数` 个线程，而且是**整个应用共享**的。
+
+按默认值算，一次跨副本重连最多占用一个线程 `reconnect-timeout`（10m），期间按
+`reconnect-poll-interval`（500ms）唤醒约 1200 次。于是并发的跨副本重连数一旦接近 `10 × 核数`
+（2 核容器约 20、4 核约 40），`boundedElastic` 就会被占满，之后**所有**走这个调度器的阻塞任务
+一起排队——表现出来是莫名其妙的全局变慢，而不是 SSE 单点变慢，排障时很容易找错方向。
+
+实践上这个数不容易摸到：只有"客户端连错副本"才走这条路，而网关是按请求分发的，副本数越多撞的概率越高。
+真要扩容到多副本且重连频繁，优先级依次是：调小 `reconnect-timeout`（减少线程占用时长）、
+调大 `reconnect-poll-interval`（减少唤醒次数，代价是事件延迟）、让客户端在断线后优先重连原副本。
+把轮询改成事件驱动而不占线程是更彻底的解法，但那是代码改动，不在运维可调范围内。
+
 ## 5. MongoDB
 
 ### 5.1 集合（10 张）
@@ -343,6 +365,8 @@ store 统一持有，不参与维度化。
 1. 客户端记录已收最大 `eventIndex`。
 2. 调用 `GET /run/stream?projectId=&threadId=&runId=&lastEventIndex=`。
 3. 若 run 已终态，收到完整回放后结束；若仍活跃，继续增量直到 terminal 或 timeout。
+
+重连落到哪个副本决定了服务端的代价，多副本下还有一条容量上限，见 §4.4。
 
 ### 7.2 Run 卡住（RUNNING 不结束）
 
